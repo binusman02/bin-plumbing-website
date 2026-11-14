@@ -66,3 +66,15 @@ export function getStatusMeta(status: string | null | undefined): {
     className: `inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${TONE_CLASSES[match.tone]}`,
   };
 }
+
+export const PLUMBER_UPDATABLE_STATUSES = [
+  "scheduled",
+  "inspection_required",
+  "quotation_submitted",
+  "awaiting_approval",
+  "approved",
+  "in_progress",
+  "work_completed",
+  "awaiting_final_payment",
+  "completed",
+] as const;

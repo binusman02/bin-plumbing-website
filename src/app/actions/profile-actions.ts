@@ -167,3 +167,65 @@ export async function changePortalPasswordAction(input: {
     return { success: false, error: err?.message || "Failed to update password." };
   }
 }
+
+export async function adminUpdatePlumberProfileAction(input: {
+  plumberId: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  residentialLocation?: string;
+  preferredLocations?: string[];
+  skills?: string[];
+  availability?: string;
+}) {
+  try {
+    const admin = await resolvePortalActor("admin");
+    if (!admin || admin.role !== "admin") {
+      return { success: false, error: "Admin authorisation required." };
+    }
+
+    const cleanName = input.fullName.trim();
+    const cleanPhone = input.phone.trim();
+    if (!cleanName || cleanName.length < 2) {
+      return { success: false, error: "Full name must be at least 2 characters." };
+    }
+    if (!cleanPhone) {
+      return { success: false, error: "Phone number is required." };
+    }
+
+    const supabase = getServiceSupabase();
+    const { error } = await supabase
+      .from("plumbers")
+      .update({
+        full_name: cleanName,
+        phone: cleanPhone,
+        email: input.email?.trim() || null,
+        residential_location: input.residentialLocation?.trim() || "",
+        preferred_locations: Array.isArray(input.preferredLocations) ? input.preferredLocations : [],
+        skills: Array.isArray(input.skills) ? input.skills : [],
+        availability: input.availability?.trim() || "Standard",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.plumberId);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await appendAuditLog({
+      actor: admin.email || admin.name || "Admin",
+      action: "Updated Plumber Profile",
+      entity_type: "plumber",
+      entity_id: input.plumberId,
+      new_value: cleanName,
+    });
+
+    revalidatePath("/admin/plumbers");
+    revalidatePath("/plumber");
+    revalidatePath("/admin/requests");
+    revalidatePath("/admin/communications");
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to update plumber profile." };
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Camera, CheckCircle2, KeyRound, Loader2, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { changePortalPasswordAction, updateProfileAction } from "@/app/actions/profile-actions";
 import { Avatar } from "@/components/ui";
@@ -28,6 +29,7 @@ interface ProfileManagerProps {
 }
 
 export function ProfileManager({ role, initialData }: ProfileManagerProps) {
+  const router = useRouter();
   const [fullName, setFullName] = useState(initialData.fullName || "");
   const [phone, setPhone] = useState(initialData.phone || "");
   const [email, setEmail] = useState(initialData.email || "");
@@ -71,6 +73,7 @@ export function ProfileManager({ role, initialData }: ProfileManagerProps) {
       } else {
         setAvatarUrl(data.avatarUrl);
         setFeedback({ type: "success", text: "Profile photo updated." });
+        router.refresh();
       }
     } catch {
       setFeedback({ type: "error", text: "Upload failed. Please try again." });
@@ -91,6 +94,7 @@ export function ProfileManager({ role, initialData }: ProfileManagerProps) {
       if (res.ok) {
         setAvatarUrl(null);
         setFeedback({ type: "success", text: "Profile photo removed." });
+        router.refresh();
       }
     } finally {
       setUploadingAvatar(false);

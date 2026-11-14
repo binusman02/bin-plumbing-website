@@ -117,10 +117,16 @@ export function NotificationDrawer({
     window.addEventListener("notifications-refresh", handleRefresh);
     window.addEventListener("online", handleRefresh);
     document.addEventListener("visibilitychange", handleVisibility);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadNotifications(false, 0);
+      }
+    }, 15000);
     return () => {
       window.removeEventListener("notifications-refresh", handleRefresh);
       window.removeEventListener("online", handleRefresh);
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.clearInterval(intervalId);
     };
   }, [loadNotifications]);
 
@@ -131,6 +137,9 @@ export function NotificationDrawer({
       if (!data.recipientRole || data.recipientRole === role) {
         void loadNotifications(false, 0);
       }
+    },
+    onDataSync: () => {
+      void loadNotifications(false, 0);
     },
     onMessageSignal: () => {
       void loadNotifications(false, 0);

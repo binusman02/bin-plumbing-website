@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, Lock, Smartphone } from "lucide-react";
 import {
   loginCustomerWithPasswordAction,
@@ -39,7 +38,6 @@ interface CustomerAuthViewProps {
 }
 
 export function CustomerAuthView({ activeLocations = [] }: CustomerAuthViewProps) {
-  const router = useRouter();
   const [authMode, setAuthMode] = useState<"signin" | "register" | "forgot">("signin");
   const [identifierInput, setIdentifierInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
@@ -64,17 +62,21 @@ export function CustomerAuthView({ activeLocations = [] }: CustomerAuthViewProps
     setAuthSuccess("");
     setPendingResendEmail("");
     setAuthLoading(true);
-    const res = await loginCustomerWithPasswordAction(identifierInput, passwordInput);
-    setAuthLoading(false);
-    if (!res.success) {
-      setAuthError(res.error || "Invalid sign-in details.");
-      if ("needsConfirmation" in res && res.needsConfirmation && res.emailForResend) {
-        setPendingResendEmail(res.emailForResend);
+    try {
+      const res = await loginCustomerWithPasswordAction(identifierInput, passwordInput);
+      if (!res.success) {
+        setAuthError(res.error || "Invalid sign-in details.");
+        if ("needsConfirmation" in res && res.needsConfirmation && res.emailForResend) {
+          setPendingResendEmail(res.emailForResend);
+        }
+        setAuthLoading(false);
+        return;
       }
-      return;
+      window.location.assign(window.location.pathname + window.location.search);
+    } catch {
+      setAuthError("Sign-in failed. Please try again.");
+      setAuthLoading(false);
     }
-    router.push("/customer");
-    router.refresh();
   };
 
   const handleResendConfirmation = async () => {
@@ -104,32 +106,37 @@ export function CustomerAuthView({ activeLocations = [] }: CustomerAuthViewProps
       return;
     }
     setAuthLoading(true);
-    const res = await registerCustomerWithPasswordAction({
-      fullName: regName,
-      phone: regPhone,
-      email: regEmail.trim(),
-      password: regPassword,
-      address: regAddress,
-      state: regState,
-      cityLga: regCityLga || activeLocations[0] || "City Area",
-      consentPrivacy: regConsent,
-    });
-    setAuthLoading(false);
-    if (!res.success) {
-      setAuthError(res.error || "Could not create account.");
-      return;
+    try {
+      const res = await registerCustomerWithPasswordAction({
+        fullName: regName,
+        phone: regPhone,
+        email: regEmail.trim(),
+        password: regPassword,
+        address: regAddress,
+        state: regState,
+        cityLga: regCityLga || activeLocations[0] || "City Area",
+        consentPrivacy: regConsent,
+      });
+      if (!res.success) {
+        setAuthError(res.error || "Could not create account.");
+        setAuthLoading(false);
+        return;
+      }
+      if (res.requiresEmailVerification) {
+        setAuthLoading(false);
+        setIdentifierInput(regEmail.trim());
+        setAuthMode("signin");
+        setAuthSuccess(
+          res.message ||
+            "Account created. Please check your email inbox (and spam folder) to confirm your address before signing in."
+        );
+        return;
+      }
+      window.location.assign(window.location.pathname + window.location.search);
+    } catch {
+      setAuthError("Registration failed. Please try again.");
+      setAuthLoading(false);
     }
-    if (res.requiresEmailVerification) {
-      setIdentifierInput(regEmail.trim());
-      setAuthMode("signin");
-      setAuthSuccess(
-        res.message ||
-          "Account created. Please check your email inbox (and spam folder) to confirm your address before signing in."
-      );
-      return;
-    }
-    router.push("/customer");
-    router.refresh();
   };
 
   const handleForgot = async (e: React.FormEvent) => {

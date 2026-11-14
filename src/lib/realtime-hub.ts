@@ -27,6 +27,7 @@ export interface RealtimeHubOptions {
   onAvailability?: (data: { plumberId: string; isAvailable: boolean }) => void;
   onAdminSignal?: () => void;
   onNotificationSync?: (data: { recipientRole?: string }) => void;
+  onDataSync?: (data: { entity?: string; ticketNumber?: string }) => void;
   onPresenceSync?: (online: {
     adminOnline: boolean;
     plumberOnline: boolean;
@@ -40,6 +41,7 @@ export interface RealtimeHubOptions {
 let sharedChannel: RealtimeChannel | null = null;
 let sharedSubscribed = false;
 let latestPresencePayload: RealtimePresencePayload | null = null;
+const pendingBroadcasts: Array<{ event: string; payload: Record<string, unknown> }> = [];
 const hubListeners = new Set<{ current: RealtimeHubOptions }>();
 
 function computePresenceSummary(ch: RealtimeChannel) {
@@ -185,7 +187,76 @@ function getSharedChannel(): RealtimeChannel | null {
             listener.current.onMessageDeleted?.(data);
           }
         }
-      });
+      })
+      .on("broadcast", { event: "data_sync" }, ({ payload }) => {
+        const data = {
+          entity: typeof payload?.entity === "string" ? payload.entity : undefined,
+          ticketNumber: typeof payload?.ticketNumber === "string" ? payload.ticketNumber : undefined,
+        };
+        for (const listener of hubListeners) {
+          listener.current.onDataSync?.(data);
+          listener.current.onAdminSignal?.();
+        }
+      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages" },
+        (payload) => {
+          const row = (payload.new || payload.old || {}) as Record<string, unknown>;
+          const ticketNumber = typeof row.ticket_number === "string" ? row.ticket_number : "";
+          if (!ticketNumber) return;
+          for (const listener of hubListeners) {
+            listener.current.onMessageSignal?.({ ticketNumber });
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications" },
+        (payload) => {
+          const row = (payload.new || payload.old || {}) as Record<string, unknown>;
+          const recipientRole = typeof row.recipient_role === "string" ? row.recipient_role : undefined;
+          for (const listener of hubListeners) {
+            listener.current.onNotificationSync?.({ recipientRole });
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "service_requests" },
+        (payload) => {
+          const row = (payload.new || payload.old || {}) as Record<string, unknown>;
+          const ticketNumber = typeof row.ticket_number === "string" ? row.ticket_number : undefined;
+          for (const listener of hubListeners) {
+            listener.current.onDataSync?.({ entity: "service_requests", ticketNumber });
+            listener.current.onAdminSignal?.();
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "quotations" },
+        (payload) => {
+          const row = (payload.new || payload.old || {}) as Record<string, unknown>;
+          const ticketNumber = typeof row.ticket_number === "string" ? row.ticket_number : undefined;
+          for (const listener of hubListeners) {
+            listener.current.onDataSync?.({ entity: "quotations", ticketNumber });
+            listener.current.onAdminSignal?.();
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "payments" },
+        (payload) => {
+          const row = (payload.new || payload.old || {}) as Record<string, unknown>;
+          const ticketNumber = typeof row.ticket_number === "string" ? row.ticket_number : undefined;
+          for (const listener of hubListeners) {
+            listener.current.onDataSync?.({ entity: "payments", ticketNumber });
+            listener.current.onAdminSignal?.();
+          }
+        }
+      );
 
     sharedChannel = ch;
     ch.subscribe(async (status) => {
@@ -193,6 +264,16 @@ function getSharedChannel(): RealtimeChannel | null {
         sharedSubscribed = true;
         if (latestPresencePayload) {
           await ch.track(latestPresencePayload);
+        }
+        while (pendingBroadcasts.length > 0) {
+          const next = pendingBroadcasts.shift();
+          if (next) {
+            void ch.send({
+              type: "broadcast",
+              event: next.event,
+              payload: next.payload,
+            });
+          }
         }
       }
     });
@@ -209,12 +290,19 @@ export function broadcastRealtimeEvent(
     | "message_deleted"
     | "plumber_availability"
     | "admin_signal"
-    | "notification_sync",
+    | "notification_sync"
+    | "data_sync",
   payload: Record<string, unknown>
 ): void {
   try {
     const ch = getSharedChannel();
-    if (!ch || !sharedSubscribed) return;
+    if (!ch) return;
+    if (!sharedSubscribed) {
+      if (pendingBroadcasts.length < 20) {
+        pendingBroadcasts.push({ event, payload });
+      }
+      return;
+    }
     void ch.send({
       type: "broadcast",
       event,

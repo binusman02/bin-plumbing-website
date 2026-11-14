@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, Mail, ArrowRight, Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import { loginAdmin } from "@/app/actions/admin-auth";
@@ -21,7 +21,24 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [redirectTo, setRedirectTo] = useState<string>("/admin");
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get("redirect") || "";
+    if (requested.startsWith("/admin") && !requested.startsWith("//")) {
+      setRedirectTo(requested);
+    }
+    const err = params.get("error");
+    const reason = params.get("reason");
+    if (err === "unauthorized") {
+      setErrorMessage("Your account is not authorised for administrator access.");
+    } else if (reason === "auth_required") {
+      setInfoMessage("Please sign in to continue to your administrator page.");
+    }
+  }, []);
 
   // Forgot password state
   const [showReset, setShowReset] = useState(false);
@@ -54,7 +71,7 @@ export default function AdminLoginPage() {
       setErrorMessage(result.error);
       setLoading(false);
     } else {
-      router.push("/admin");
+      router.push(redirectTo);
       router.refresh();
     }
   };
@@ -136,6 +153,11 @@ export default function AdminLoginPage() {
         </form>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {infoMessage && !errorMessage && (
+            <div className="rounded-lg border border-[#F5B301]/40 bg-[#F5B301]/10 px-3.5 py-2.5 text-xs font-medium text-[#F5B301]">
+              {infoMessage}
+            </div>
+          )}
           {errorMessage && <AuthAlert type="error" message={errorMessage} />}
 
           <div>

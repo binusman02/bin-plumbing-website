@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const preferredRole = formData.get("role") as "admin" | "customer" | "plumber" | null;
+    const targetPlumberId = (formData.get("targetPlumberId") as string | null)?.trim() || "";
 
     const actor = (await resolvePortalActor(preferredRole || undefined)) || preAuthActor;
 
@@ -92,8 +94,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const effectiveRole: "admin" | "customer" | "plumber" =
+      actor.role === "admin" && targetPlumberId ? "plumber" : actor.role;
+    const effectiveId =
+      actor.role === "admin" && targetPlumberId ? targetPlumberId : actor.id;
+
     const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-    const storagePath = `avatars/${actor.role}/${actor.id}/${Date.now()}.${ext}`;
+    const storagePath = `avatars/${effectiveRole}/${effectiveId}/${Date.now()}.${ext}`;
     const bytes = new Uint8Array(await file.arrayBuffer());
     const supabase = getServiceSupabase();
 
@@ -112,12 +119,12 @@ export async function POST(request: Request) {
       .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
 
     const avatarUrl = signed?.signedUrl || "";
-    const table = getTableForRole(actor.role);
+    const table = getTableForRole(effectiveRole);
 
     const updateError = await updateProfileAvatarColumns(
       supabase,
       table,
-      actor.id,
+      effectiveId,
       avatarUrl,
       storagePath
     );
@@ -125,6 +132,12 @@ export async function POST(request: Request) {
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+
+    revalidatePath("/plumber");
+    revalidatePath("/customer");
+    revalidatePath("/admin/plumbers");
+    revalidatePath("/admin/profile");
+    revalidatePath("/admin/communications");
 
     return NextResponse.json({ success: true, avatarUrl, storagePath });
   } catch (err: any) {
@@ -148,12 +161,25 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const table = getTableForRole(actor.role);
+    const targetPlumberId =
+      typeof body?.targetPlumberId === "string" ? body.targetPlumberId.trim() : "";
+    const effectiveRole: "admin" | "customer" | "plumber" =
+      actor.role === "admin" && targetPlumberId ? "plumber" : actor.role;
+    const effectiveId =
+      actor.role === "admin" && targetPlumberId ? targetPlumberId : actor.id;
+
+    const table = getTableForRole(effectiveRole);
     const supabase = getServiceSupabase();
-    const updateError = await updateProfileAvatarColumns(supabase, table, actor.id, null, null);
+    const updateError = await updateProfileAvatarColumns(supabase, table, effectiveId, null, null);
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+
+    revalidatePath("/plumber");
+    revalidatePath("/customer");
+    revalidatePath("/admin/plumbers");
+    revalidatePath("/admin/profile");
+    revalidatePath("/admin/communications");
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

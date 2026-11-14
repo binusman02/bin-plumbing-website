@@ -41,7 +41,7 @@ import {
   RequestDetailDrawer,
 } from "@/components/admin/requests/RequestDetailDrawer";
 import { formatDateTime, formatNGN } from "@/lib/currency";
-import { useRealtimeHub } from "@/lib/realtime-hub";
+import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 import { getStatusMeta } from "@/lib/status-styles";
 import type {
   JobMessage,
@@ -236,6 +236,10 @@ export function RequestsManagerClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  useEffect(() => {
+    setRequests(initialRequests);
+  }, [initialRequests]);
+
   useRealtimeHub({
     role: "admin",
     onPresenceSync: (p) => {
@@ -243,6 +247,9 @@ export function RequestsManagerClient({
     },
     onAvailability: (payload: { plumberId: string; isAvailable: boolean }) => {
       setAvailabilityMap((prev) => ({ ...prev, [payload.plumberId]: payload.isAvailable }));
+    },
+    onDataSync: () => {
+      router.refresh();
     },
   });
 
@@ -441,6 +448,12 @@ export function RequestsManagerClient({
     setSelected(updated);
     setEditStatus(effectiveStatus);
     setFeedback({ type: "success", text: "Service request saved to database." });
+    broadcastRealtimeEvent("data_sync", {
+      entity: "service_requests",
+      ticketNumber: selected.ticket_number,
+    });
+    broadcastRealtimeEvent("notification_sync", {});
+    router.refresh();
   };
 
   const handleBoardDrop = async (targetCol: (typeof BOARD_COLUMNS)[number]) => {
@@ -460,6 +473,13 @@ export function RequestsManagerClient({
       // Rollback
       setRequests((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: prevStatus } : r)));
       setFeedback({ type: "error", text: res.error || "Could not move stage." });
+    } else {
+      broadcastRealtimeEvent("data_sync", {
+        entity: "service_requests",
+        ticketNumber: req.ticket_number,
+      });
+      broadcastRealtimeEvent("notification_sync", {});
+      router.refresh();
     }
   };
 

@@ -65,6 +65,12 @@ export function GalleryManagerClient({
         setItems((prev) =>
           prev.map((i) => (i.id === item.id ? { ...i, published: nextState } : i))
         );
+        setFeedback({
+          type: "success",
+          text: nextState ? "Photo published to public Gallery." : "Photo unpublished.",
+        });
+      } else {
+        setFeedback({ type: "error", text: res.error || "Failed to update publish status." });
       }
     });
   };
@@ -74,6 +80,9 @@ export function GalleryManagerClient({
       const res = await deleteGalleryItemAction(id);
       if (res.success) {
         setItems((prev) => prev.filter((i) => i.id !== id));
+        setFeedback({ type: "success", text: "Gallery photo deleted." });
+      } else {
+        setFeedback({ type: "error", text: res.error || "Failed to delete gallery photo." });
       }
     });
   };

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { getRequiredAnonKey, getRequiredSupabaseUrl, getServiceSupabase } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/notifications";
@@ -92,6 +92,7 @@ export interface CustomerProfile {
   neighbourhood?: string;
   property_type?: string;
   notes?: string;
+  avatar_url?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -131,6 +132,7 @@ export interface PlumberProfile {
   rating: number;
   total_jobs: number;
   notes?: string;
+  avatar_url?: string;
   admin_notes?: string;
   onboarding_notes?: string;
   agreement_url?: string;
@@ -169,6 +171,7 @@ export interface StructuredQuotation {
   revision_number: number;
   parent_quotation_id?: string;
   notes?: string;
+  avatar_url?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -193,6 +196,7 @@ export interface PaymentRecord {
   verified_at?: string;
   payment_date?: string;
   notes?: string;
+  avatar_url?: string;
   created_at: string;
 }
 
@@ -653,6 +657,7 @@ export function mapPlumberRow(
     rating: Number(row.rating || 5.0),
     total_jobs: Number(row.total_jobs || 0),
     notes: row.notes ? String(row.notes) : undefined,
+    avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
     documents: plumberDocs.map(toDocObj),
     created_at: String(row.created_at),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
@@ -672,6 +677,7 @@ function mapCustomerRow(row: Record<string, unknown>): CustomerProfile {
     neighbourhood: row.neighbourhood ? String(row.neighbourhood) : undefined,
     property_type: row.property_type ? String(row.property_type) : undefined,
     notes: row.notes ? String(row.notes) : undefined,
+    avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
     created_at: String(row.created_at),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
   };
@@ -702,6 +708,7 @@ export function mapQuotationRow(row: Record<string, unknown>): StructuredQuotati
     revision_number: Number(row.revision_number || 1),
     parent_quotation_id: row.parent_quotation_id ? String(row.parent_quotation_id) : undefined,
     notes: row.notes ? String(row.notes) : undefined,
+    avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
     created_at: String(row.created_at),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
   };
@@ -756,6 +763,7 @@ export function mapPaymentRow(row: Record<string, unknown>): PaymentRecord {
     verified_at: row.verified_at ? String(row.verified_at) : undefined,
     payment_date: String(row.created_at),
     notes: row.notes ? String(row.notes) : undefined,
+    avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
     created_at: String(row.created_at),
   };
 }
@@ -772,6 +780,7 @@ function getPublicReadClient() {
 export async function getServiceCategories(onlyActive = false): Promise<ServiceCategorySetting[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("service-categories");
   if (isBuildPhase()) return DEFAULT_SERVICE_CATEGORIES;
   try {
     const supabase = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
@@ -816,6 +825,7 @@ export async function getServiceCategories(onlyActive = false): Promise<ServiceC
 export async function getServiceAreas(onlyActive = false): Promise<CoverageAreaSetting[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("service-areas");
   if (isBuildPhase()) return DEFAULT_COVERAGE_AREAS;
   try {
     const supabase = getServiceSupabase();
@@ -1049,6 +1059,11 @@ export async function getServiceRequestByTicket(
   return mapRequestRow(row, histRows || []);
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value.trim());
+}
+
 export async function updateServiceRequest(
   idOrTicket: string,
   updates: {
@@ -1065,13 +1080,15 @@ export async function updateServiceRequest(
   historyEntry?: Omit<RequestHistoryEntry, "id" | "timestamp">
 ): Promise<ServiceRequestRecord | null> {
   const supabase = getServiceSupabase();
-  const { data: existing } = await supabase
-    .from("service_requests")
-    .select("*")
-    .or(`id.eq.${idOrTicket},ticket_number.eq.${idOrTicket}`)
-    .maybeSingle();
+  const cleanKey = idOrTicket.trim();
+  const existingQuery = supabase.from("service_requests").select("*");
+  const { data: existing, error: findErr } = await (
+    isUuid(cleanKey)
+      ? existingQuery.or(`id.eq.${cleanKey},ticket_number.eq.${cleanKey}`)
+      : existingQuery.eq("ticket_number", cleanKey)
+  ).maybeSingle();
 
-  if (!existing) return null;
+  if (findErr || !existing) return null;
   const nowIso = new Date().toISOString();
 
   const payload: Record<string, unknown> = { updated_at: nowIso };
@@ -1104,6 +1121,11 @@ export async function updateServiceRequest(
       .select("*")
       .single();
     updated = retry.data;
+    if (retry.error) {
+      throw new Error(`Failed to update service request: ${retry.error.message}`);
+    }
+  } else if (error) {
+    throw new Error(`Failed to update service request: ${error.message}`);
   }
 
   if (historyEntry) {
@@ -1124,11 +1146,13 @@ export async function appendRequestHistoryEntry(
   entry: Omit<RequestHistoryEntry, "id" | "timestamp">
 ): Promise<void> {
   const supabase = getServiceSupabase();
-  const { data: req } = await supabase
-    .from("service_requests")
-    .select("id, ticket_number")
-    .or(`id.eq.${ticketOrId},ticket_number.eq.${ticketOrId}`)
-    .maybeSingle();
+  const cleanKey = ticketOrId.trim();
+  const reqQuery = supabase.from("service_requests").select("id, ticket_number");
+  const { data: req } = await (
+    isUuid(cleanKey)
+      ? reqQuery.or(`id.eq.${cleanKey},ticket_number.eq.${cleanKey}`)
+      : reqQuery.eq("ticket_number", cleanKey)
+  ).maybeSingle();
 
   if (!req) return;
   const nowIso = new Date().toISOString();
@@ -1197,11 +1221,13 @@ export async function getQuotationsForRequest(
 ): Promise<StructuredQuotation[]> {
   if (isBuildPhase()) return [];
   const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("quotations")
-    .select("*")
-    .or(`request_id.eq.${requestIdOrTicket},ticket_number.eq.${requestIdOrTicket}`)
-    .order("revision_number", { ascending: false });
+  const cleanKey = requestIdOrTicket.trim();
+  const q = supabase.from("quotations").select("*");
+  const { data } = await (
+    isUuid(cleanKey)
+      ? q.or(`request_id.eq.${cleanKey},ticket_number.eq.${cleanKey}`)
+      : q.eq("ticket_number", cleanKey)
+  ).order("revision_number", { ascending: false });
   return (data || []).map(mapQuotationRow);
 }
 
@@ -1283,7 +1309,7 @@ export async function submitStructuredQuotation(params: {
   }
 
   if (params.requestId) {
-    await supabase
+    const { error: statusErr } = await supabase
       .from("service_requests")
       .update({
         status: "awaiting_approval",
@@ -1291,6 +1317,9 @@ export async function submitStructuredQuotation(params: {
         updated_at: nowIso,
       })
       .eq("id", params.requestId);
+    if (statusErr) {
+      throw new Error(`Quotation saved but request status update failed: ${statusErr.message}`);
+    }
 
     await appendRequestHistoryEntry(params.requestId, {
       actor: params.plumberName,
@@ -1356,13 +1385,16 @@ export async function setCustomerQuotationApproval(
   if (error || !updated) return null;
 
   if (updated.request_id) {
-    await supabase
+    const { error: decisionStatusErr } = await supabase
       .from("service_requests")
       .update({
         status: decision === "approved" ? "approved" : "quotation_submitted",
         updated_at: nowIso,
       })
       .eq("id", updated.request_id);
+    if (decisionStatusErr) {
+      throw new Error(`Decision saved but request status update failed: ${decisionStatusErr.message}`);
+    }
 
     await appendRequestHistoryEntry(String(updated.request_id), {
       actor: customerName,
@@ -1610,27 +1642,34 @@ export async function registerPlumberAccount(data: {
   phone: string;
   email: string;
   passwordHash: string;
+  authUserId?: string;
 }): Promise<PlumberAccountRecord> {
   const supabase = getServiceSupabase();
   const cleanPhone = data.phone.trim();
+  const cleanEmail = data.email.trim().toLowerCase();
   const nowIso = new Date().toISOString();
   const existing = await getPlumberByPhone(cleanPhone);
 
   if (existing) {
-    await supabase
+    const { error: updateErr } = await supabase
       .from("plumbers")
       .update({
-        email: data.email.trim().toLowerCase(),
+        email: cleanEmail,
         password_hash: data.passwordHash,
+        ...(data.authUserId ? { auth_user_id: data.authUserId } : {}),
         updated_at: nowIso,
       })
       .eq("id", existing.id);
+
+    if (updateErr) {
+      throw new Error(`Failed to update plumber account: ${updateErr.message}`);
+    }
 
     return {
       id: existing.id,
       full_name: existing.full_name,
       phone: existing.phone,
-      email: data.email.trim().toLowerCase(),
+      email: cleanEmail,
       password_hash: data.passwordHash,
       plumber_id: existing.id,
       created_at: existing.created_at,
@@ -1638,23 +1677,28 @@ export async function registerPlumberAccount(data: {
   }
 
   const newId = `plumber-${Date.now().toString(36)}`;
-  await supabase.from("plumbers").insert({
+  const { error: insertErr } = await supabase.from("plumbers").insert({
     id: newId,
     full_name: data.fullName.trim(),
     phone: cleanPhone,
-    email: data.email.trim().toLowerCase(),
+    email: cleanEmail,
     password_hash: data.passwordHash,
+    ...(data.authUserId ? { auth_user_id: data.authUserId } : {}),
     residential_location: "",
     verification_status: "submitted",
     created_at: nowIso,
     updated_at: nowIso,
   });
 
+  if (insertErr) {
+    throw new Error(`Failed to register plumber account: ${insertErr.message}`);
+  }
+
   return {
     id: newId,
     full_name: data.fullName.trim(),
     phone: cleanPhone,
-    email: data.email.trim().toLowerCase(),
+    email: cleanEmail,
     password_hash: data.passwordHash,
     plumber_id: newId,
     created_at: nowIso,
@@ -1666,6 +1710,7 @@ export async function registerCustomer(data: {
   phone: string;
   email?: string;
   passwordHash?: string;
+  authUserId?: string;
   address?: string;
   cityLga?: string;
   neighbourhood?: string;
@@ -1677,12 +1722,13 @@ export async function registerCustomer(data: {
   const nowIso = new Date().toISOString();
 
   if (existing) {
-    const { data: updated } = await supabase
+    const { data: updated, error: updateErr } = await supabase
       .from("customers")
       .update({
         full_name: data.fullName.trim() || existing.full_name,
         email: data.email?.trim() || existing.email || null,
         ...(data.passwordHash ? { password_hash: data.passwordHash } : {}),
+        ...(data.authUserId ? { auth_user_id: data.authUserId } : {}),
         address: data.address?.trim() || existing.address_in_kano,
         city_lga: data.cityLga || existing.city_lga,
         neighbourhood: data.neighbourhood ?? existing.neighbourhood ?? "",
@@ -1692,6 +1738,9 @@ export async function registerCustomer(data: {
       .eq("id", existing.id)
       .select("*")
       .single();
+    if (updateErr) {
+      throw new Error(`Failed to update customer: ${updateErr.message}`);
+    }
     return updated ? mapCustomerRow(updated) : existing;
   }
 
@@ -1702,6 +1751,7 @@ export async function registerCustomer(data: {
     phone: cleanPhone,
     email: data.email?.trim() || null,
     password_hash: data.passwordHash || null,
+    ...(data.authUserId ? { auth_user_id: data.authUserId } : {}),
     address: data.address?.trim() || "",
     city_lga: data.cityLga || "",
     neighbourhood: data.neighbourhood || "",
@@ -1858,10 +1908,11 @@ export async function verifyPaymentById(
   if (error || !updated) return false;
 
   if (status === "verified" && updated.request_id) {
-    await supabase
+    const { error: completeErr } = await supabase
       .from("service_requests")
       .update({ status: "completed", updated_at: nowIso })
       .eq("id", updated.request_id);
+    if (completeErr) return false;
 
     await appendRequestHistoryEntry(String(updated.request_id), {
       actor,
@@ -1927,11 +1978,12 @@ export async function getMessagesForRequest(
 ): Promise<JobMessage[]> {
   if (isBuildPhase()) return [];
   const supabase = getServiceSupabase();
-  let query = supabase
-    .from("messages")
-    .select("*")
-    .or(`request_id.eq.${requestIdOrTicket},ticket_number.eq.${requestIdOrTicket}`)
-    .order("created_at", { ascending: true });
+  const cleanKey = requestIdOrTicket.trim();
+  let query = supabase.from("messages").select("*");
+  query = isUuid(cleanKey)
+    ? query.or(`request_id.eq.${cleanKey},ticket_number.eq.${cleanKey}`)
+    : query.eq("ticket_number", cleanKey);
+  query = query.order("created_at", { ascending: true });
   if (!includeInternal) {
     query = query.eq("is_internal", false);
   }
@@ -1973,12 +2025,15 @@ export async function postJobMessage(params: {
   let reqPlumberId: string | null = null;
 
   if (params.ticketNumber || params.requestId) {
-    const lookupKey = params.ticketNumber || params.requestId;
-    const { data: reqRow } = await supabase
+    const lookupKey = (params.ticketNumber || params.requestId).trim();
+    const reqLookup = supabase
       .from("service_requests")
-      .select("id, customer_id, assigned_plumber_id")
-      .or(`ticket_number.eq.${lookupKey},id.eq.${lookupKey}`)
-      .maybeSingle();
+      .select("id, customer_id, assigned_plumber_id");
+    const { data: reqRow } = await (
+      isUuid(lookupKey)
+        ? reqLookup.or(`ticket_number.eq.${lookupKey},id.eq.${lookupKey}`)
+        : reqLookup.eq("ticket_number", lookupKey)
+    ).maybeSingle();
     if (reqRow) {
       resolvedRequestId = String(reqRow.id);
       reqCustomerId = reqRow.customer_id ? String(reqRow.customer_id) : null;
@@ -2628,6 +2683,7 @@ export async function markAllAdminCommunicationsRead(): Promise<number> {
 export async function getMarketplaceSettings(): Promise<MarketplaceSettings> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("settings");
   if (isBuildPhase()) return DEFAULT_SETTINGS;
   try {
     const supabase = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
@@ -2847,7 +2903,10 @@ export async function createComplaint(
     created_at: nowIso,
     updated_at: nowIso,
   };
-  await supabase.from("complaints").insert(payload);
+  const { error: complaintErr } = await supabase.from("complaints").insert(payload);
+  if (complaintErr) {
+    throw new Error(`Failed to save complaint: ${complaintErr.message}`);
+  }
   return {
     id,
     ticket_number: payload.ticket_number,
@@ -2906,6 +2965,7 @@ export async function updateComplaintStatus(
 export async function getAllGalleryItems(onlyPublished = false): Promise<GalleryItemRecord[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("gallery");
   if (isBuildPhase()) return [];
   try {
     const supabase = getServiceSupabase();
@@ -2956,7 +3016,10 @@ export async function addGalleryItem(
     created_at: nowIso,
     updated_at: nowIso,
   };
-  await supabase.from("gallery_items").insert(payload);
+  const { error } = await supabase.from("gallery_items").insert(payload);
+  if (error) {
+    throw new Error(`Failed to save gallery item: ${error.message}`);
+  }
   return { ...data, id, created_at: nowIso };
 }
 
@@ -3036,6 +3099,7 @@ export interface ReviewRecord {
 export async function getReviews(statusFilter?: "pending" | "approved" | "rejected"): Promise<ReviewRecord[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("reviews");
   if (isBuildPhase()) return [];
   try {
     const supabase = getServiceSupabase();
@@ -3117,6 +3181,7 @@ export interface GuideRecord {
 export async function getGuides(publishedOnly = false): Promise<GuideRecord[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("guides");
   if (isBuildPhase()) return [];
   try {
     const supabase = getServiceSupabase();

@@ -1,7 +1,8 @@
 "use server";
 
 import path from "path";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
+import { PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 import {
   createPlumberApplication,
   updatePlumberVerification,
@@ -351,6 +352,7 @@ export async function assignPlumberToRequestAction(params: {
     revalidatePath("/admin");
     revalidatePath("/tracking");
     revalidatePath("/plumber");
+    revalidatePath("/customer");
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -593,21 +595,14 @@ export async function updateRequestStatusByTicketAction(
       if (!ctx) {
         return { success: false, error: "You are not assigned to this service request." };
       }
-      const allowedPlumberStatuses: RequestStatus[] = [
-        "scheduled",
-        "in_progress",
-        "inspection_required",
-        "quotation_submitted",
-        "work_completed",
-        "awaiting_final_payment",
-      ];
+      const allowedPlumberStatuses: readonly RequestStatus[] = PLUMBER_UPDATABLE_STATUSES;
       if (!allowedPlumberStatuses.includes(status)) {
         return { success: false, error: "Only administrators can set this request status." };
       }
     }
 
     const actorName = admin ? admin.fullName : plumberActor!.name;
-    await updateServiceRequest(
+    const updatedReq = await updateServiceRequest(
       ticketNumber,
       {
         status,
@@ -619,6 +614,10 @@ export async function updateRequestStatusByTicketAction(
         details: notes,
       }
     );
+
+    if (!updatedReq) {
+      return { success: false, error: "Service request not found or could not be updated." };
+    }
 
     await postJobMessage({
       requestId: ticketNumber,
@@ -666,6 +665,7 @@ export async function updateRequestStatusByTicketAction(
     revalidatePath("/admin");
     revalidatePath("/tracking");
     revalidatePath("/plumber");
+    revalidatePath("/customer");
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -917,6 +917,9 @@ export async function saveMarketplaceSettingsAction(
       entity_id: "marketplace_settings",
       new_value: "Updated platform settings",
     });
+    updateTag("settings");
+    updateTag("service-categories");
+    updateTag("service-areas");
     revalidatePath("/admin/settings");
     revalidatePath("/");
     revalidatePath("/contact");
@@ -1290,6 +1293,7 @@ export async function addGalleryItemAction(formData: FormData) {
       published,
     });
 
+    updateTag("gallery");
     revalidatePath("/admin/gallery");
     revalidatePath("/gallery");
     revalidatePath("/projects");
@@ -1305,7 +1309,12 @@ export async function toggleGalleryPublishAction(id: string, published: boolean)
     if (!admin) {
       return { success: false, error: "Admin authorisation required." };
     }
-    await toggleGalleryPublish(id, published);
+    const ok = await toggleGalleryPublish(id, published);
+    if (!ok) {
+      return { success: false, error: "Failed to update gallery item publish status." };
+    }
+    updateTag("gallery");
+    updateTag("gallery");
     revalidatePath("/admin/gallery");
     revalidatePath("/gallery");
     revalidatePath("/projects");
@@ -1328,7 +1337,10 @@ export async function deleteGalleryItemAction(id: string) {
       .eq("id", id)
       .maybeSingle();
 
-    await deleteGalleryItem(id);
+    const ok = await deleteGalleryItem(id);
+    if (!ok) {
+      return { success: false, error: "Failed to delete gallery item." };
+    }
 
     if (row?.image_url && String(row.image_url).includes("/api/gallery/file/")) {
       const rawName = decodeURIComponent(String(row.image_url).split("/api/gallery/file/")[1] || "");
@@ -1338,6 +1350,7 @@ export async function deleteGalleryItemAction(id: string) {
       }
     }
 
+    updateTag("gallery");
     revalidatePath("/admin/gallery");
     revalidatePath("/gallery");
     revalidatePath("/projects");
@@ -1446,6 +1459,8 @@ export async function upsertGuideAction(input: {
     if (!saved) {
       return { success: false, error: "Could not save guide." };
     }
+    updateTag("guides");
+    updateTag("guides");
     revalidatePath("/admin/guides");
     revalidatePath("/guides");
     revalidatePath(`/guides/${saved.slug}`);
@@ -1525,6 +1540,7 @@ export async function seedDraftGuidesAction() {
       );
       if (saved) seeded.push(saved);
     }
+    updateTag("guides");
     revalidatePath("/admin/guides");
     return { success: true, guides: seeded };
   } catch (err: any) {

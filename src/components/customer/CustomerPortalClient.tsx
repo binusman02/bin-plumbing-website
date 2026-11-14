@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { startTransition as startBackgroundTransition, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
   CreditCard,
@@ -33,6 +34,7 @@ import {
 } from "@/components/customer/CustomerRequestModals";
 import { PortalShell, type PortalNavGroup } from "@/components/portal/PortalShell";
 import { usePortalRealtimeChat } from "@/hooks/usePortalRealtimeChat";
+import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 import { formatDateTime, formatNGN } from "@/lib/currency";
 import { getStatusMeta } from "@/lib/status-styles";
 import type {
@@ -66,15 +68,95 @@ export default function CustomerPortalClient({
   activeLocations = [],
   bankDetails,
 }: CustomerPortalClientProps) {
-  const [authenticatedCustomerId] = useState<string | null>(initialCustomerId);
+  const router = useRouter();
+  const lastSyncRef = useRef(0);
+  const authenticatedCustomerId = initialCustomerId;
 
   // Dashboard states
-  const [activeTab, setActiveTab] = useState<CustomerTab>("home");
+  const [activeTab, setActiveTabState] = useState<CustomerTab>("home");
+
+  const setActiveTab = useCallback((tab: CustomerTab) => {
+    setActiveTabState(tab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (tab === "home") {
+        url.searchParams.delete("tab");
+      } else {
+        url.searchParams.set("tab", tab);
+      }
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const param = new URLSearchParams(window.location.search).get("tab") as CustomerTab | null;
+      if (
+        param === "home" ||
+        param === "requests" ||
+        param === "messages" ||
+        param === "payments" ||
+        param === "profile"
+      ) {
+        setActiveTabState(param);
+      }
+    };
+    syncFromUrl();
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState<ServiceRequestRecord[]>(initialRequests);
   const [quotations, setQuotations] = useState<StructuredQuotation[]>(initialQuotations);
   const [messages, setMessages] = useState<JobMessage[]>(initialMessages);
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequestRecord | null>(null);
+
+  useEffect(() => {
+    setRequests(initialRequests);
+  }, [initialRequests]);
+
+  useEffect(() => {
+    setQuotations(initialQuotations);
+  }, [initialQuotations]);
+
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
+
+  const triggerPortalRefresh = useCallback(() => {
+    const now = Date.now();
+    if (now - lastSyncRef.current < 1500) return;
+    lastSyncRef.current = now;
+    startBackgroundTransition(() => {
+      router.refresh();
+    });
+  }, [router]);
+
+  useRealtimeHub({
+    role: "customer",
+    userId: authenticatedCustomerId || undefined,
+    enabled: Boolean(authenticatedCustomerId),
+    onDataSync: triggerPortalRefresh,
+  });
+
+  useEffect(() => {
+    if (!authenticatedCustomerId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && activeTab !== "messages") {
+        triggerPortalRefresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible" && activeTab !== "messages") {
+        triggerPortalRefresh();
+      }
+    }, 20000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(id);
+    };
+  }, [authenticatedCustomerId, activeTab, triggerPortalRefresh]);
 
   // New Request Modal
   const [showNewRequestModal, setShowNewRequestModal] = useState(false);
@@ -239,6 +321,9 @@ export default function CustomerPortalClient({
           )
         );
         setActionFeedback(`Quotation ${decision}.`);
+        broadcastRealtimeEvent("data_sync", { entity: "quotations", ticketNumber: quote.ticket_number });
+        broadcastRealtimeEvent("notification_sync", {});
+        router.refresh();
       }
     });
   };
@@ -262,6 +347,13 @@ export default function CustomerPortalClient({
         setShowNewRequestModal(false);
         setNewDescription("");
         setActionFeedback(`Request ${res.request.ticket_number} submitted.`);
+        broadcastRealtimeEvent("data_sync", {
+          entity: "service_requests",
+          ticketNumber: res.request.ticket_number,
+        });
+        broadcastRealtimeEvent("admin_signal", {});
+        broadcastRealtimeEvent("notification_sync", { recipientRole: "admin" });
+        router.refresh();
       }
     });
   };
@@ -554,6 +646,7 @@ export default function CustomerPortalClient({
               fullName: currentCustomer.full_name,
               phone: currentCustomer.phone,
               email: currentCustomer.email || "",
+              avatarUrl: currentCustomer.avatar_url || null,
               cityLga: currentCustomer.city_lga || currentCustomer.address_in_kano || "",
               address: currentCustomer.address_in_kano || "",
               state: currentCustomer.state || "Kano",

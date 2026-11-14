@@ -47,14 +47,18 @@ export function PlumberAuthView({
     e.preventDefault();
     setLoginError("");
     setAuthLoading(true);
-    const res = await loginPlumberWithPasswordAction(identifierInput, passwordInput);
-    setAuthLoading(false);
-    if (!res.success) {
-      setLoginError(res.error || "Invalid sign-in details.");
-      return;
+    try {
+      const res = await loginPlumberWithPasswordAction(identifierInput, passwordInput);
+      if (!res.success) {
+        setLoginError(res.error || "Invalid sign-in details.");
+        setAuthLoading(false);
+        return;
+      }
+      window.location.assign(window.location.pathname + window.location.search);
+    } catch {
+      setLoginError("Sign-in failed. Please try again.");
+      setAuthLoading(false);
     }
-    router.push("/plumber");
-    router.refresh();
   };
 
   const handleForgotSubmit = async (e: React.FormEvent) => {

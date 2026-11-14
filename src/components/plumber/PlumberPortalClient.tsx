@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { startTransition as startBackgroundTransition, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   DollarSign,
   LayoutDashboard,
@@ -23,7 +24,7 @@ import { PlumberJobDrawer } from "@/components/plumber/PlumberJobDrawer";
 import { PortalShell, type PortalNavGroup } from "@/components/portal/PortalShell";
 import { usePortalRealtimeChat } from "@/hooks/usePortalRealtimeChat";
 import { formatDateTime, formatNGN } from "@/lib/currency";
-import { broadcastRealtimeEvent } from "@/lib/realtime-hub";
+import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 import { getStatusMeta } from "@/lib/status-styles";
 import type {
   JobMessage,
@@ -59,13 +60,93 @@ export default function PlumberPortalClient({
   payments,
   messages: initialMessages,
 }: PlumberPortalClientProps) {
-  const [authenticatedPlumberId] = useState<string | null>(initialPlumberId);
+  const router = useRouter();
+  const lastSyncRef = useRef(0);
+  const authenticatedPlumberId = initialPlumberId;
 
-  const [activeTab, setActiveTab] = useState<PlumberTab>("home");
+  const [activeTab, setActiveTabState] = useState<PlumberTab>("home");
+
+  const setActiveTab = useCallback((tab: PlumberTab) => {
+    setActiveTabState(tab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (tab === "home") {
+        url.searchParams.delete("tab");
+      } else {
+        url.searchParams.set("tab", tab);
+      }
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const param = new URLSearchParams(window.location.search).get("tab") as PlumberTab | null;
+      if (
+        param === "home" ||
+        param === "jobs" ||
+        param === "messages" ||
+        param === "earnings" ||
+        param === "profile"
+      ) {
+        setActiveTabState(param);
+      }
+    };
+    syncFromUrl();
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState<ServiceRequestRecord[]>(initialRequests);
-  const [quotations] = useState<StructuredQuotation[]>(initialQuotations);
+  const [quotations, setQuotations] = useState<StructuredQuotation[]>(initialQuotations);
   const [messages, setMessages] = useState<JobMessage[]>(initialMessages);
+
+  useEffect(() => {
+    setRequests(initialRequests);
+  }, [initialRequests]);
+
+  useEffect(() => {
+    setQuotations(initialQuotations);
+  }, [initialQuotations]);
+
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
+
+  const triggerPortalRefresh = useCallback(() => {
+    const now = Date.now();
+    if (now - lastSyncRef.current < 1500) return;
+    lastSyncRef.current = now;
+    startBackgroundTransition(() => {
+      router.refresh();
+    });
+  }, [router]);
+
+  useRealtimeHub({
+    role: "plumber",
+    userId: authenticatedPlumberId || undefined,
+    enabled: Boolean(authenticatedPlumberId),
+    onDataSync: triggerPortalRefresh,
+  });
+
+  useEffect(() => {
+    if (!authenticatedPlumberId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && activeTab !== "messages") {
+        triggerPortalRefresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible" && activeTab !== "messages") {
+        triggerPortalRefresh();
+      }
+    }, 20000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(id);
+    };
+  }, [authenticatedPlumberId, activeTab, triggerPortalRefresh]);
 
   const [selectedJob, setSelectedJob] = useState<ServiceRequestRecord | null>(null);
   const [activeTicketForChat, setActiveTicketForChat] = useState<string>("");
@@ -246,6 +327,12 @@ export default function PlumberPortalClient({
         setTransportAmt("");
         setOtherAmt("");
         setScopeSummary("");
+        broadcastRealtimeEvent("data_sync", {
+          entity: "quotations",
+          ticketNumber: selectedJob.ticket_number,
+        });
+        broadcastRealtimeEvent("notification_sync", {});
+        router.refresh();
       } else {
         setActionFeedback(res.error || "Could not submit quotation.");
       }
@@ -266,6 +353,12 @@ export default function PlumberPortalClient({
         );
         setSelectedJob(updated);
         setActionFeedback("Job status updated.");
+        broadcastRealtimeEvent("data_sync", {
+          entity: "service_requests",
+          ticketNumber: selectedJob.ticket_number,
+        });
+        broadcastRealtimeEvent("notification_sync", {});
+        router.refresh();
       } else {
         setActionFeedback(res.error || "Could not update status.");
       }
@@ -554,6 +647,7 @@ export default function PlumberPortalClient({
               fullName: currentPlumber.full_name,
               phone: currentPlumber.phone,
               email: currentPlumber.email || "",
+              avatarUrl: currentPlumber.avatar_url || null,
               residentialLocation: currentPlumber.residential_location || "",
               preferredLocations: currentPlumber.preferred_locations || [],
               skills: currentPlumber.skills || [],

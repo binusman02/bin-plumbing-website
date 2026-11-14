@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Camera,
   CheckCircle2,
   Download,
   FileCheck2,
@@ -11,6 +13,7 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  Save,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -20,6 +23,8 @@ import {
   updatePlumberOnboardingAction,
   updatePlumberStatusAction,
 } from "@/app/actions/marketplace-actions";
+import { adminUpdatePlumberProfileAction } from "@/app/actions/profile-actions";
+import { Avatar } from "@/components/ui";
 import { formatDateTime } from "@/lib/currency";
 import { getStatusMeta } from "@/lib/status-styles";
 import type {
@@ -63,7 +68,17 @@ export default function PlumbersManagerClient({
   initialPlumbers,
   requests = [],
 }: PlumbersManagerClientProps) {
+  const router = useRouter();
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [plumbers, setPlumbers] = useState<PlumberProfile[]>(initialPlumbers);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editResidentialLocation, setEditResidentialLocation] = useState("");
+  const [editPreferredLocations, setEditPreferredLocations] = useState("");
+  const [editSkills, setEditSkills] = useState("");
+  const [editAvailability, setEditAvailability] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<PlumberProfile | null>(null);
@@ -95,6 +110,13 @@ export default function PlumbersManagerClient({
 
   const openDetail = (plumber: PlumberProfile) => {
     setSelected(plumber);
+    setEditName(plumber.full_name || "");
+    setEditPhone(plumber.phone || "");
+    setEditEmail(plumber.email || "");
+    setEditResidentialLocation(plumber.residential_location || "");
+    setEditPreferredLocations((plumber.preferred_locations || []).join(", "));
+    setEditSkills((plumber.skills || []).join(", "));
+    setEditAvailability(plumber.availability || "Standard");
     setIdChecked(Boolean(plumber.verification_checklist?.id_checked?.checked));
     setReferencesChecked(Boolean(plumber.verification_checklist?.references_checked?.checked));
     setAgreementSigned(Boolean(plumber.verification_checklist?.agreement_signed?.checked));
@@ -102,6 +124,76 @@ export default function PlumbersManagerClient({
     setAgreementUrl(plumber.agreement_url || "");
     setRejectionReason(plumber.rejection_reason || "");
     setFeedback(null);
+  };
+
+  const handleUploadPlumberPhoto = async (file: File) => {
+    if (!selected) return;
+    setFeedback(null);
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("role", "admin");
+      fd.append("targetPlumberId", selected.id);
+      const res = await fetch("/api/profile/avatar", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: "error", text: data.error || "Could not upload plumber photo." });
+      } else {
+        const updated: PlumberProfile = { ...selected, avatar_url: data.avatarUrl };
+        setPlumbers((prev) => prev.map((p) => (p.id === selected.id ? updated : p)));
+        setSelected(updated);
+        setFeedback({ type: "success", text: "Plumber photo updated." });
+        router.refresh();
+      }
+    } catch {
+      setFeedback({ type: "error", text: "Photo upload failed. Please try again." });
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleSavePlumberProfile = () => {
+    if (!selected) return;
+    setFeedback(null);
+    startTransition(async () => {
+      const preferredArr = editPreferredLocations
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const skillsArr = editSkills
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const res = await adminUpdatePlumberProfileAction({
+        plumberId: selected.id,
+        fullName: editName,
+        phone: editPhone,
+        email: editEmail,
+        residentialLocation: editResidentialLocation,
+        preferredLocations: preferredArr,
+        skills: skillsArr,
+        availability: editAvailability,
+      });
+      if (res.success) {
+        const updated: PlumberProfile = {
+          ...selected,
+          full_name: editName.trim(),
+          phone: editPhone.trim(),
+          email: editEmail.trim() || undefined,
+          residential_location: editResidentialLocation.trim(),
+          preferred_locations: preferredArr,
+          skills: skillsArr,
+          availability: editAvailability.trim() || "Standard",
+        };
+        setPlumbers((prev) => prev.map((p) => (p.id === selected.id ? updated : p)));
+        setSelected(updated);
+        setFeedback({ type: "success", text: "Plumber profile updated." });
+        router.refresh();
+      } else {
+        setFeedback({ type: "error", text: res.error || "Could not update plumber profile." });
+      }
+    });
   };
 
   const handleSaveOnboarding = () => {
@@ -387,6 +479,116 @@ export default function PlumbersManagerClient({
               </div>
 
               <div className="flex-1 space-y-5 overflow-y-auto p-4 pb-28 sm:p-6 md:pb-6">
+                {/* Plumber Photo & Profile Edit */}
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={selected.full_name} src={selected.avatar_url} size="lg" />
+                      <div>
+                        <p className="text-sm font-bold text-[#0B1F3A]">{selected.full_name}</p>
+                        <p className="text-xs text-slate-500">JPG, PNG, or WebP up to 5 MB</p>
+                      </div>
+                    </div>
+                    <div>
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleUploadPlumberPhoto(f);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={uploadingPhoto}
+                        onClick={() => photoInputRef.current?.click()}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {uploadingPhoto ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Camera className="h-3.5 w-3.5" />
+                        )}
+                        {uploadingPhoto ? "Uploading..." : "Upload Photo"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Full Name</label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-[#0B1F3A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
+                      <input
+                        type="text"
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-[#0B1F3A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
+                      <input
+                        type="email"
+                        value={editEmail}
+                        onChange={(e) => setEditEmail(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-[#0B1F3A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Availability</label>
+                      <input
+                        type="text"
+                        value={editAvailability}
+                        onChange={(e) => setEditAvailability(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-[#0B1F3A]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Preferred Service Locations (comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={editPreferredLocations}
+                        onChange={(e) => setEditPreferredLocations(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-[#0B1F3A]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Skills (comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={editSkills}
+                        onChange={(e) => setEditSkills(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-[#0B1F3A]"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={handleSavePlumberProfile}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#132f57] disabled:opacity-50"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      Save Profile Details
+                    </button>
+                  </div>
+                </div>
+
                 {/* Profile Summary */}
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

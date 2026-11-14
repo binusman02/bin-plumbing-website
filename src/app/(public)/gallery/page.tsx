@@ -11,8 +11,7 @@ export const metadata: Metadata = {
 };
 
 export default async function GalleryPage() {
-  const items = await getAllGalleryItems();
-  const published = items.filter((item) => item.published);
+  const published = await getAllGalleryItems(true);
 
   return (
     <div className="bg-white">

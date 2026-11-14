@@ -1,0 +1,12 @@
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'new';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'contacted';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'scheduled';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'inspection_required';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'quotation_submitted';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'awaiting_approval';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'approved';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'work_completed';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'awaiting_final_payment';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE public.request_status ADD VALUE IF NOT EXISTS 'cancelled';

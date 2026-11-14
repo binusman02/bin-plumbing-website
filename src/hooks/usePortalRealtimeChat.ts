@@ -74,6 +74,7 @@ export function usePortalRealtimeChat({
     onMessage: (msg) => {
       if (!ticketSet.has(msg.ticket_number)) return;
       if (filterIncomingMessage && !filterIncomingMessage(msg)) return;
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
       syncTicketMessages(msg.ticket_number);
     },
     onRead: ({ ticketNumber, viewerRole }) => {
@@ -137,7 +138,7 @@ export function usePortalRealtimeChat({
       if (document.visibilityState === "hidden") return;
       syncTicketMessages(activeTicket);
     };
-    const id = window.setInterval(syncOnce, 30000);
+    const id = window.setInterval(syncOnce, 8000);
     window.addEventListener("online", syncOnce);
     return () => {
       window.clearInterval(id);

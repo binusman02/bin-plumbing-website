@@ -1,9 +1,11 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { checkRateLimit } from "@/lib/security";
+import { CUSTOMER_SESSION_COOKIE, PLUMBER_SESSION_COOKIE } from "@/lib/customer-session";
 
 export async function loginAdmin(formData: FormData) {
   const email = (formData.get("email") as string)?.trim() || "";
@@ -44,6 +46,12 @@ export async function loginAdmin(formData: FormData) {
     await supabase.auth.signOut();
     return { error: "This account is not authorised for admin access." };
   }
+
+  const cookieStore = await cookies();
+  cookieStore.delete("bin_customer_session_phone");
+  cookieStore.delete(CUSTOMER_SESSION_COOKIE);
+  cookieStore.delete("bin_plumber_session_id");
+  cookieStore.delete(PLUMBER_SESSION_COOKIE);
 
   return { success: true };
 }

@@ -49,10 +49,16 @@ export async function updateSession(request: NextRequest) {
   const isAccessingCustomer = pathname.startsWith("/customer");
   const isAccessingPlumber = pathname.startsWith("/plumber");
 
-  // Block unauthenticated access to protected /admin routes
+  // Block unauthenticated access to protected /admin routes while preserving destination
   if (isAccessingAdmin && !isAdminLogin && !user) {
     const url = request.nextUrl.clone();
+    const intended = `${pathname}${request.nextUrl.search}`;
     url.pathname = "/admin/login";
+    url.search = "";
+    if (intended && intended !== "/admin") {
+      url.searchParams.set("redirect", intended);
+    }
+    url.searchParams.set("reason", "auth_required");
     return NextResponse.redirect(url);
   }
 
@@ -101,9 +107,12 @@ export async function updateSession(request: NextRequest) {
         .maybeSingle();
 
       if (adminRow) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/admin";
-        return NextResponse.redirect(url);
+        const requestedRedirect = request.nextUrl.searchParams.get("redirect") || "";
+        const safeTarget =
+          requestedRedirect.startsWith("/admin") && !requestedRedirect.startsWith("//")
+            ? requestedRedirect
+            : "/admin";
+        return NextResponse.redirect(new URL(safeTarget, request.url));
       }
     }
   }

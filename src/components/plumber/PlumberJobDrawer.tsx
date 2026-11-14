@@ -10,7 +10,7 @@ import type {
   ServiceRequestRecord,
   StructuredQuotation,
 } from "@/lib/marketplace";
-import { getStatusMeta } from "@/lib/status-styles";
+import { getStatusMeta, PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 
 const JOB_STEPS = [
   { id: "scheduled", label: "Assigned" },
@@ -197,10 +197,16 @@ export function PlumberJobDrawer({
                 onChange={(e) => setNextJobStatus(e.target.value as RequestStatus)}
                 className="h-11 flex-1 rounded-xl border border-slate-200 px-3 text-sm"
               >
-                <option value="inspection_required">Inspection Required</option>
-                <option value="scheduled">Scheduled</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed</option>
+                {!(PLUMBER_UPDATABLE_STATUSES as readonly string[]).includes(selectedJob.status) && (
+                  <option value={selectedJob.status} disabled>
+                    {getStatusMeta(selectedJob.status).label} (Current)
+                  </option>
+                )}
+                {PLUMBER_UPDATABLE_STATUSES.map((st) => (
+                  <option key={st} value={st}>
+                    {getStatusMeta(st).label}
+                  </option>
+                ))}
               </select>
               <button
                 type="button"

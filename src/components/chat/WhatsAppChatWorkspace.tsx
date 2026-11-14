@@ -127,7 +127,22 @@ export function WhatsAppChatWorkspace({
   const prevTicketRef = useRef<string | null>(initialTicket);
 
   useEffect(() => {
-    setMessages(initialMessages);
+    setMessages((prev) => {
+      if (prev.length === 0) return initialMessages;
+      const byId = new Map(prev.map((m) => [m.id, m]));
+      let changed = initialMessages.length !== prev.length;
+      for (const m of initialMessages) {
+        const existing = byId.get(m.id);
+        if (!existing || existing.message !== m.message || existing.read_at !== m.read_at || existing.deleted_for_everyone !== m.deleted_for_everyone) {
+          changed = true;
+        }
+        byId.set(m.id, m);
+      }
+      if (!changed) return prev;
+      return Array.from(byId.values()).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
   }, [initialMessages]);
 
   useEffect(() => {
@@ -200,6 +215,11 @@ export function WhatsAppChatWorkspace({
 
     pingPresence();
     const timer = setInterval(pingPresence, 25000);
+    const syncTimer = setInterval(() => {
+      if (document.visibilityState === "visible" && selectedTicket) {
+        void syncTicketMessages(selectedTicket);
+      }
+    }, 5000);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -231,6 +251,7 @@ export function WhatsAppChatWorkspace({
     return () => {
       active = false;
       clearInterval(timer);
+      clearInterval(syncTimer);
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("pagehide", handlePageHide);
@@ -246,6 +267,7 @@ export function WhatsAppChatWorkspace({
     },
     onMessage: (msg) => {
       if (actorRole === "customer" && msg.is_internal) return;
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
       syncTicketMessages(msg.ticket_number);
     },
     onRead: ({ ticketNumber, viewerRole }) => {
@@ -525,7 +547,8 @@ export function WhatsAppChatWorkspace({
           setPendingFile(null);
           setReplyTo(null);
           setEmojiOpen(false);
-          broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket });
+          broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket, message: sentMsg });
+          broadcastRealtimeEvent("notification_sync", {});
         } else {
           setSendError(res.error || "Could not send message.");
         }
@@ -551,7 +574,7 @@ export function WhatsAppChatWorkspace({
         setMessages((prev) => prev.map((m) => (m.id === target.id ? res.message! : m)));
         setEditingMsg(null);
         setEditDraft("");
-        broadcastRealtimeEvent("new_message", { ticketNumber: target.ticket_number });
+        broadcastRealtimeEvent("new_message", { ticketNumber: target.ticket_number, message: res.message });
       } else {
         setSendError(res.error || "Could not edit message.");
       }

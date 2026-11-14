@@ -43,6 +43,18 @@ async function setPlumberSessionCookie(accountId: string) {
   });
 }
 
+async function clearCustomerSessionCookie() {
+  const cookieStore = await cookies();
+  cookieStore.delete("bin_customer_session_phone");
+  cookieStore.delete(CUSTOMER_SESSION_COOKIE);
+}
+
+async function clearPlumberSessionCookie() {
+  const cookieStore = await cookies();
+  cookieStore.delete("bin_plumber_session_id");
+  cookieStore.delete(PLUMBER_SESSION_COOKIE);
+}
+
 function normalizeNigerianPhoneDigits(input: string): string {
   const digits = input.replace(/\D/g, "");
   if (digits.startsWith("234") && digits.length === 13) {
@@ -119,6 +131,7 @@ export async function loginCustomerWithPasswordAction(
         matchedLocal?.password_hash &&
         verifyCustomerPassword(password, matchedLocal.password_hash)
       ) {
+        await clearPlumberSessionCookie();
         await setCustomerSessionCookie(matchedLocal.id);
         revalidatePath("/customer");
         return { success: true };
@@ -142,7 +155,9 @@ export async function loginCustomerWithPasswordAction(
       return { success: false, error: "Invalid sign-in details." };
     }
 
-    // Ensure local customer profile exists for request/quote matching
+    await clearPlumberSessionCookie();
+
+    // Ensure local customer profile exists and is linked to auth_user_id
     const meta = data.user.user_metadata || {};
     const phoneFromMeta = (meta.phone as string) || (!rawId.includes("@") ? rawId : "");
     if (phoneFromMeta) {
@@ -150,6 +165,7 @@ export async function loginCustomerWithPasswordAction(
         fullName: (meta.full_name as string) || data.user.email || "Customer",
         phone: phoneFromMeta,
         email: data.user.email || undefined,
+        authUserId: data.user.id,
         address: (meta.address as string) || "On file",
         cityLga: (meta.city_lga as string) || undefined,
         neighbourhood: (meta.neighbourhood as string) || undefined,
@@ -282,11 +298,14 @@ export async function registerCustomerWithPasswordAction(input: {
       phone,
       email: email || undefined,
       passwordHash,
+      authUserId: data?.user?.id,
       address,
       cityLga: `${cityLga}, ${state}`,
       neighbourhood: input.neighbourhood?.trim() || undefined,
       propertyType: input.propertyType || "Residential / Villa",
     });
+
+    await clearPlumberSessionCookie();
 
     // If Supabase rate-limited signup email or requires email verification without a session,
     // sign the customer in immediately using the signed httpOnly session cookie + scrypt password hash.
@@ -426,7 +445,10 @@ export async function registerPlumberAccountAction(input: {
       phone,
       email,
       passwordHash,
+      authUserId: data?.user?.id,
     });
+
+    await clearCustomerSessionCookie();
 
     if (isRateLimited || !data?.session) {
       await setPlumberSessionCookie(account.id);
@@ -505,6 +527,7 @@ export async function loginPlumberWithPasswordAction(
         matchedLocal?.password_hash &&
         verifyCustomerPassword(password, matchedLocal.password_hash)
       ) {
+        await clearCustomerSessionCookie();
         await setPlumberSessionCookie(matchedLocal.id);
         revalidatePath("/join-as-plumber");
         revalidatePath("/plumber");
@@ -527,6 +550,29 @@ export async function loginPlumberWithPasswordAction(
     if (role !== "plumber") {
       await supabase.auth.signOut();
       return { success: false, error: "Invalid sign-in details." };
+    }
+
+    await clearCustomerSessionCookie();
+
+    // Ensure local plumber record is linked to auth_user_id
+    const plumberMeta = data.user.user_metadata || {};
+    const plumberPhone = (plumberMeta.phone as string) || (!rawId.includes("@") ? rawId : "");
+    if (plumberPhone) {
+      const existingPlumbers = await getAllPlumbers();
+      const normalizedPlumberPhone = normalizeNigerianPhoneDigits(plumberPhone);
+      const matchedPlumber = existingPlumbers.find(
+        (p) =>
+          (data.user.email && p.email?.toLowerCase() === data.user.email.toLowerCase()) ||
+          normalizeNigerianPhoneDigits(p.phone) === normalizedPlumberPhone
+      );
+      if (matchedPlumber) {
+        const { getServiceSupabase } = await import("@/lib/supabase/admin");
+        await getServiceSupabase()
+          .from("plumbers")
+          .update({ auth_user_id: data.user.id, updated_at: new Date().toISOString() })
+          .eq("id", matchedPlumber.id)
+          .is("auth_user_id", null);
+      }
     }
 
     revalidatePath("/plumber");
