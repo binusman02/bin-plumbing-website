@@ -1,26 +1,71 @@
 @import "tailwindcss";
 
+@theme {
+  --color-navy: #0B1F3A;
+  --color-navy-deep: #07152B;
+  --color-gold: #F5B301;
+  --color-gold-hover: #E0A200;
+  --color-surface-white: #FFFFFF;
+  --color-surface-light: #F4F6F9;
+  --color-border-subtle: #E3E8EF;
+  --color-text-primary: #1B2430;
+  --color-text-muted: #5B6675;
+  --color-text-on-navy: #FFFFFF;
+  --color-text-on-navy-muted: #C9D3E0;
+
+  --font-heading: var(--font-plus-jakarta), system-ui, sans-serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --navy: #0B1F3A;
+  --navy-deep: #07152B;
+  --gold: #F5B301;
+  --gold-hover: #E0A200;
+  --background: #FFFFFF;
+  --surface-light: #F4F6F9;
+  --border-subtle: #E3E8EF;
+  --foreground: #1B2430;
+  --text-muted: #5B6675;
+  --text-on-navy: #FFFFFF;
+  --text-on-navy-muted: #C9D3E0;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 84px;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-plus-jakarta), system-ui, -apple-system, sans-serif;
+}
+
+/* Consistent soft shadow & hover lift (150-250ms, 2-4px lift) */
+.card-elevated {
+  box-shadow: 0 4px 20px -4px rgba(11, 31, 58, 0.06);
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.card-elevated:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px -6px rgba(11, 31, 58, 0.1);
+}
+
+/* Accessible focus outlines using Gold token */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }

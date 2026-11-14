@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Bin Plumbing Services Ltd — Web Platform
 
-## Getting Started
+Next.js (App Router) + Supabase platform for service requests, dispatch coordination, plumber quotations, customer approvals, payment reconciliation, and real-time job chat.
 
-First, run the development server:
+## Setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. **Install dependencies**
+   ```bash
+   npm install
+   ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. **Configure environment variables**
+   Copy `.env.example` to `.env.local` and fill in your values:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_SITE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY` (server-only)
+   - `AUTH_SESSION_SECRET` (random 32+ char string for signed customer/plumber session cookies)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. **Run database migration in Supabase**
+   Execute `supabase/migrations/20261113_phase0_security_and_tables.sql` (or `supabase/schema.sql` on a fresh project) in the Supabase SQL Editor.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. **Migrate existing JSON data (one-time)**
+   ```bash
+   node scripts/migrate-json-to-supabase.mjs
+   ```
+   This safely creates a backup in `backups/` and upserts existing records into the normalized Supabase tables.
 
-## Learn More
+5. **Add your Admin User**
+   Insert your Supabase Auth user UUID into `public.admin_users` (see `SECURITY-CHECKLIST.md`).
 
-To learn more about Next.js, take a look at the following resources:
+6. **Run locally**
+   ```bash
+   npm run dev
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Scripts
+- `npm run dev` — Start development server
+- `npm run lint` — Run ESLint
+- `npm run build` — Production build
