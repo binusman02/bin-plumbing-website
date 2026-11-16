@@ -121,13 +121,17 @@ export default async function PlumberPortalPage() {
           .eq("assigned_plumber_id", targetPlumber.id)
           .order("created_at", { ascending: false });
 
-        isolatedRequests = (reqRows || [])
-          .filter((r) => !r.deleted_at)
-          .map((r) => mapServiceRequestRow(r));
-        const ticketNumbers = isolatedRequests.map((r) => r.ticket_number);
+        const activeReqRows = (reqRows || []).filter((r) => !r.deleted_at);
+        const ticketNumbers = activeReqRows.map((r) => String(r.ticket_number));
+        const requestIds = activeReqRows.map((r) => String(r.id));
 
         if (ticketNumbers.length > 0) {
-          const [quoteRes, payRes, msgRes] = await Promise.all([
+          const [histRes, quoteRes, payRes, msgRes] = await Promise.all([
+            adminSupabase
+              .from("request_history")
+              .select("*")
+              .in("request_id", requestIds)
+              .order("created_at", { ascending: true }),
             adminSupabase
               .from("quotations")
               .select("*")
@@ -146,6 +150,8 @@ export default async function PlumberPortalPage() {
               .order("created_at", { ascending: true }),
           ]);
 
+          const histRows = histRes.data || [];
+          isolatedRequests = activeReqRows.map((r) => mapServiceRequestRow(r, histRows));
           isolatedQuotations = (quoteRes.data || [])
             .map((q) => mapQuotationRow(q))
             .filter((q) => q.customer_approval_status === "approved");
