@@ -115,12 +115,16 @@ export function PlumberJobDrawer({
       ? { lat: selectedJob.customer_lat, lng: selectedJob.customer_lng }
       : null;
 
+  const isJobActive = Boolean(
+    selectedJob && !["completed", "cancelled"].includes(selectedJob.status)
+  );
+
   const { route: roadRoute, status: roadRouteStatus, retry: retryRoadRoute } = useRoadRoute({
     as: "plumber",
     ticket: selectedJob?.ticket_number ?? undefined,
     plumber: plumberCoords ?? null,
     destination: destinationCoords,
-    enabled: Boolean(selectedJob && destinationCoords && plumberCoords),
+    enabled: Boolean(isJobActive && destinationCoords && plumberCoords),
   });
 
   if (!selectedJob) return null;
@@ -160,7 +164,6 @@ export function PlumberJobDrawer({
   };
 
   const tripState = deriveJobTripState(selectedJob.history);
-  const isJobActive = !["completed", "cancelled"].includes(selectedJob.status);
   const firstStep = roadRoute?.ok && roadRoute.steps && roadRoute.steps.length > 0 ? roadRoute.steps[0] : null;
   const estMins = roadRoute?.ok && roadRoute.durationS != null ? Math.max(1, Math.round(roadRoute.durationS / 60)) : null;
 
@@ -330,7 +333,7 @@ export function PlumberJobDrawer({
             )}
           </div>
 
-          {selectedJob.customer_lat != null && selectedJob.customer_lng != null && (
+          {isJobActive && selectedJob.customer_lat != null && selectedJob.customer_lng != null && (
             <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3.5">
               <p className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
                 {tripState === "on_the_way" ? "Live Turn-by-Turn Navigation" : "Live Job Map"}
