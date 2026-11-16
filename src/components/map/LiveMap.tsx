@@ -1335,7 +1335,7 @@ export function LiveMap({
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [styleLoaded, hasOwn, hasRemote]);
+  }, [styleLoaded, hasOwn, hasRemote, isDev]);
 
   const fitAllMarkersRef = useRef(fitAllMarkers);
   useEffect(() => {
@@ -1722,7 +1722,7 @@ export function LiveMap({
               }}
               className="rounded bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-slate-900 hover:bg-amber-300"
             >
-              Export JSON ({diagLogRef.current.length})
+              Export JSON
             </button>
           </div>
           <pre className="whitespace-pre-wrap break-all text-[9px] text-slate-200">
