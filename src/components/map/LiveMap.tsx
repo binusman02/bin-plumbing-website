@@ -1046,20 +1046,21 @@ export function LiveMap({
         let lat = ownSample.lat;
         let lng = ownSample.lng;
 
-        // Route projection & snapping (throttled to ~5 Hz for efficiency, with segment continuity)
+        // Route snapping runs every frame on the local segment window (no snap/unsnap flicker),
+        // while GeoJSON passed/remaining updates & off-route checks stay throttled to ~5 Hz.
         const routePts = overlaysRef.current.roadRoutePoints;
         if (routePts && routePts.length >= 2) {
-          if (nowPerf - lastRouteSplitMsRef.current >= 200) {
-            lastRouteSplitMsRef.current = nowPerf;
-            const proj = projectPointOntoRoute([lat, lng], routePts, {
-              prevSegmentIndex: prevRouteSegRef.current,
-            });
-            if (proj) {
-              prevRouteSegRef.current = proj.segmentIndex;
-              if (proj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M) {
-                lat = proj.snappedPoint[0];
-                lng = proj.snappedPoint[1];
-              }
+          const proj = projectPointOntoRoute([lat, lng], routePts, {
+            prevSegmentIndex: prevRouteSegRef.current,
+          });
+          if (proj) {
+            prevRouteSegRef.current = proj.segmentIndex;
+            if (proj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M) {
+              lat = proj.snappedPoint[0];
+              lng = proj.snappedPoint[1];
+            }
+            if (nowPerf - lastRouteSplitMsRef.current >= 200) {
+              lastRouteSplitMsRef.current = nowPerf;
               if (lastSplitSegRef.current !== proj.segmentIndex) {
                 lastSplitSegRef.current = proj.segmentIndex;
                 const { passed, remaining } = splitRouteAtProjection(routePts, proj);
