@@ -1570,10 +1570,7 @@ export default function CustomerPortalClient({
           requests={myRequests}
           initialMessages={myMessages}
           plumberAvatars={plumberAvatars}
-          initialTicket={
-            activeChatTicket ||
-            (activeChatMessageId ? null : myRequests[0]?.ticket_number || null)
-          }
+          initialTicket={activeChatTicket || null}
           initialMessageId={activeChatMessageId}
           navigationKey={chatNavKey}
           onTargetChange={(ticket, messageId) => {

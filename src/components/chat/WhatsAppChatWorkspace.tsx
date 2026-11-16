@@ -1432,7 +1432,7 @@ export function WhatsAppChatWorkspace({
             </div>
 
             {/* Composer */}
-            <div className="border-t border-slate-200 bg-white p-3">
+            <div className="border-t border-slate-200 bg-white px-3 py-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] md:p-3">
               {sendError && (
                 <p className="mb-2 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
                   {sendError}
@@ -1550,7 +1550,7 @@ export function WhatsAppChatWorkspace({
                 </div>
               )}
 
-              <div className="flex items-end gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1594,13 +1594,14 @@ export function WhatsAppChatWorkspace({
                     }
                   }}
                   placeholder="Type a message..."
-                  className="max-h-28 min-h-[40px] flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
+                  className="max-h-28 min-h-[40px] flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleSend}
                   disabled={isPending || uploading || (!draft.trim() && !pendingFile)}
-                  className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-[#0B1F3A] px-4 text-xs font-bold text-white transition hover:bg-[#0B1F3A]/90 disabled:opacity-40"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] text-xs font-bold text-white transition hover:bg-[#0B1F3A]/90 disabled:opacity-40 sm:w-auto sm:px-4"
+                  aria-label="Send message"
                 >
                   {isPending || uploading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

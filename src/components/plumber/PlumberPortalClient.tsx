@@ -1489,10 +1489,7 @@ export default function PlumberPortalClient({
           actorName={currentPlumber.full_name}
           requests={myJobs}
           initialMessages={myMessages}
-          initialTicket={
-            activeTicketForChat ||
-            (activeChatMessageId ? null : myJobs[0]?.ticket_number || null)
-          }
+          initialTicket={activeTicketForChat || null}
           initialMessageId={activeChatMessageId}
           navigationKey={chatNavKey}
           onTargetChange={(ticket, messageId) => {
