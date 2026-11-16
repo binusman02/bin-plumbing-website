@@ -716,4 +716,34 @@ describe("live-movement & camera-follow lifecycle", () => {
     assert.ok(src.includes('"free"'));
     assert.ok(src.includes("stepCameraFollow("));
   });
+
+  it("16 & 17. suppresses stationary GPS noise around start and recovers cleanly when returning to start", () => {
+    let buf = createFixBufferState();
+    buf = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 7, speed: 0.2, heading: 0, timestampMs: 1_000 },
+      1_000
+    ).nextState;
+
+    // 2 m GPS jitter while standing still (accuracy 7 m -> deadband 3 m, speed 0.2 m/s): suppressed
+    const jitter = pushFixToBuffer(
+      buf,
+      { lat: 12.000018, lng: 8.50001, accuracy: 7, speed: 0.2, heading: 45, timestampMs: 2_000 },
+      2_000
+    );
+    assert.equal(jitter.accepted, false);
+
+    // Walking away along route, then returning to segment 0: route projection returns smoothly to segment 0
+    const route: [number, number][] = [
+      [12.0, 8.5],
+      [12.0005, 8.5],
+      [12.001, 8.5],
+      [12.0015, 8.5],
+    ];
+    const returned = projectPointOntoRoute([12.00005, 8.5], route, {
+      prevSegmentIndex: 2,
+      backwardToleranceSegments: 2,
+    });
+    assert.equal(returned?.segmentIndex, 0);
+  });
 });

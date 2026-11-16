@@ -811,6 +811,8 @@ export function LiveMap({
   });
 
   const cameraPoseRef = useRef<CameraPose | null>(null);
+  const transitionUntilPerfRef = useRef<number>(0);
+  const routeSnapActiveRef = useRef<boolean>(false);
   const offRouteRef = useRef<OffRouteState>({ offRouteSinceMs: null, lastRerouteAtMs: 0 });
   const prevRouteSegRef = useRef<number | null>(null);
   const lastRouteKeyRef = useRef<string>("");
@@ -1046,21 +1048,26 @@ export function LiveMap({
         let lat = ownSample.lat;
         let lng = ownSample.lng;
 
-        // Route snapping runs every frame on the local segment window (no snap/unsnap flicker),
-        // while GeoJSON passed/remaining updates & off-route checks stay throttled to ~5 Hz.
+        // Route projection & snapping (throttled to ~5 Hz for efficiency, with segment continuity)
         const routePts = overlaysRef.current.roadRoutePoints;
         if (routePts && routePts.length >= 2) {
-          const proj = projectPointOntoRoute([lat, lng], routePts, {
-            prevSegmentIndex: prevRouteSegRef.current,
-          });
-          if (proj) {
-            prevRouteSegRef.current = proj.segmentIndex;
-            if (proj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M) {
-              lat = proj.snappedPoint[0];
-              lng = proj.snappedPoint[1];
-            }
-            if (nowPerf - lastRouteSplitMsRef.current >= 200) {
-              lastRouteSplitMsRef.current = nowPerf;
+          if (nowPerf - lastRouteSplitMsRef.current >= 200) {
+            lastRouteSplitMsRef.current = nowPerf;
+            const proj = projectPointOntoRoute([lat, lng], routePts, {
+              prevSegmentIndex: prevRouteSegRef.current,
+            });
+            if (proj) {
+              prevRouteSegRef.current = proj.segmentIndex;
+              // Hysteresis: snap ON <= 25 m, snap OFF > 35 m so boundary noise doesn't ping-pong
+              if (proj.distanceMeters <= 25) {
+                routeSnapActiveRef.current = true;
+              } else if (proj.distanceMeters > 35) {
+                routeSnapActiveRef.current = false;
+              }
+              if (routeSnapActiveRef.current && proj.distanceMeters <= 35) {
+                lat = proj.snappedPoint[0];
+                lng = proj.snappedPoint[1];
+              }
               if (lastSplitSegRef.current !== proj.segmentIndex) {
                 lastSplitSegRef.current = proj.segmentIndex;
                 const { passed, remaining } = splitRouteAtProjection(routePts, proj);
@@ -1118,9 +1125,13 @@ export function LiveMap({
           }
         }
 
-        // Continuous damped-spring camera follow (every rAF frame)
+        // Continuous damped-spring camera follow (every rAF frame, unless a one-off easeTo is running)
         if (cameraModeRef.current === "following-own") {
-          const dest = destinationRef.current;
+          if (nowPerf < transitionUntilPerfRef.current) {
+            const c = map.getCenter();
+            cameraPoseRef.current = { lat: c.lat, lng: c.lng, bearing: map.getBearing() };
+          } else {
+            const dest = destinationRef.current;
           const distToDest = dest ? haversineMeters(lat, lng, dest.lat, dest.lng) : Infinity;
 
           if (dest && distToDest <= 75) {
@@ -1169,6 +1180,7 @@ export function LiveMap({
               bearing: nextPose.bearing,
               pitch: targetPitch,
             });
+          }
           }
         } else if ((map.getPadding().top || 0) > 0) {
           map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
@@ -1472,6 +1484,8 @@ export function LiveMap({
                   NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS
                 );
                 if (map && pos) {
+                  transitionUntilPerfRef.current =
+                    performance.now() + (reducedMotionRef.current ? 0 : 460);
                   map.easeTo({
                     center: [pos.lng, pos.lat],
                     zoom: 17,

@@ -276,13 +276,20 @@ export function projectPointOntoRoute(
     const winEnd = Math.min(maxSeg, prevSeg + ahead);
     const localProj = projectRange(pLat, pLng, route, winStart, winEnd);
 
-    // Stay on the local route window unless we're well off-route (> 45m) and a global
-    // match is actually within snap distance (e.g., after a genuine shortcut/reroute).
-    if (localProj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M * 1.5) {
+    // Stay on the local route window unless we're well off-route (> 45m) or a global
+    // match is significantly closer (e.g., returning to the start or a genuine reroute).
+    if (localProj.distanceMeters <= 25) {
       return localProj;
     }
     const globalProj = projectRange(pLat, pLng, route, 0, maxSeg);
-    return globalProj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M ? globalProj : localProj;
+    if (
+      globalProj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M &&
+      (localProj.distanceMeters > NAV_CONFIG.ROUTE_SNAP_DISTANCE_M * 1.5 ||
+        globalProj.distanceMeters + 10 < localProj.distanceMeters)
+    ) {
+      return globalProj;
+    }
+    return localProj;
   }
 
   return projectRange(pLat, pLng, route, 0, maxSeg);
@@ -376,6 +383,7 @@ export function pushFixToBuffer(
     minDurationMs?: number;
     maxDurationMs?: number;
     allowWarmupAccuracyMs?: number;
+    enableStationaryStabilizer?: boolean;
   }
 ): { accepted: boolean; nextState: FixBufferState } {
   if (!isValidCoord(fix.lat, fix.lng)) {
@@ -416,20 +424,50 @@ export function pushFixToBuffer(
     nextAccurateAt = nowPerfMs;
   }
 
+  // Stationary & Low-Speed Stabilizer: suppress GPS noise micro-drift around
+  // the starting/stationary location so the dot does not wobble back and forth.
+  let stabilizedFix = fix;
+  if (prev && options?.enableStationaryStabilizer !== false) {
+    const movedM = distMeters(prev.lat, prev.lng, fix.lat, fix.lng);
+    const accM = typeof fix.accuracy === "number" && Number.isFinite(fix.accuracy) ? fix.accuracy : 10;
+    const deadbandM = Math.min(10, Math.max(3, accM * 0.35));
+    const lowSpeed = fix.speed == null || !Number.isFinite(fix.speed) || fix.speed < 0.8;
+    if (movedM < deadbandM && lowSpeed && fix.timestampMs - prev.timestampMs < 15_000) {
+      return { accepted: false, nextState: state };
+    }
+    // Gentle spatial smoothing during slow walking (< 2.0 m/s) to damp jitter
+    if (fix.speed != null && Number.isFinite(fix.speed) && fix.speed >= 0.5 && fix.speed < 2.0) {
+      const alpha = 0.65;
+      stabilizedFix = {
+        ...fix,
+        lat: prev.lat + (fix.lat - prev.lat) * alpha,
+        lng: prev.lng + (fix.lng - prev.lng) * alpha,
+      };
+    }
+  }
+
   const minDur = options?.minDurationMs ?? 250;
   const maxDur = options?.maxDurationMs ?? 2_000;
-  const rawDelta = prev ? fix.timestampMs - prev.timestampMs : 400;
+  const rawDelta = prev ? stabilizedFix.timestampMs - prev.timestampMs : 400;
   // Adaptive interpolation window slightly cushions jitter while staying responsive
   const interpDurationMs = Math.max(minDur, Math.min(maxDur, rawDelta));
 
-  const fromLat = options?.currentDisplayed ? options.currentDisplayed.lat : prev ? prev.lat : fix.lat;
-  const fromLng = options?.currentDisplayed ? options.currentDisplayed.lng : prev ? prev.lng : fix.lng;
+  const fromLat = options?.currentDisplayed
+    ? options.currentDisplayed.lat
+    : prev
+    ? prev.lat
+    : stabilizedFix.lat;
+  const fromLng = options?.currentDisplayed
+    ? options.currentDisplayed.lng
+    : prev
+    ? prev.lng
+    : stabilizedFix.lng;
 
   return {
     accepted: true,
     nextState: {
       prevFix: prev,
-      latestFix: fix,
+      latestFix: stabilizedFix,
       lastAccurateFixAtMs: nextAccurateAt,
       fromLat,
       fromLng,
