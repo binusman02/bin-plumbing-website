@@ -763,7 +763,7 @@ export function LiveMap({
     cone: HTMLDivElement;
   } | null>(null);
   const ownAcceptFixRef = useRef<LocalFix | null>(null);
-  const hasAccurateFixRef = useRef(false);
+  const lastAccurateFixMsRef = useRef<number>(0);
   const ownAnimRef = useRef<{
     fromLat: number;
     fromLng: number;
@@ -783,7 +783,7 @@ export function LiveMap({
   useEffect(() => {
     if (!ownPosition) {
       ownAcceptFixRef.current = null;
-      hasAccurateFixRef.current = false;
+      lastAccurateFixMsRef.current = 0;
       ownAnimRef.current = null;
       arrivalFittedRef.current = false;
       if (ownMarkerRef.current) {
@@ -807,15 +807,20 @@ export function LiveMap({
       Number.isFinite(candidate.lng) &&
       !(candidate.lat === 0 && candidate.lng === 0);
 
-    // Once we have locked a <=100 m fix, reject any >100 m fix or impossible jump.
-    // While warming up indoors (no <=100 m fix yet), allow tightening fixes so the
-    // dot and accuracy circle still update like Google Maps (extrapolation stays off).
+    // Reject impossible jumps or older timestamps always.
+    // For accuracy > 100 m: ignore short spikes when we had a <=100 m fix in the last 10s,
+    // but allow updates if >10s has passed without a <=100 m fix so the dot never freezes indoors.
     if (!acceptable) {
-      if (hasAccurateFixRef.current || !hasValidCoords) {
+      const onlyAccuracyFailed = isAcceptableNavFix(
+        { ...candidate, accuracy: 50 },
+        ownAcceptFixRef.current
+      );
+      const staleAccurate = Date.now() - lastAccurateFixMsRef.current > 10_000;
+      if (!hasValidCoords || !onlyAccuracyFailed || !staleAccurate) {
         return;
       }
     } else {
-      hasAccurateFixRef.current = true;
+      lastAccurateFixMsRef.current = Date.now();
     }
 
     const prev = ownAcceptFixRef.current;
@@ -1264,6 +1269,19 @@ export function LiveMap({
         ref={containerRef}
         className={`h-full w-full ${interactivePicker ? "cursor-crosshair" : ""}`}
       />
+
+      {navigationMode && ownPosition && (
+        <div className="pointer-events-none absolute left-2 top-2 z-[400] rounded-lg border border-slate-200/90 bg-white/95 px-2.5 py-1 text-[10px] font-bold text-[#0B1F3A] shadow-sm backdrop-blur-sm sm:left-3 sm:top-3">
+          {ownPosition.accuracyM != null
+            ? ownPosition.accuracyM > 100
+              ? `GPS ±${Math.round(ownPosition.accuracyM)} m (low)`
+              : `GPS ±${Math.round(ownPosition.accuracyM)} m`
+            : "GPS active"}
+          {ownPosition.speed != null && ownPosition.speed >= 0.5
+            ? ` • ${(ownPosition.speed * 3.6).toFixed(0)} km/h`
+            : ""}
+        </div>
+      )}
 
       {tileError && (
         <div className="pointer-events-none absolute left-3 top-3 z-[400] max-w-[240px] rounded-lg border border-amber-200 bg-amber-50/95 px-2.5 py-1.5 text-[11px] font-medium text-amber-800 shadow-sm">
