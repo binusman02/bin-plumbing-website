@@ -8,6 +8,7 @@ import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace"
 import { SITE_NAME, SITE_URL } from "@/lib/seo";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Analytics } from "@vercel/analytics/next";
 
 const plusJakarta = localFont({
   src: "./fonts/plus-jakarta-sans-latin-wght-normal.woff2",
@@ -210,6 +211,7 @@ export default function RootLayout({
         <ServiceWorkerRegister />
         {children}
         <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );
