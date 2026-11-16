@@ -49,9 +49,9 @@ export default function Footer({ settings }: FooterProps) {
 
           {/* Column 2: Services (3 cols) */}
           <div className="lg:col-span-3 space-y-4">
-            <h4 className="text-sm font-bold uppercase tracking-wider text-white">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white">
               Plumbing Services
-            </h4>
+            </h3>
             <ul className="space-y-2.5 text-sm">
               {(settings.service_categories || [])
                 .filter((c) => c.visible !== false && c.active !== false)
@@ -80,9 +80,9 @@ export default function Footer({ settings }: FooterProps) {
 
           {/* Column 3: Platform & Links (2 cols) */}
           <div className="lg:col-span-2 space-y-4">
-            <h4 className="text-sm font-bold uppercase tracking-wider text-white">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white">
               Navigation
-            </h4>
+            </h3>
             <ul className="space-y-2.5 text-sm">
               <li>
                 <Link href="/request" className="text-[#C9D3E0] hover:text-[#F5B301] transition-colors">
@@ -114,9 +114,9 @@ export default function Footer({ settings }: FooterProps) {
 
           {/* Column 4: Contact Details from Settings (3 cols) */}
           <div className="lg:col-span-3 space-y-4">
-            <h4 className="text-sm font-bold uppercase tracking-wider text-white">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white">
               Contact Details
-            </h4>
+            </h3>
             <div className="space-y-3 text-sm">
               {address && (
                 <div className="flex items-start gap-2.5">

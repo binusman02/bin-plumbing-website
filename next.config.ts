@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: false,
     formats: ["image/avif", "image/webp"],
+    deviceSizes: [640, 750, 828, 1080, 1200, 1360, 1920],
   },
   cacheComponents: true,
   partialPrefetching: true,

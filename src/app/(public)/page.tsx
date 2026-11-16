@@ -226,7 +226,7 @@ export default async function HomePage() {
                     src={service.image || "/images/services/pipework-roughin.jpg"}
                     alt={`${service.title || service.name} service`}
                     fill
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 384px"
                     className="object-cover"
                   />
                 </div>
