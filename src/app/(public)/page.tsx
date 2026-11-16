@@ -126,6 +126,9 @@ export default async function HomePage() {
           alt="Professional plumber inspecting and installing residential pipework"
           fill
           priority
+          fetchPriority="high"
+          sizes="(max-width: 768px) 100vw, 1360px"
+          quality={75}
           className="object-cover object-center"
         />
         <div className="absolute inset-0 bg-[#07152B]/75" aria-hidden="true" />
@@ -193,7 +196,7 @@ export default async function HomePage() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
                 Our Services
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -255,7 +258,7 @@ export default async function HomePage() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
                 Process
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -315,7 +318,7 @@ export default async function HomePage() {
             </div>
 
             <div className="lg:col-span-6">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
                 Why Choose Us
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -351,7 +354,7 @@ export default async function HomePage() {
           <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
             <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div className="max-w-2xl">
-                <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+                <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
                   Completed Work
                 </p>
                 <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -379,7 +382,7 @@ export default async function HomePage() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
                 Common Questions
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -409,7 +412,7 @@ export default async function HomePage() {
         <section className="bg-[#F4F6F9] py-14 md:py-20">
           <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
                 Customer Feedback
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">

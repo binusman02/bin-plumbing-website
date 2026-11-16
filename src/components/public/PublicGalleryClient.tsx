@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Camera, MapPin, X, ZoomIn } from "lucide-react";
 import type { GalleryItemRecord } from "@/lib/marketplace";
@@ -92,18 +93,19 @@ export function PublicGalleryClient({ items }: PublicGalleryClientProps) {
               className="relative block aspect-[4/3] w-full overflow-hidden bg-[#F4F6F9] text-left"
               aria-label={`View ${item.title}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src={item.image_url}
                 alt={item.title}
-                className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 380px"
+                className="object-cover transition duration-300 group-hover:scale-105"
               />
               <span className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#07152B]/75 text-white opacity-0 transition group-hover:opacity-100">
                 <ZoomIn className="h-4 w-4" />
               </span>
             </button>
             <div className="p-5">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#F5B301]">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#9A6B00]">
                 {item.service_category}
               </p>
               <h2 className="mt-1 text-lg font-bold text-[#0B1F3A]">{item.title}</h2>
