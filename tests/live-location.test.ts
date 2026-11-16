@@ -551,7 +551,7 @@ describe("live-movement & camera-follow lifecycle", () => {
     let buf = createFixBufferState();
     const r1 = pushFixToBuffer(
       buf,
-      { lat: 12.0, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 1_000 },
+      { lat: 12.0, lng: 8.5, accuracy: 10, speed: 11, heading: 0, timestampMs: 1_000 },
       1_000
     );
     assert.equal(r1.accepted, true);
@@ -559,19 +559,19 @@ describe("live-movement & camera-follow lifecycle", () => {
 
     const r2 = pushFixToBuffer(
       buf,
-      { lat: 12.001, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 2_000 },
+      { lat: 12.0001, lng: 8.5, accuracy: 10, speed: 11, heading: 0, timestampMs: 2_000 },
       2_000
     );
     assert.equal(r2.accepted, true);
     buf = r2.nextState;
 
     const mid = sampleBufferedPosition(buf, 2_500, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS);
-    assert.ok(mid && mid.lat > 12.0004 && mid.lat < 12.0006);
+    assert.ok(mid && mid.lat > 12.00004 && mid.lat < 12.00006);
 
     // Consecutive update preserves continuity from currentDisplayed
     const r3 = pushFixToBuffer(
       buf,
-      { lat: 12.002, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 3_000 },
+      { lat: 12.0002, lng: 8.5, accuracy: 10, speed: 11, heading: 0, timestampMs: 3_000 },
       2_500,
       { currentDisplayed: { lat: mid!.lat, lng: mid!.lng } }
     );
@@ -695,8 +695,8 @@ describe("live-movement & camera-follow lifecycle", () => {
 
     // Moving >50m beyond the route for 10s triggers reroute
     let off = { offRouteSinceMs: null as number | null, lastRerouteAtMs: 0 };
-    off = updateOffRouteState(off, 70, 1_000).nextState;
-    const reroute = updateOffRouteState(off, 70, 11_500);
+    off = updateOffRouteState(off, 70, 100_000).nextState;
+    const reroute = updateOffRouteState(off, 70, 110_500);
     assert.equal(reroute.shouldReroute, true);
   });
 

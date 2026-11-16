@@ -795,7 +795,7 @@ export function LiveMap({
   const ownLatestRef = useRef(ownPosition);
   useEffect(() => {
     ownLatestRef.current = ownPosition;
-  }, [ownPosition]);
+  });
 
   const remoteMarkerRef = useRef<{
     marker: import("maplibre-gl").Marker;
@@ -808,7 +808,7 @@ export function LiveMap({
   const remoteLatestRef = useRef(remotePlumber);
   useEffect(() => {
     remoteLatestRef.current = remotePlumber;
-  }, [remotePlumber]);
+  });
 
   const cameraPoseRef = useRef<CameraPose | null>(null);
   const offRouteRef = useRef<OffRouteState>({ offRouteSinceMs: null, lastRerouteAtMs: 0 });
