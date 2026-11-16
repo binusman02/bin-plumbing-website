@@ -82,6 +82,7 @@ export function usePlumberLocationSharing(params: {
   const lastFixRef = useRef<GeolocationPosition | null>(null);
   const lastFixTimeMsRef = useRef(0);
   const lastWatchEventRef = useRef(0);
+  const gnssWeakUntilRef = useRef(0);
   const throttleTimerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
   const pendingRef = useRef<GeolocationPosition | null>(null);
@@ -477,50 +478,61 @@ export function usePlumberLocationSharing(params: {
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         lastWatchEventRef.current = Date.now();
+        gnssWeakUntilRef.current = 0;
         onFix(pos);
       },
       onGeoError,
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20_000 }
     );
 
-    // Stationary or throttled phones may emit sparse watch events: poll fresh GPS
-    // (maximumAge: 0) whenever watchPosition has been quiet > 4s so movement is caught quickly.
+    // Indoors or on throttled phones, high-accuracy GNSS watchPosition can stall.
+    // Poll every 2.5s when quiet and immediately switch to fused Wi-Fi/network fixes
+    // for 15s whenever GNSS times out, instead of blocking 16s per update.
+    const pollFused = () => {
+      navigator.geolocation.getCurrentPosition(
+        onFix,
+        (fallbackErr) => {
+          if (fallbackErr.code === fallbackErr.PERMISSION_DENIED) {
+            onGeoError(fallbackErr);
+          }
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 4_000,
+          maximumAge: 1_500,
+        }
+      );
+    };
+
     const keepAlive = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       if (permissionDeniedRef.current) return;
-      const silentMs = Date.now() - lastWatchEventRef.current;
-      const thresholdMs = shareToServerRef.current ? 4_000 : 8_000;
-      if (silentMs < thresholdMs) return;
+      const now = Date.now();
+      const silentMs = now - lastWatchEventRef.current;
+      if (silentMs < 2_500) return;
+
+      if (now < gnssWeakUntilRef.current) {
+        pollFused();
+        return;
+      }
+
       navigator.geolocation.getCurrentPosition(
         onFix,
         (err) => {
-          // Do not clobber active watchPosition session on transient keepAlive timeout
           if (err.code === err.PERMISSION_DENIED) {
             onGeoError(err);
             return;
           }
-          // If high-accuracy GNSS times out (e.g. indoors), fall back to fused/network location
-          navigator.geolocation.getCurrentPosition(
-            onFix,
-            (fallbackErr) => {
-              if (fallbackErr.code === fallbackErr.PERMISSION_DENIED) {
-                onGeoError(fallbackErr);
-              }
-            },
-            {
-              enableHighAccuracy: false,
-              timeout: 6_000,
-              maximumAge: 5_000,
-            }
-          );
+          gnssWeakUntilRef.current = Date.now() + 15_000;
+          pollFused();
         },
         {
           enableHighAccuracy: true,
-          timeout: 8_000,
+          timeout: 2_500,
           maximumAge: 0,
         }
       );
-    }, 4_000);
+    }, 2_500);
 
     const flushPending = () => {
       const pos = pendingRef.current;

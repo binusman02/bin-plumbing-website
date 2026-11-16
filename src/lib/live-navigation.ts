@@ -687,3 +687,79 @@ export function fuseGyroCompassHeading(params: {
   const err = shortestAngleDelta(predicted, referenceDeg);
   return normalizeHeading(predicted + err * Math.min(1, Math.max(0.01, correctionAlpha)));
 }
+
+export interface StepOffset {
+  dLat: number;
+  dLng: number;
+}
+
+export interface StepDetectorState {
+  armed: boolean;
+  lastStepAtMs: number;
+}
+
+export function createStepDetectorState(): StepDetectorState {
+  return { armed: true, lastStepAtMs: 0 };
+}
+
+/**
+ * Hysteresis + refractory step detector for linear acceleration magnitude (m/s^2,
+ * gravity removed). Arms below `0.9` m/s^2 and triggers once per footstep peak
+ * in `[1.6, 18.0]` m/s^2 with a `320 ms` minimum cadence.
+ */
+export function processStepAcceleration(
+  state: StepDetectorState,
+  linearAccelMagMps2: number,
+  nowMs: number
+): { stepped: boolean; nextState: StepDetectorState } {
+  if (!Number.isFinite(linearAccelMagMps2)) {
+    return { stepped: false, nextState: state };
+  }
+  if (linearAccelMagMps2 < 0.9) {
+    return {
+      stepped: false,
+      nextState: state.armed ? state : { ...state, armed: true },
+    };
+  }
+  if (
+    state.armed &&
+    linearAccelMagMps2 >= 1.6 &&
+    linearAccelMagMps2 <= 18.0 &&
+    nowMs - state.lastStepAtMs >= 320
+  ) {
+    return {
+      stepped: true,
+      nextState: { armed: false, lastStepAtMs: nowMs },
+    };
+  }
+  return { stepped: false, nextState: state };
+}
+
+/**
+ * Advances a bounded indoor pedestrian dead-reckoning offset by `stepMeters` along
+ * `headingDeg` (0 = North, 90 = East), clamped to `maxDriftM` from the last GPS anchor.
+ */
+export function advanceStepOffset(
+  current: StepOffset,
+  refLat: number,
+  headingDeg: number,
+  stepMeters = 0.65,
+  maxDriftM = 12
+): StepOffset {
+  if (!Number.isFinite(headingDeg) || !Number.isFinite(refLat) || stepMeters <= 0 || maxDriftM <= 0) {
+    return current;
+  }
+  const rad = (headingDeg * Math.PI) / 180;
+  const metersPerDegLat = 111_320;
+  const metersPerDegLng = Math.max(10_000, 111_320 * Math.cos((refLat * Math.PI) / 180));
+
+  const nextNorthM = current.dLat * metersPerDegLat + Math.cos(rad) * stepMeters;
+  const nextEastM = current.dLng * metersPerDegLng + Math.sin(rad) * stepMeters;
+  const totalM = Math.hypot(nextNorthM, nextEastM);
+
+  const scale = totalM > maxDriftM ? maxDriftM / totalM : 1;
+  return {
+    dLat: (nextNorthM * scale) / metersPerDegLat,
+    dLng: (nextEastM * scale) / metersPerDegLng,
+  };
+}

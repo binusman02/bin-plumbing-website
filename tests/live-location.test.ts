@@ -28,6 +28,9 @@ import {
 } from "../src/lib/routing.ts";
 import {
   NAV_CONFIG,
+  advanceStepOffset,
+  createStepDetectorState,
+  processStepAcceleration,
   shortestAngleDelta,
   smoothHeading,
   isAcceptableNavFix,
@@ -925,5 +928,34 @@ describe("security must-fix checks (roles, rate limits, trip lock)", () => {
       3_000
     );
     assert.equal(step2m.accepted, true);
+  });
+
+  it("5. detects discrete walking steps for indoor PDR and clamps max drift", () => {
+    let det = createStepDetectorState();
+    // Stationary noise < 0.9 does not trigger
+    const r0 = processStepAcceleration(det, 0.3, 1_000);
+    assert.equal(r0.stepped, false);
+    det = r0.nextState;
+
+    // First footstep peak triggers once; immediate high sample stays disarmed until < 0.9
+    const r1 = processStepAcceleration(det, 2.4, 1_100);
+    assert.equal(r1.stepped, true);
+    det = r1.nextState;
+    const r2 = processStepAcceleration(det, 2.5, 1_150);
+    assert.equal(r2.stepped, false);
+    det = r2.nextState;
+
+    // Re-arms below 0.9, triggers again after 320 ms cooldown
+    det = processStepAcceleration(det, 0.4, 1_300).nextState;
+    const r3 = processStepAcceleration(det, 2.2, 1_500);
+    assert.equal(r3.stepped, true);
+
+    // Offset advances north and clamps at maxDriftM (12m)
+    let off = { dLat: 0, dLng: 0 };
+    for (let i = 0; i < 30; i += 1) {
+      off = advanceStepOffset(off, 12.0, 0, 0.65, 12);
+    }
+    const northM = off.dLat * 111_320;
+    assert.ok(northM > 11.9 && northM <= 12.01);
   });
 });

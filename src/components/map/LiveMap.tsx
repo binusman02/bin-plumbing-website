@@ -5,9 +5,12 @@ import type { StyleSpecification } from "maplibre-gl";
 import { MAP_CONFIG, SERVICE_AREA_CENTER } from "@/lib/map-config";
 import { haversineMeters, type LocationStatus } from "@/lib/live-location";
 import {
+  advanceStepOffset,
   computeFrameAlpha,
   createFixBufferState,
+  createStepDetectorState,
   NAV_CONFIG,
+  processStepAcceleration,
   projectPointOntoRoute,
   pushFixToBuffer,
   sampleBufferedPosition,
@@ -18,6 +21,8 @@ import {
   type CameraPose,
   type FixBufferState,
   type OffRouteState,
+  type StepDetectorState,
+  type StepOffset,
 } from "@/lib/live-navigation";
 import { useDeviceHeading } from "@/hooks/useDeviceHeading";
 
@@ -811,6 +816,9 @@ export function LiveMap({
     cone: HTMLDivElement;
   } | null>(null);
   const ownBufferRef = useRef<FixBufferState>(createFixBufferState());
+  const stepTargetOffsetRef = useRef<StepOffset>({ dLat: 0, dLng: 0 });
+  const stepRenderedOffsetRef = useRef<StepOffset>({ dLat: 0, dLng: 0 });
+  const stepDetectorRef = useRef<StepDetectorState>(createStepDetectorState());
   const ownLatestRef = useRef(ownPosition);
   useEffect(() => {
     ownLatestRef.current = ownPosition;
@@ -867,6 +875,8 @@ export function LiveMap({
   useEffect(() => {
     if (ownLat == null || ownLng == null) {
       ownBufferRef.current = createFixBufferState();
+      stepTargetOffsetRef.current = { dLat: 0, dLng: 0 };
+      stepRenderedOffsetRef.current = { dLat: 0, dLng: 0 };
       arrivalFittedRef.current = false;
       if (ownMarkerRef.current) {
         ownMarkerRef.current.marker.remove();
@@ -883,6 +893,7 @@ export function LiveMap({
       NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS,
       headingStateRef.current.heading
     );
+    const renderedOff = stepRenderedOffsetRef.current;
 
     const { accepted, rejectionReason, nextState } = pushFixToBuffer(
       ownBufferRef.current,
@@ -896,13 +907,19 @@ export function LiveMap({
       },
       nowPerf,
       {
-        currentDisplayed: currentGpsPos ? { lat: currentGpsPos.lat, lng: currentGpsPos.lng } : null,
+        currentDisplayed: currentGpsPos
+          ? { lat: currentGpsPos.lat + renderedOff.dLat, lng: currentGpsPos.lng + renderedOff.dLng }
+          : null,
         minDurationMs: reducedMotionRef.current ? 1 : 200,
         maxDurationMs: reducedMotionRef.current ? 1 : 1_100,
-        allowWarmupAccuracyMs: 10_000,
+        allowWarmupAccuracyMs: 4_000,
       }
     );
     ownBufferRef.current = nextState;
+    if (accepted) {
+      stepTargetOffsetRef.current = { dLat: 0, dLng: 0 };
+      stepRenderedOffsetRef.current = { dLat: 0, dLng: 0 };
+    }
     if (isDev) {
       diagLastIngestRef.current = {
         accepted,
@@ -1018,6 +1035,44 @@ export function LiveMap({
   const hasOwn = ownLat != null && ownLng != null;
   const hasRemote = remLat != null && remLng != null;
 
+  // Indoor step-detection PDR: bridges gaps when walking indoors between GPS/Wi-Fi fixes
+  useEffect(() => {
+    if (!hasOwn || typeof window === "undefined") return;
+    const onMotion = (e: DeviceMotionEvent) => {
+      const hd = headingStateRef.current.heading;
+      const latest = ownBufferRef.current.latestFix;
+      if (hd == null || !latest) return;
+
+      let mag = 0;
+      const acc = e.acceleration;
+      if (acc && acc.x != null && acc.y != null && acc.z != null) {
+        mag = Math.hypot(acc.x, acc.y, acc.z);
+      } else {
+        const accG = e.accelerationIncludingGravity;
+        if (!accG || accG.x == null || accG.y == null || accG.z == null) return;
+        mag = Math.abs(Math.hypot(accG.x, accG.y, accG.z) - 9.81);
+      }
+
+      const { stepped, nextState } = processStepAcceleration(
+        stepDetectorRef.current,
+        mag,
+        performance.now()
+      );
+      stepDetectorRef.current = nextState;
+      if (stepped) {
+        stepTargetOffsetRef.current = advanceStepOffset(
+          stepTargetOffsetRef.current,
+          latest.lat,
+          hd,
+          0.65,
+          12
+        );
+      }
+    };
+    window.addEventListener("devicemotion", onMotion, { passive: true });
+    return () => window.removeEventListener("devicemotion", onMotion);
+  }, [hasOwn]);
+
   useEffect(() => {
     const map = mapRef.current;
     const ml = maplibreRef.current;
@@ -1083,8 +1138,17 @@ export function LiveMap({
         : null;
 
       if (dotObj && ownSample) {
-        let lat = ownSample.lat;
-        let lng = ownSample.lng;
+        const stepAlpha = reducedMotionRef.current ? 1 : computeFrameAlpha(frameDelta, 180);
+        const targetOff = stepTargetOffsetRef.current;
+        const curOff = stepRenderedOffsetRef.current;
+        const nextOff = {
+          dLat: curOff.dLat + (targetOff.dLat - curOff.dLat) * stepAlpha,
+          dLng: curOff.dLng + (targetOff.dLng - curOff.dLng) * stepAlpha,
+        };
+        stepRenderedOffsetRef.current = nextOff;
+
+        let lat = ownSample.lat + nextOff.dLat;
+        let lng = ownSample.lng + nextOff.dLng;
         let activeProjSeg: number | null = prevRouteSegRef.current;
         let activeProjDistM: number | null = null;
         let snappedPos: { lat: number; lng: number } | null = null;
