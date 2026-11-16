@@ -5,6 +5,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import { MAP_CONFIG, SERVICE_AREA_CENTER } from "@/lib/map-config";
 import { haversineMeters, type LocationStatus } from "@/lib/live-location";
 import {
+  computeFrameAlpha,
   createFixBufferState,
   NAV_CONFIG,
   projectPointOntoRoute,
@@ -746,18 +747,11 @@ export function LiveMap({
         followPausedRef.current = true;
         cameraModeRef.current = "free";
         setCameraMode("free");
+        // Stay free until the user explicitly taps Recenter (no automatic resume / re-zoom).
         if (resumeTimerRef.current != null) {
           window.clearTimeout(resumeTimerRef.current);
-        }
-        resumeTimerRef.current = window.setTimeout(() => {
-          setFollowPaused(false);
-          followPausedRef.current = false;
           resumeTimerRef.current = null;
-          if (navModeRef.current) {
-            cameraModeRef.current = "following-own";
-            setCameraMode("following-own");
-          }
-        }, 10_000);
+        }
       };
       map.on("dragstart", pauseFollowForUser);
       map.on("zoomstart", pauseFollowForUser);
@@ -903,8 +897,8 @@ export function LiveMap({
       nowPerf,
       {
         currentDisplayed: currentGpsPos ? { lat: currentGpsPos.lat, lng: currentGpsPos.lng } : null,
-        minDurationMs: reducedMotionRef.current ? 1 : 250,
-        maxDurationMs: reducedMotionRef.current ? 1 : 2_000,
+        minDurationMs: reducedMotionRef.current ? 1 : 200,
+        maxDurationMs: reducedMotionRef.current ? 1 : 1_100,
         allowWarmupAccuracyMs: 10_000,
       }
     );
@@ -1285,13 +1279,20 @@ export function LiveMap({
               : stepCameraFollow(
                   cameraPoseRef.current,
                   { lat, lng, bearing: targetBearing },
-                  frameDelta
+                  frameDelta,
+                  { posTauMs: 70, bearingTauMs: 110 }
                 );
             cameraPoseRef.current = nextPose;
 
+            // Ease zoom toward target instead of snapping (no abrupt zoom jumps)
+            const curZoom = map.getZoom();
+            const nextZoom = reducedMotionRef.current
+              ? targetZoom
+              : curZoom + (targetZoom - curZoom) * computeFrameAlpha(frameDelta, 600);
+
             map.jumpTo({
               center: [nextPose.lng, nextPose.lat],
-              zoom: targetZoom,
+              zoom: nextZoom,
               bearing: nextPose.bearing,
               pitch: targetPitch,
             });
