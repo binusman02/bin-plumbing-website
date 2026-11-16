@@ -408,7 +408,12 @@ export function LiveMap({
   const [cameraMode, setCameraMode] = useState<CameraMode>(
     navigationMode ? "following-own" : "overview"
   );
-  const isDev = process.env.NODE_ENV === "development";
+  const [isDev, setIsDev] = useState(process.env.NODE_ENV === "development");
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.search.includes("gpsdiag=1")) {
+      setIsDev(true);
+    }
+  }, []);
   const [diagOpen, setDiagOpen] = useState(false);
   const [diagSnapshot, setDiagSnapshot] = useState<Record<string, unknown> | null>(null);
   const diagOpenRef = useRef(false);

@@ -80,6 +80,7 @@ export function usePlumberLocationSharing(params: {
   const shareToServerRef = useRef(shareToServer);
   const lastSentRef = useRef<{ lat: number; lng: number; sentAtMs: number } | null>(null);
   const lastFixRef = useRef<GeolocationPosition | null>(null);
+  const lastFixTimeMsRef = useRef(0);
   const lastWatchEventRef = useRef(0);
   const throttleTimerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
@@ -245,9 +246,20 @@ export function usePlumberLocationSharing(params: {
 
   const onFix = useCallback(
     (pos: GeolocationPosition) => {
+      const prevFix = lastFixRef.current;
       lastFixRef.current = pos;
       const { latitude, longitude, accuracy, heading, speed } = pos.coords;
-      const fixTimeMs = typeof pos.timestamp === "number" && pos.timestamp > 0 ? pos.timestamp : Date.now();
+      const rawTimeMs =
+        typeof pos.timestamp === "number" && pos.timestamp > 0 ? pos.timestamp : Date.now();
+      const coordsChanged =
+        !prevFix ||
+        Math.abs(latitude - prevFix.coords.latitude) > 1e-7 ||
+        Math.abs(longitude - prevFix.coords.longitude) > 1e-7;
+      const fixTimeMs =
+        coordsChanged && rawTimeMs <= lastFixTimeMsRef.current
+          ? Math.max(Date.now(), lastFixTimeMsRef.current + 1)
+          : rawTimeMs;
+      lastFixTimeMsRef.current = Math.max(lastFixTimeMsRef.current, fixTimeMs);
       permissionDeniedRef.current = false;
       patch({
         deviceCoords: { lat: latitude, lng: longitude },
@@ -485,7 +497,22 @@ export function usePlumberLocationSharing(params: {
           // Do not clobber active watchPosition session on transient keepAlive timeout
           if (err.code === err.PERMISSION_DENIED) {
             onGeoError(err);
+            return;
           }
+          // If high-accuracy GNSS times out (e.g. indoors), fall back to fused/network location
+          navigator.geolocation.getCurrentPosition(
+            onFix,
+            (fallbackErr) => {
+              if (fallbackErr.code === fallbackErr.PERMISSION_DENIED) {
+                onGeoError(fallbackErr);
+              }
+            },
+            {
+              enableHighAccuracy: false,
+              timeout: 6_000,
+              maximumAge: 5_000,
+            }
+          );
         },
         {
           enableHighAccuracy: true,
