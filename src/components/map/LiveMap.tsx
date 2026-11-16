@@ -408,6 +408,26 @@ export function LiveMap({
   const [cameraMode, setCameraMode] = useState<CameraMode>(
     navigationMode ? "following-own" : "overview"
   );
+  const isDev = process.env.NODE_ENV === "development";
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagSnapshot, setDiagSnapshot] = useState<Record<string, unknown> | null>(null);
+  const diagOpenRef = useRef(false);
+  useEffect(() => {
+    diagOpenRef.current = diagOpen;
+  }, [diagOpen]);
+  const diagLogRef = useRef<Record<string, unknown>[]>([]);
+  const diagLastIngestRef = useRef<{
+    accepted: boolean;
+    rejectionReason: string | null;
+    rawLat: number;
+    rawLng: number;
+    accuracy: number | null;
+    speed: number | null;
+    heading: number | null;
+    timestampMs: number;
+    receivedAtMs: number;
+  } | null>(null);
+  const lastDiagEmitMsRef = useRef(0);
 
   const followPausedRef = useRef(false);
   const headingUpRef = useRef(true);
@@ -856,11 +876,16 @@ export function LiveMap({
       return;
     }
 
-    const currentDrawn = ownMarkerRef.current
-      ? ownMarkerRef.current.marker.getLngLat()
-      : null;
+    // Sample in pure GPS coordinate space (never route-snapped space) to keep interpolation clean
+    const nowPerf = performance.now();
+    const currentGpsPos = sampleBufferedPosition(
+      ownBufferRef.current,
+      nowPerf,
+      NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS,
+      headingStateRef.current.heading
+    );
 
-    const { accepted, nextState } = pushFixToBuffer(
+    const { accepted, rejectionReason, nextState } = pushFixToBuffer(
       ownBufferRef.current,
       {
         lat: ownLat,
@@ -870,18 +895,29 @@ export function LiveMap({
         heading: ownHeading,
         timestampMs: ownTs || Date.now(),
       },
-      performance.now(),
+      nowPerf,
       {
-        currentDisplayed: currentDrawn ? { lat: currentDrawn.lat, lng: currentDrawn.lng } : null,
+        currentDisplayed: currentGpsPos ? { lat: currentGpsPos.lat, lng: currentGpsPos.lng } : null,
         minDurationMs: reducedMotionRef.current ? 1 : 250,
         maxDurationMs: reducedMotionRef.current ? 1 : 2_000,
         allowWarmupAccuracyMs: 10_000,
       }
     );
-    if (accepted) {
-      ownBufferRef.current = nextState;
+    ownBufferRef.current = nextState;
+    if (isDev) {
+      diagLastIngestRef.current = {
+        accepted,
+        rejectionReason,
+        rawLat: ownLat,
+        rawLng: ownLng,
+        accuracy: ownAcc,
+        speed: ownSpeed,
+        heading: ownHeading,
+        timestampMs: ownTs || Date.now(),
+        receivedAtMs: Date.now(),
+      };
     }
-  }, [ownLat, ownLng, ownTs, ownAcc, ownSpeed, ownHeading]);
+  }, [ownLat, ownLng, ownTs, ownAcc, ownSpeed, ownHeading, isDev]);
 
   // 2) Remote-plumber GPS ingestion (keyed ONLY on primitive values; immune to parent re-renders)
   const remLat = remotePlumber?.lat ?? null;
@@ -902,9 +938,12 @@ export function LiveMap({
       return;
     }
 
-    const currentDrawn = remoteMarkerRef.current
-      ? remoteMarkerRef.current.marker.getLngLat()
-      : null;
+    const nowPerf = performance.now();
+    const currentGpsPos = sampleBufferedPosition(
+      remoteBufferRef.current,
+      nowPerf,
+      NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS
+    );
 
     const { accepted, nextState } = pushFixToBuffer(
       remoteBufferRef.current,
@@ -916,9 +955,9 @@ export function LiveMap({
         heading: remHeading,
         timestampMs: remCoordMs || Date.now(),
       },
-      performance.now(),
+      nowPerf,
       {
-        currentDisplayed: currentDrawn ? { lat: currentDrawn.lat, lng: currentDrawn.lng } : null,
+        currentDisplayed: currentGpsPos ? { lat: currentGpsPos.lat, lng: currentGpsPos.lng } : null,
         minDurationMs: reducedMotionRef.current ? 1 : 400,
         maxDurationMs: reducedMotionRef.current ? 1 : 5_000,
         allowWarmupAccuracyMs: 15_000,
@@ -1047,27 +1086,35 @@ export function LiveMap({
       if (dotObj && ownSample) {
         let lat = ownSample.lat;
         let lng = ownSample.lng;
+        let activeProjSeg: number | null = prevRouteSegRef.current;
+        let activeProjDistM: number | null = null;
+        let snappedPos: { lat: number; lng: number } | null = null;
 
-        // Route projection & snapping (throttled to ~5 Hz for efficiency, with segment continuity)
+        // Route projection & snapping: snap EVERY frame for smooth 60fps road glide,
+        // while throttling GeoJSON route-split & off-route checks to ~5 Hz.
         const routePts = overlaysRef.current.roadRoutePoints;
         if (routePts && routePts.length >= 2) {
-          if (nowPerf - lastRouteSplitMsRef.current >= 200) {
-            lastRouteSplitMsRef.current = nowPerf;
-            const proj = projectPointOntoRoute([lat, lng], routePts, {
-              prevSegmentIndex: prevRouteSegRef.current,
-            });
-            if (proj) {
-              prevRouteSegRef.current = proj.segmentIndex;
-              // Hysteresis: snap ON <= 25 m, snap OFF > 35 m so boundary noise doesn't ping-pong
-              if (proj.distanceMeters <= 25) {
-                routeSnapActiveRef.current = true;
-              } else if (proj.distanceMeters > 35) {
-                routeSnapActiveRef.current = false;
-              }
-              if (routeSnapActiveRef.current && proj.distanceMeters <= 35) {
-                lat = proj.snappedPoint[0];
-                lng = proj.snappedPoint[1];
-              }
+          const proj = projectPointOntoRoute([lat, lng], routePts, {
+            prevSegmentIndex: prevRouteSegRef.current,
+          });
+          if (proj) {
+            prevRouteSegRef.current = proj.segmentIndex;
+            activeProjSeg = proj.segmentIndex;
+            activeProjDistM = proj.distanceMeters;
+            // Hysteresis: snap ON <= 25 m, snap OFF > 35 m so boundary noise doesn't ping-pong
+            if (proj.distanceMeters <= 25) {
+              routeSnapActiveRef.current = true;
+            } else if (proj.distanceMeters > 35) {
+              routeSnapActiveRef.current = false;
+            }
+            if (routeSnapActiveRef.current && proj.distanceMeters <= 35) {
+              lat = proj.snappedPoint[0];
+              lng = proj.snappedPoint[1];
+              snappedPos = { lat, lng };
+            }
+
+            if (nowPerf - lastRouteSplitMsRef.current >= 200) {
+              lastRouteSplitMsRef.current = nowPerf;
               if (lastSplitSegRef.current !== proj.segmentIndex) {
                 lastSplitSegRef.current = proj.segmentIndex;
                 const { passed, remaining } = splitRouteAtProjection(routePts, proj);
@@ -1096,6 +1143,69 @@ export function LiveMap({
         }
 
         dotObj.marker.setLngLat([lng, lat]);
+
+        if (isDev && nowPerf - lastDiagEmitMsRef.current >= 200) {
+          lastDiagEmitMsRef.current = nowPerf;
+          const buf = ownBufferRef.current;
+          const ing = diagLastIngestRef.current;
+          const stab = buf.latestFix;
+          const raw = buf.rawLatestFix;
+          const camCenter = map.getCenter();
+          const entry = {
+            atIso: new Date().toISOString(),
+            gps: ing
+              ? {
+                  rawLat: ing.rawLat,
+                  rawLng: ing.rawLng,
+                  accuracyM: ing.accuracy,
+                  speedMps: ing.speed,
+                  headingDeg: ing.heading,
+                  timestampMs: ing.timestampMs,
+                  ageSinceLastMs: Date.now() - ing.receivedAtMs,
+                }
+              : null,
+            processing: {
+              lastAccepted: raw ? { lat: raw.lat, lng: raw.lng } : null,
+              stabilized: stab ? { lat: stab.lat, lng: stab.lng } : null,
+              interpolated: { lat: ownSample.lat, lng: ownSample.lng },
+              snapped: snappedPos,
+              distRawToStabM:
+                raw && stab ? Math.round(haversineMeters(raw.lat, raw.lng, stab.lat, stab.lng) * 10) / 10 : null,
+              distStabToRenderedM: stab
+                ? Math.round(haversineMeters(stab.lat, stab.lng, lat, lng) * 10) / 10
+                : null,
+              routeSeg: activeProjSeg,
+              routeDistM: activeProjDistM != null ? Math.round(activeProjDistM * 10) / 10 : null,
+              snapActive: routeSnapActiveRef.current,
+            },
+            controller: {
+              movementState: buf.movementState,
+              interpProgress: Math.round(ownSample.progress * 100) / 100,
+              extrapolating: ownSample.extrapolating,
+              stale: ownSample.stale,
+              accepted: ing?.accepted ?? null,
+              rejectionReason: ing?.rejectionReason ?? null,
+            },
+            camera: {
+              mode: cameraModeRef.current,
+              currentCenter: { lat: camCenter.lat, lng: camCenter.lng },
+              targetCenter: { lat, lng },
+              currentBearing: Math.round(map.getBearing()),
+              targetBearing:
+                headingUpRef.current && headingStateRef.current.heading != null
+                  ? Math.round(headingStateRef.current.heading)
+                  : 0,
+              paused: followPausedRef.current || nowPerf < transitionUntilPerfRef.current,
+            },
+          };
+          diagLogRef.current.push(entry);
+          if (diagLogRef.current.length > 500) {
+            diagLogRef.current.shift();
+          }
+          if (diagOpenRef.current) {
+            setDiagSnapshot(entry);
+          }
+        }
 
         // Direction cone
         const hd = headingStateRef.current;
@@ -1582,7 +1692,44 @@ export function LiveMap({
             Fit Pins
           </button>
         )}
+        {isDev && ownPosition && (
+          <button
+            type="button"
+            onClick={() => setDiagOpen((v) => !v)}
+            className="rounded-lg border border-purple-300 bg-purple-50/95 px-2 py-1.5 text-[10px] font-bold text-purple-900 shadow-sm hover:bg-purple-100 sm:px-2.5 sm:text-[11px]"
+          >
+            {diagOpen ? "Hide Diag" : "Diag"}
+          </button>
+        )}
       </div>
+
+      {isDev && diagOpen && (
+        <div className="pointer-events-auto absolute left-2 top-10 z-[410] max-h-60 w-72 overflow-auto rounded-lg border border-slate-700 bg-slate-900/95 p-2.5 font-mono text-[10px] leading-snug text-slate-100 shadow-lg">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="font-bold text-amber-300">DEV MOVEMENT DIAG</span>
+            <button
+              type="button"
+              onClick={() => {
+                const blob = new Blob([JSON.stringify(diagLogRef.current, null, 2)], {
+                  type: "application/json",
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `bin-map-diagnostics-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="rounded bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-slate-900 hover:bg-amber-300"
+            >
+              Export JSON ({diagLogRef.current.length})
+            </button>
+          </div>
+          <pre className="whitespace-pre-wrap break-all text-[9px] text-slate-200">
+            {diagSnapshot ? JSON.stringify(diagSnapshot, null, 2) : "Waiting for GPS sample..."}
+          </pre>
+        </div>
+      )}
 
       {/* Bottom-left subtle legend */}
       <div className="pointer-events-none absolute bottom-2 left-2 z-[400] flex max-w-[calc(100%-3.5rem)] flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-[#0B1F3A] shadow-sm backdrop-blur-sm sm:bottom-3 sm:left-3 sm:gap-3 sm:px-2.5">

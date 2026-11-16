@@ -746,4 +746,91 @@ describe("live-movement & camera-follow lifecycle", () => {
     });
     assert.equal(returned?.segmentIndex, 0);
   });
+
+  it("18. Sequential A -> B -> C -> A isolation tests (stationary 60s -> move -> return -> stationary 60s -> move)", () => {
+    const route: [number, number][] = [
+      [12.0, 8.5],
+      [12.0004, 8.5],
+      [12.0008, 8.5],
+      [12.0012, 8.5],
+    ];
+    let buf = createFixBufferState();
+    let cam = null as ReturnType<typeof stepCameraFollow> | null;
+    let prevSeg: number | null = null;
+
+    // 1. Stationary at A for 60s with +/- 2m GPS noise (accuracy 7m)
+    buf = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 7, speed: 0.1, heading: 0, timestampMs: 1_000 },
+      1_000
+    ).nextState;
+    for (let t = 2_000; t <= 60_000; t += 2_000) {
+      const jitterLat = 12.0 + ((t % 4_000 === 0 ? 1 : -1) * 0.000015);
+      const res = pushFixToBuffer(
+        buf,
+        { lat: jitterLat, lng: 8.5, accuracy: 7, speed: 0.2, heading: 0, timestampMs: t },
+        t
+      );
+      if (t - 1_000 < 15_000) {
+        assert.equal(res.accepted, false);
+        assert.equal(res.rejectionReason, "stationary_noise");
+      }
+      buf = res.nextState;
+    }
+
+    // 2. Move A -> B -> C
+    const forward = [
+      { lat: 12.0002, lng: 8.5, speed: 1.4, ts: 62_000 },
+      { lat: 12.0005, lng: 8.5, speed: 3.5, ts: 72_000 },
+      { lat: 12.0009, lng: 8.5, speed: 4.0, ts: 82_000 },
+    ];
+    for (const step of forward) {
+      const cur = sampleBufferedPosition(buf, step.ts, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS);
+      const res = pushFixToBuffer(
+        buf,
+        { lat: step.lat, lng: step.lng, accuracy: 8, speed: step.speed, heading: 0, timestampMs: step.ts },
+        step.ts,
+        { currentDisplayed: cur ? { lat: cur.lat, lng: cur.lng } : null }
+      );
+      assert.equal(res.accepted, true);
+      buf = res.nextState;
+      const pos = sampleBufferedPosition(buf, step.ts + 500, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS)!;
+      const proj = projectPointOntoRoute([pos.lat, pos.lng], route, { prevSegmentIndex: prevSeg });
+      assert.ok(proj != null);
+      prevSeg = proj.segmentIndex;
+      cam = stepCameraFollow(cam, { lat: pos.lat, lng: pos.lng, bearing: 0 }, 16.67);
+    }
+    assert.ok(prevSeg != null && prevSeg >= 1);
+
+    // 3. Return C -> A
+    const back = [
+      { lat: 12.0005, lng: 8.5, speed: 3.5, ts: 92_000 },
+      { lat: 12.0001, lng: 8.5, speed: 1.5, ts: 102_000 },
+      { lat: 12.0, lng: 8.5, speed: 0.2, ts: 112_000 },
+    ];
+    for (const step of back) {
+      const cur = sampleBufferedPosition(buf, step.ts, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS);
+      const res = pushFixToBuffer(
+        buf,
+        { lat: step.lat, lng: step.lng, accuracy: 7, speed: step.speed, heading: 180, timestampMs: step.ts },
+        step.ts,
+        { currentDisplayed: cur ? { lat: cur.lat, lng: cur.lng } : null }
+      );
+      assert.equal(res.accepted, true);
+      buf = res.nextState;
+      const proj = projectPointOntoRoute([step.lat, step.lng], route, { prevSegmentIndex: prevSeg });
+      assert.ok(proj != null);
+      prevSeg = proj.segmentIndex;
+    }
+    assert.equal(prevSeg, 0);
+
+    // 4. Stationary at A again: noise suppressed, no jump/reversal
+    const backNoise = pushFixToBuffer(
+      buf,
+      { lat: 12.000015, lng: 8.5, accuracy: 7, speed: 0.1, heading: 180, timestampMs: 114_000 },
+      114_000
+    );
+    assert.equal(backNoise.accepted, false);
+    assert.equal(backNoise.rejectionReason, "stationary_noise");
+  });
 });

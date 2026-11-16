@@ -347,9 +347,21 @@ export function updateOffRouteState(
 // Continuous GPS Fix Buffer & Damped-Spring Camera Controller
 // ---------------------------------------------------------------------------
 
+export type MovementState = "STATIONARY" | "LOW_SPEED" | "MOVING";
+
+export type FixRejectionReason =
+  | "invalid_coord"
+  | "duplicate_or_older_timestamp"
+  | "duplicate_stationary_coord"
+  | "implausible_jump"
+  | "poor_accuracy"
+  | "stationary_noise";
+
 export interface FixBufferState {
   prevFix: LocalFix | null;
   latestFix: LocalFix | null;
+  rawLatestFix: LocalFix | null;
+  movementState: MovementState;
   lastAccurateFixAtMs: number;
   fromLat: number;
   fromLng: number;
@@ -361,6 +373,8 @@ export function createFixBufferState(): FixBufferState {
   return {
     prevFix: null,
     latestFix: null,
+    rawLatestFix: null,
+    movementState: "STATIONARY",
     lastAccurateFixAtMs: 0,
     fromLat: 0,
     fromLng: 0,
@@ -371,8 +385,8 @@ export function createFixBufferState(): FixBufferState {
 
 /**
  * Ingests a new GPS fix into a time-ordered buffer, preserving movement continuity
- * from `currentDisplayedPos` while rejecting duplicates, out-of-order timestamps,
- * impossible jumps, and poor-accuracy spikes.
+ * from `currentDisplayed` (in GPS coordinate space, never route-snapped space) while
+ * rejecting duplicates, out-of-order timestamps, impossible jumps, and poor-accuracy spikes.
  */
 export function pushFixToBuffer(
   state: FixBufferState,
@@ -385,71 +399,107 @@ export function pushFixToBuffer(
     allowWarmupAccuracyMs?: number;
     enableStationaryStabilizer?: boolean;
   }
-): { accepted: boolean; nextState: FixBufferState } {
+): { accepted: boolean; rejectionReason: FixRejectionReason | null; nextState: FixBufferState } {
   if (!isValidCoord(fix.lat, fix.lng)) {
-    return { accepted: false, nextState: state };
+    return { accepted: false, rejectionReason: "invalid_coord", nextState: state };
   }
 
+  const prevRaw = state.rawLatestFix ?? state.latestFix;
   const prev = state.latestFix;
-  if (prev) {
+  if (prevRaw) {
     // Reject duplicate or out-of-order timestamps
-    if (fix.timestampMs <= prev.timestampMs) {
-      return { accepted: false, nextState: state };
+    if (fix.timestampMs <= prevRaw.timestampMs) {
+      return {
+        accepted: false,
+        rejectionReason: "duplicate_or_older_timestamp",
+        nextState: state,
+      };
     }
-    // Reject exact duplicate coordinates if speed is 0 / unchanged
+    // Reject exact duplicate coordinates within 250 ms
     if (
-      Math.abs(fix.lat - prev.lat) < 1e-7 &&
-      Math.abs(fix.lng - prev.lng) < 1e-7 &&
-      fix.timestampMs - prev.timestampMs < 250
+      Math.abs(fix.lat - prevRaw.lat) < 1e-7 &&
+      Math.abs(fix.lng - prevRaw.lng) < 1e-7 &&
+      fix.timestampMs - prevRaw.timestampMs < 250
     ) {
-      return { accepted: false, nextState: state };
+      return {
+        accepted: false,
+        rejectionReason: "duplicate_stationary_coord",
+        nextState: state,
+      };
     }
   }
 
-  const acceptable = isAcceptableNavFix(fix, prev);
+  const acceptable = isAcceptableNavFix(fix, prevRaw);
   let nextAccurateAt = state.lastAccurateFixAtMs;
 
   if (!acceptable) {
     // Reject impossible jumps always; only allow accuracy > 100 m if no accurate fix
     // was received within `allowWarmupAccuracyMs` (so indoor warm-up doesn't freeze).
-    const onlyAccuracyFailed = isAcceptableNavFix({ ...fix, accuracy: 50 }, prev);
+    const onlyAccuracyFailed = isAcceptableNavFix({ ...fix, accuracy: 50 }, prevRaw);
+    if (!onlyAccuracyFailed) {
+      return { accepted: false, rejectionReason: "implausible_jump", nextState: state };
+    }
     const warmupWindow = options?.allowWarmupAccuracyMs ?? 0;
     const allowWarmup =
       warmupWindow > 0 &&
       (state.lastAccurateFixAtMs === 0 || nowPerfMs - state.lastAccurateFixAtMs > warmupWindow);
-    if (!onlyAccuracyFailed || !allowWarmup) {
-      return { accepted: false, nextState: state };
+    if (!allowWarmup) {
+      return { accepted: false, rejectionReason: "poor_accuracy", nextState: state };
     }
   } else {
     nextAccurateAt = nowPerfMs;
   }
 
-  // Stationary & Low-Speed Stabilizer: suppress GPS noise micro-drift around
-  // the starting/stationary location so the dot does not wobble back and forth.
+  // Stationary & Low-Speed Stabilizer: compare raw displacement against accuracy noise floor,
+  // and track explicit MOVEMENT state without compounding smoothing across raw fixes.
   let stabilizedFix = fix;
-  if (prev && options?.enableStationaryStabilizer !== false) {
-    const movedM = distMeters(prev.lat, prev.lng, fix.lat, fix.lng);
-    const accM = typeof fix.accuracy === "number" && Number.isFinite(fix.accuracy) ? fix.accuracy : 10;
+  let nextMovementState: MovementState = "MOVING";
+  if (prevRaw && prev) {
+    const movedFromPrevRawM = distMeters(prevRaw.lat, prevRaw.lng, fix.lat, fix.lng);
+    const movedFromAnchorM = distMeters(prev.lat, prev.lng, fix.lat, fix.lng);
+    const dtSec = Math.max(0.25, (fix.timestampMs - prevRaw.timestampMs) / 1000);
+    const effectiveSpeed =
+      fix.speed != null && Number.isFinite(fix.speed) ? fix.speed : movedFromPrevRawM / dtSec;
+    const accM =
+      typeof fix.accuracy === "number" && Number.isFinite(fix.accuracy) ? fix.accuracy : 10;
     const deadbandM = Math.min(10, Math.max(3, accM * 0.35));
-    const lowSpeed = fix.speed == null || !Number.isFinite(fix.speed) || fix.speed < 0.8;
-    if (movedM < deadbandM && lowSpeed && fix.timestampMs - prev.timestampMs < 15_000) {
-      return { accepted: false, nextState: state };
+
+    if (options?.enableStationaryStabilizer !== false) {
+      const lowReportedSpeed =
+        fix.speed == null || !Number.isFinite(fix.speed) || fix.speed < 0.8;
+      if (
+        movedFromAnchorM < deadbandM &&
+        lowReportedSpeed &&
+        fix.timestampMs - prevRaw.timestampMs < 15_000
+      ) {
+        return {
+          accepted: false,
+          rejectionReason: "stationary_noise",
+          nextState: { ...state, movementState: "STATIONARY" },
+        };
+      }
+      if (effectiveSpeed < 0.5) {
+        nextMovementState = "STATIONARY";
+      } else if (effectiveSpeed < 2.0) {
+        nextMovementState = "LOW_SPEED";
+        const alpha = 0.65;
+        stabilizedFix = {
+          ...fix,
+          lat: prev.lat + (fix.lat - prev.lat) * alpha,
+          lng: prev.lng + (fix.lng - prev.lng) * alpha,
+        };
+      } else {
+        nextMovementState = "MOVING";
+      }
     }
-    // Gentle spatial smoothing during slow walking (< 2.0 m/s) to damp jitter
-    if (fix.speed != null && Number.isFinite(fix.speed) && fix.speed >= 0.5 && fix.speed < 2.0) {
-      const alpha = 0.65;
-      stabilizedFix = {
-        ...fix,
-        lat: prev.lat + (fix.lat - prev.lat) * alpha,
-        lng: prev.lng + (fix.lng - prev.lng) * alpha,
-      };
-    }
+  } else if (fix.speed != null && Number.isFinite(fix.speed)) {
+    nextMovementState =
+      fix.speed < 0.5 ? "STATIONARY" : fix.speed < 2.0 ? "LOW_SPEED" : "MOVING";
   }
 
   const minDur = options?.minDurationMs ?? 250;
   const maxDur = options?.maxDurationMs ?? 2_000;
-  const rawDelta = prev ? stabilizedFix.timestampMs - prev.timestampMs : 400;
-  // Adaptive interpolation window slightly cushions jitter while staying responsive
+  const rawDelta = prevRaw ? fix.timestampMs - prevRaw.timestampMs : 400;
   const interpDurationMs = Math.max(minDur, Math.min(maxDur, rawDelta));
 
   const fromLat = options?.currentDisplayed
@@ -465,9 +515,12 @@ export function pushFixToBuffer(
 
   return {
     accepted: true,
+    rejectionReason: null,
     nextState: {
       prevFix: prev,
       latestFix: stabilizedFix,
+      rawLatestFix: fix,
+      movementState: nextMovementState,
       lastAccurateFixAtMs: nextAccurateAt,
       fromLat,
       fromLng,
@@ -487,7 +540,13 @@ export function sampleBufferedPosition(
   nowPerfMs: number,
   maxExtrapolationMs: number,
   overrideHeadingDeg?: number | null
-): { lat: number; lng: number; extrapolating: boolean; stale: boolean } | null {
+): {
+  lat: number;
+  lng: number;
+  progress: number;
+  extrapolating: boolean;
+  stale: boolean;
+} | null {
   const latest = state.latestFix;
   if (!latest) return null;
 
@@ -497,6 +556,7 @@ export function sampleBufferedPosition(
     return {
       lat: state.fromLat + (latest.lat - state.fromLat) * t,
       lng: state.fromLng + (latest.lng - state.fromLng) * t,
+      progress: t,
       extrapolating: false,
       stale: false,
     };
@@ -516,6 +576,7 @@ export function sampleBufferedPosition(
   return {
     lat: ext.lat,
     lng: ext.lng,
+    progress: 1,
     extrapolating: ext.extrapolated && extraMs < maxExtrapolationMs,
     stale: extraMs >= maxExtrapolationMs,
   };
