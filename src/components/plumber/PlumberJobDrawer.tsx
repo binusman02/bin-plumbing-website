@@ -274,7 +274,7 @@ export function PlumberJobDrawer({
                       type="button"
                       disabled={busyAction === "quick_status"}
                       onClick={() => onQuickStatusChange("inspection_required")}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132E54] disabled:opacity-60"
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132E54] disabled:opacity-60"
                     >
                       {busyAction === "quick_status" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       Start Inspection
@@ -283,7 +283,7 @@ export function PlumberJobDrawer({
                 <button
                   type="button"
                   onClick={() => quoteFormRef.current?.scrollIntoView({ behavior: "smooth" })}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#0B1F3A] bg-white px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50"
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[#0B1F3A] bg-white px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50"
                 >
                   Submit Quotation
                 </button>
@@ -292,7 +292,7 @@ export function PlumberJobDrawer({
                     type="button"
                     disabled={busyAction === "quick_status"}
                     onClick={() => onQuickStatusChange("in_progress")}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
                   >
                     {busyAction === "quick_status" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     Start Work
@@ -536,7 +536,7 @@ export function PlumberJobDrawer({
               </button>
             </div>
             {photoStatus && <p className="text-xs font-medium text-emerald-700">{photoStatus}</p>}
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <ClassicSelect
                 value={nextJobStatus}
                 onChange={(val) => setNextJobStatus(val as RequestStatus)}
@@ -733,7 +733,7 @@ export function PlumberJobDrawer({
               placeholder="Work scope or additional notes..."
               className="w-full rounded-xl border border-slate-200 p-3 text-sm"
             />
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 disabled={totalQuote <= 0}
@@ -871,14 +871,14 @@ export function PlumberJobDrawer({
           <button
             type="button"
             onClick={() => onOpenChat(selectedJob.ticket_number)}
-            className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-[#0B1F3A] hover:bg-slate-50"
+            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-[#0B1F3A] hover:bg-slate-50"
           >
             <MessageSquare className="h-4 w-4" /> Chat
           </button>
           {selectedJob.customer_phone && (
             <a
               href={`tel:${selectedJob.customer_phone}`}
-              className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] text-sm font-bold text-white"
+              className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] text-sm font-bold text-white"
             >
               <Phone className="h-4 w-4" /> Call Customer
             </a>

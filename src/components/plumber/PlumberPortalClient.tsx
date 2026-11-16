@@ -886,7 +886,7 @@ export default function PlumberPortalClient({
                     type="button"
                     disabled={locationSharing.retrying}
                     onClick={locationSharing.retry}
-                    className={`relative z-10 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition disabled:cursor-wait disabled:opacity-70 ${
+                    className={`relative z-10 inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition disabled:cursor-wait disabled:opacity-70 ${
                       locationSharing.phase === "active"
                         ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                         : "bg-[#0B1F3A] text-white hover:bg-[#132f57]"
@@ -908,7 +908,7 @@ export default function PlumberPortalClient({
                   type="button"
                   onClick={handleToggleAvailability}
                   disabled={busyAction === "availability"}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-bold transition ${
+                  className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition ${
                     isAvailable
                       ? "bg-emerald-600 text-white hover:bg-emerald-700"
                       : "border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
@@ -992,7 +992,7 @@ export default function PlumberPortalClient({
                       setFocusMarkerId("plumber-self");
                       setFocusSeq((n) => n + 1);
                     }}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
                   >
                     <Crosshair className="h-3.5 w-3.5 text-[#F5B301]" />
                     My Location
@@ -1006,7 +1006,7 @@ export default function PlumberPortalClient({
                         setFocusMarkerId("customer-job");
                         setFocusSeq((n) => n + 1);
                       }}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#132f57]"
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#132f57]"
                     >
                       <Navigation className="h-3.5 w-3.5 text-[#F5B301]" />
                       Customer Pin
