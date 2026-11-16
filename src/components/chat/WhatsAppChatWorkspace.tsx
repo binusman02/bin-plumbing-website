@@ -977,8 +977,8 @@ export function WhatsAppChatWorkspace({
     <div
       className={
         mobileThreadOpen
-          ? "fixed inset-0 z-50 flex h-[100dvh] overflow-hidden bg-[#ECE5DD] md:static md:z-auto md:h-[calc(100vh-11rem)] md:min-h-[520px] md:rounded-2xl md:border md:border-slate-200 md:bg-white md:shadow-sm"
-          : "flex h-[calc(100dvh-9.5rem)] min-h-[440px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-11rem)] md:min-h-[520px]"
+          ? "fixed inset-0 z-50 flex h-[100dvh] w-full max-w-full overflow-hidden bg-[#ECE5DD] md:static md:z-auto md:h-[calc(100vh-11rem)] md:min-h-[520px] md:rounded-2xl md:border md:border-slate-200 md:bg-white md:shadow-sm"
+          : "flex h-[calc(100dvh-9.5rem)] min-h-[440px] w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-11rem)] md:min-h-[520px]"
       }
     >
       {/* LEFT PANEL: CONVERSATION LIST */}
@@ -1069,7 +1069,7 @@ export function WhatsAppChatWorkspace({
 
       {/* RIGHT PANEL: ACTIVE CONVERSATION */}
       <section
-        className={`flex flex-1 flex-col bg-[#F4F6F9] ${
+        className={`min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-[#F4F6F9] ${
           selectedTicket || targetStatusBanner ? "flex" : "hidden md:flex"
         }`}
       >
@@ -1594,7 +1594,7 @@ export function WhatsAppChatWorkspace({
                     }
                   }}
                   placeholder="Type a message..."
-                  className="max-h-28 min-h-[40px] flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
+                  className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
                 />
                 <button
                   type="button"
