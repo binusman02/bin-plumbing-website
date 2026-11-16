@@ -107,6 +107,10 @@ export function isAcceptableNavFix(
     return false;
   }
   if (prevFix) {
+    // Reject out-of-order / stale cached fixes so the dot never snaps backwards
+    if (fix.timestampMs < prevFix.timestampMs) {
+      return false;
+    }
     const dtSec = Math.max(0.5, (fix.timestampMs - prevFix.timestampMs) / 1000);
     const dist = distMeters(prevFix.lat, prevFix.lng, fix.lat, fix.lng);
     // Allow a small grace buffer (30m) for initial GPS lock tightening

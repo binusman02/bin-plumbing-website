@@ -471,18 +471,20 @@ export function usePlumberLocationSharing(params: {
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20_000 }
     );
 
-    // Stationary phones may emit no watch events: ask for a fresh/cached fix so the
-    // heartbeat is only sent when the device actually confirmed its position.
+    // Stationary or throttled phones may emit sparse watch events: poll fresh GPS
+    // (maximumAge: 0) whenever watchPosition has been quiet > 4s so movement is caught quickly.
     const keepAlive = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       if (permissionDeniedRef.current) return;
-      if (Date.now() - lastWatchEventRef.current < 20_000) return;
+      const silentMs = Date.now() - lastWatchEventRef.current;
+      const thresholdMs = shareToServerRef.current ? 4_000 : 8_000;
+      if (silentMs < thresholdMs) return;
       navigator.geolocation.getCurrentPosition(onFix, onGeoError, {
         enableHighAccuracy: true,
-        timeout: 10_000,
-        maximumAge: 15_000,
+        timeout: 8_000,
+        maximumAge: 0,
       });
-    }, 15_000);
+    }, 4_000);
 
     const flushPending = () => {
       const pos = pendingRef.current;

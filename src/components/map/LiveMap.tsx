@@ -1136,6 +1136,11 @@ export function LiveMap({
     return () => cancelAnimationFrame(rafId);
   }, [styleLoaded, remotePlumber]);
 
+  const fitAllMarkersRef = useRef(fitAllMarkers);
+  useEffect(() => {
+    fitAllMarkersRef.current = fitAllMarkers;
+  }, [fitAllMarkers]);
+
   // Sync markers with smooth interpolation
   useEffect(() => {
     const map = mapRef.current;
@@ -1213,9 +1218,9 @@ export function LiveMap({
     const idsKey = markers.map((m) => m.id).sort().join(",");
     if (idsKey && idsKey !== lastFittedIdsRef.current) {
       lastFittedIdsRef.current = idsKey;
-      fitAllMarkers();
+      fitAllMarkersRef.current();
     }
-  }, [markers, selectedMarkerId, fitAllMarkers]);
+  }, [markers, selectedMarkerId]);
 
   // Explicit focus on a marker
   useEffect(() => {
