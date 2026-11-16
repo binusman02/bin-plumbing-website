@@ -21,6 +21,11 @@ import {
   X,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/currency";
+import {
+  dispatchNotificationNavigation,
+  type NotificationNavigationRequest,
+  parseNotificationDestination,
+} from "@/lib/notification-navigation";
 import type { NotificationMutationAction, NotificationRecord } from "@/lib/notifications";
 import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 
@@ -30,10 +35,12 @@ interface NotificationDrawerProps {
   variant?: "drawer" | "inline";
   onClose?: () => void;
   onUnreadCountChange?: (count: number) => void;
-  onNavigate?: (destination: string) => void;
+  onNavigate?: (destination: string, navRequest: NotificationNavigationRequest) => void;
 }
 
 type TabFilter = "all" | "unread" | "archived";
+
+const inFlightNotifications = new Map<string, Promise<unknown>>();
 
 export function NotificationDrawer({
   open = false,
@@ -66,14 +73,30 @@ export function NotificationDrawer({
       setError(null);
       try {
         const offset = append ? currentCount : 0;
-        const res = await fetch(
-          `/api/notifications?role=${role}&limit=30&offset=${offset}`,
-          { cache: "no-store" }
-        );
-        if (!res.ok) {
-          throw new Error("Could not load notifications.");
+        const cacheKey = `${role}:${offset}`;
+        let reqPromise = inFlightNotifications.get(cacheKey);
+        if (!reqPromise) {
+          reqPromise = fetch(
+            `/api/notifications?role=${role}&limit=30&offset=${offset}`,
+            { cache: "no-store" }
+          ).then(async (res) => {
+            if (!res.ok) throw new Error("Could not load notifications.");
+            return res.json();
+          });
+          inFlightNotifications.set(cacheKey, reqPromise);
+          reqPromise.finally(() => {
+            window.setTimeout(() => {
+              if (inFlightNotifications.get(cacheKey) === reqPromise) {
+                inFlightNotifications.delete(cacheKey);
+              }
+            }, 2500);
+          });
         }
-        const data = await res.json();
+        const data = (await reqPromise) as {
+          items?: NotificationRecord[];
+          hasMore?: boolean;
+          unreadCount?: number;
+        };
         const incoming: NotificationRecord[] = Array.isArray(data.items) ? data.items : [];
         setItems((prev) => {
           if (!append) return incoming;
@@ -121,7 +144,7 @@ export function NotificationDrawer({
       if (document.visibilityState === "visible") {
         void loadNotifications(false, 0);
       }
-    }, 15000);
+    }, 45000);
     return () => {
       window.removeEventListener("notifications-refresh", handleRefresh);
       window.removeEventListener("online", handleRefresh);
@@ -217,12 +240,19 @@ export function NotificationDrawer({
       return;
     }
 
-    if (item.destination) {
+    const navReq = parseNotificationDestination(item.destination, {
+      entityType: item.entity_type,
+      entityId: item.entity_id,
+      notificationId: item.id,
+    });
+
+    if (navReq.destination) {
+      dispatchNotificationNavigation(navReq);
       onClose?.();
       if (onNavigate) {
-        onNavigate(item.destination);
+        onNavigate(navReq.destination, navReq);
       } else {
-        router.push(item.destination);
+        router.push(navReq.destination);
       }
     }
   };

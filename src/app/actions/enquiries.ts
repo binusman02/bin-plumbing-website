@@ -83,6 +83,7 @@ export async function submitContactEnquiry(data: ContactEnquiryInput) {
     await createNotification({
       recipientId: "admin",
       recipientRole: "admin",
+      actorRole: "customer",
       type: "enquiry_submitted",
       title: "New direct enquiry",
       body: `${fullName} (${location}) submitted a ${serviceType} enquiry.`,

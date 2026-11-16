@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, MapPin, Phone } from "lucide-react";
 import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
+import { SITE_URL, buildBreadcrumbJsonLd } from "@/lib/seo";
 
 export const instant = false;
 
@@ -32,10 +33,24 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     };
   }
 
+  const title = `Plumber in ${matchedArea}, Kano`;
+  const description = `Request on-site plumbing repairs, water pump servicing, leak detection, tank installation, and drainage support in ${matchedArea}, Kano.`;
+
   return {
-    title: `Plumbing Services in ${matchedArea}`,
-    description: `Request inspection-first plumbing repairs, leak detection, tank setup, and drainage services in ${matchedArea}.`,
+    title,
+    description,
     alternates: { canonical: `/areas/${slug}` },
+    openGraph: {
+      title: `${title} | Bin Plumbing Services Ltd`,
+      description,
+      url: `/areas/${slug}`,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${title} | Bin Plumbing Services Ltd`,
+      description,
+    },
   };
 }
 
@@ -59,18 +74,19 @@ export default async function AreaDetailPage({ params }: Props) {
     .slice(0, 6);
   const phone = settings.company_phone?.trim() || "";
   const companyName = settings.company_name || "Bin Plumbing Services Ltd";
-  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com").replace(/\/+$/, "");
+  const baseUrl = SITE_URL;
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Service Areas", path: "/areas" },
+    { name: matchedArea, path: `/areas/${slug}` },
+  ]);
 
   const areaJsonLd = {
     "@context": "https://schema.org",
     "@graph": [
       {
         "@type": "BreadcrumbList",
-        itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Home", item: baseUrl },
-          { "@type": "ListItem", position: 2, name: "Service Areas", item: `${baseUrl}/areas` },
-          { "@type": "ListItem", position: 3, name: matchedArea, item: `${baseUrl}/areas/${slug}` },
-        ],
+        itemListElement: breadcrumbJsonLd.itemListElement,
       },
       {
         "@type": "Plumber",
@@ -81,8 +97,13 @@ export default async function AreaDetailPage({ params }: Props) {
         address: {
           "@type": "PostalAddress",
           streetAddress: address,
+          addressLocality: "Kano",
+          addressRegion: "Kano State",
           addressCountry: "NG",
         },
+        hasMap: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+          `${matchedArea}, Kano, Nigeria`
+        )}`,
       },
     ],
   };
@@ -152,18 +173,18 @@ export default async function AreaDetailPage({ params }: Props) {
             <div className="mt-6 flex flex-col gap-3">
               <Link
                 href={`/request?area=${encodeURIComponent(matchedArea)}`}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#F5B301] px-5 text-sm font-semibold text-[#0B1F3A] hover:bg-[#E0A200]"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#F5B301] px-5 py-2.5 text-center text-sm font-semibold leading-snug text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
               >
-                Request Plumber in {matchedArea}
-                <ArrowRight className="h-4 w-4" />
+                <span>Request Plumber in {matchedArea}</span>
+                <ArrowRight className="h-4 w-4 shrink-0" />
               </Link>
               {phone && (
                 <a
                   href={`tel:${phone.replace(/\s+/g, "")}`}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-[#0B1F3A] bg-white px-5 text-sm font-semibold text-[#0B1F3A] hover:bg-[#0B1F3A] hover:text-white"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#0B1F3A] bg-white px-5 py-2.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
                 >
-                  <Phone className="h-4 w-4" />
-                  Call {phone}
+                  <Phone className="h-4 w-4 shrink-0" />
+                  <span>Call {phone}</span>
                 </a>
               )}
             </div>

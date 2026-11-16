@@ -2,6 +2,15 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  const isAccessingAdmin = pathname.startsWith("/admin");
+  const isAccessingCustomer = pathname.startsWith("/customer");
+  const isAccessingPlumber = pathname.startsWith("/plumber");
+
+  if (!isAccessingAdmin && !isAccessingCustomer && !isAccessingPlumber) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -38,16 +47,12 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const pathname = request.nextUrl.pathname;
   const role = user
     ? ((user.app_metadata?.role as string | undefined) ||
         (user.user_metadata?.role as string | undefined))
     : undefined;
 
-  const isAccessingAdmin = pathname.startsWith("/admin");
   const isAdminLogin = pathname === "/admin/login";
-  const isAccessingCustomer = pathname.startsWith("/customer");
-  const isAccessingPlumber = pathname.startsWith("/plumber");
 
   // Block unauthenticated access to protected /admin routes while preserving destination
   if (isAccessingAdmin && !isAdminLogin && !user) {

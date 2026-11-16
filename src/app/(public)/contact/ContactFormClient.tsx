@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Loader2, CheckCircle2, Send } from "lucide-react";
 import { submitContactEnquiry } from "@/app/actions/enquiries";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 
 interface ContactFormClientProps {
   activeLocations: string[];
@@ -194,24 +195,21 @@ export function ContactFormClient({ activeLocations, serviceOptions = [] }: Cont
             Area / Location <span className="text-red-600">*</span>
           </label>
           {activeLocations.length > 0 ? (
-            <select
+            <ClassicSelect
               id="contact-location"
               required
               value={formData.location}
-              onChange={(e) => {
-                setFormData({ ...formData, location: e.target.value });
+              onChange={(val) => {
+                setFormData({ ...formData, location: val });
                 if (fieldErrors.location) setFieldErrors({ ...fieldErrors, location: "" });
               }}
-              className={inputBase}
-            >
-              <option value="">Select your area...</option>
-              {activeLocations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
-              ))}
-              <option value="__other__">Other area</option>
-            </select>
+              placeholder="Select your area..."
+              options={[
+                { value: "", label: "Select your area..." },
+                ...activeLocations.map((loc) => ({ value: loc, label: loc })),
+                { value: "__other__", label: "Other area" },
+              ]}
+            />
           ) : (
             <input
               id="contact-location"
@@ -249,19 +247,18 @@ export function ContactFormClient({ activeLocations, serviceOptions = [] }: Cont
           <label htmlFor="contact-service" className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
             Topic / Service
           </label>
-          <select
+          <ClassicSelect
             id="contact-service"
             value={formData.serviceType}
-            onChange={(e) => setFormData({ ...formData, serviceType: e.target.value })}
-            className={inputBase}
-          >
-            <option value="">General Enquiry</option>
-            {serviceOptions.map((service) => (
-              <option key={service.id} value={service.title}>
-                {service.title}
-              </option>
-            ))}
-          </select>
+            onChange={(val) => setFormData({ ...formData, serviceType: val })}
+            options={[
+              { value: "", label: "General Enquiry" },
+              ...serviceOptions.map((service) => ({
+                value: service.title,
+                label: service.title,
+              })),
+            ]}
+          />
         </div>
       </div>
 

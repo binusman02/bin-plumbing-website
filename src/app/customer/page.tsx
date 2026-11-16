@@ -55,6 +55,8 @@ export default async function CustomerPortalPage() {
   let isolatedQuotations: StructuredQuotation[] = [];
   let isolatedPayments: PaymentRecord[] = [];
   let isolatedMessages: JobMessage[] = [];
+  const plumberAvatars: Record<string, string> = {};
+  const plumberLocations: Record<string, { lat: number; lng: number; updatedAt?: string }> = {};
 
   if (actor && actor.role === "customer") {
     const { data: custRow } = await adminSupabase
@@ -118,6 +120,57 @@ export default async function CustomerPortalPage() {
 
         // Compute receipt status cleanly if receipts exist
         void getMessagesForAuthorizedTicket;
+
+        const activePlumberIdSet = new Set(
+          isolatedRequests
+            .filter((r) => !["completed", "cancelled"].includes(r.status))
+            .map((r) => r.assigned_plumber_id)
+            .filter((id): id is string => Boolean(id))
+        );
+        const plumberIds = Array.from(
+          new Set(
+            isolatedRequests
+              .map((r) => r.assigned_plumber_id)
+              .filter((id): id is string => Boolean(id))
+          )
+        );
+        if (plumberIds.length > 0) {
+          const { data: plumberRows, error: plumberErr } = await adminSupabase
+            .from("plumbers")
+            .select("id, full_name, avatar_url, current_lat, current_lng, location_updated_at")
+            .in("id", plumberIds);
+          const rows = plumberErr
+            ? (
+                await adminSupabase
+                  .from("plumbers")
+                  .select("id, full_name, avatar_url")
+                  .in("id", plumberIds)
+              ).data
+            : plumberRows;
+          for (const p of (rows || []) as Record<string, unknown>[]) {
+            if (p.avatar_url) {
+              plumberAvatars[String(p.id)] = String(p.avatar_url);
+              if (p.full_name) {
+                plumberAvatars[String(p.full_name).trim().toLowerCase()] = String(p.avatar_url);
+              }
+            }
+            if (
+              activePlumberIdSet.has(String(p.id)) &&
+              p.current_lat != null &&
+              p.current_lng != null
+            ) {
+              const loc = {
+                lat: Number(p.current_lat),
+                lng: Number(p.current_lng),
+                updatedAt: p.location_updated_at ? String(p.location_updated_at) : undefined,
+              };
+              plumberLocations[String(p.id)] = loc;
+              if (p.full_name) {
+                plumberLocations[String(p.full_name).trim().toLowerCase()] = loc;
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -130,6 +183,8 @@ export default async function CustomerPortalPage() {
       quotations={isolatedQuotations}
       payments={isolatedPayments}
       messages={isolatedMessages}
+      plumberAvatars={plumberAvatars}
+      plumberLocations={plumberLocations}
       activeLocations={settings.active_coverage_locations || []}
       bankDetails={{
         bankName: settings.bank_name,

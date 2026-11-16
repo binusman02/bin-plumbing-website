@@ -32,6 +32,8 @@ export type PortalActor =
       email?: string;
       phone: string;
       name: string;
+      status?: string;
+      isApproved?: boolean;
     };
 
 function normalizeDigits(v: string): string {
@@ -84,19 +86,30 @@ export async function resolvePortalActor(
       if ((!preferredRole || preferredRole === "plumber") && metaRole === "plumber") {
         const userEmail = (user.email || "").toLowerCase().trim();
         const userPhone = normalizeDigits(String(user.user_metadata?.phone || ""));
-        const { data: plumbers } = await adminSupabase
+        let match: Record<string, unknown> | null = null;
+        const { data: byAuth } = await adminSupabase
           .from("plumbers")
-          .select("*");
+          .select("*")
+          .eq("auth_user_id", user.id)
+          .maybeSingle();
 
-        const match = (plumbers || []).find(
-          (p) =>
-            !p.deleted_at &&
-            (p.auth_user_id === user.id ||
-              (userEmail && String(p.email || "").toLowerCase().trim() === userEmail) ||
-              (userPhone && normalizeDigits(String(p.phone || "")) === userPhone))
-        );
+        if (byAuth && !byAuth.deleted_at) {
+          match = byAuth;
+        } else {
+          const { data: plumbers } = await adminSupabase
+            .from("plumbers")
+            .select("*");
+          match =
+            (plumbers || []).find(
+              (p) =>
+                !p.deleted_at &&
+                ((userEmail && String(p.email || "").toLowerCase().trim() === userEmail) ||
+                  (userPhone && normalizeDigits(String(p.phone || "")) === userPhone))
+            ) || null;
+        }
 
         if (match) {
+          const plumberStatus = String(match.verification_status || match.status || "pending_review");
           return {
             role: "plumber",
             id: String(match.id),
@@ -104,6 +117,8 @@ export async function resolvePortalActor(
             email: match.email ? String(match.email) : userEmail || undefined,
             phone: String(match.phone || ""),
             name: String(match.full_name || "Plumber"),
+            status: plumberStatus,
+            isApproved: plumberStatus === "approved" || match.is_approved === true,
           };
         }
       }
@@ -112,17 +127,27 @@ export async function resolvePortalActor(
       if ((!preferredRole || preferredRole === "customer") && metaRole === "customer") {
         const userEmail = (user.email || "").toLowerCase().trim();
         const userPhone = normalizeDigits(String(user.user_metadata?.phone || ""));
-        const { data: customers } = await adminSupabase
+        let match: Record<string, unknown> | null = null;
+        const { data: byAuth } = await adminSupabase
           .from("customers")
-          .select("*");
+          .select("*")
+          .eq("auth_user_id", user.id)
+          .maybeSingle();
 
-        const match = (customers || []).find(
-          (c) =>
-            !c.deleted_at &&
-            (c.auth_user_id === user.id ||
-              (userPhone && normalizeDigits(String(c.phone || "")) === userPhone) ||
-              (userEmail && String(c.email || "").toLowerCase().trim() === userEmail))
-        );
+        if (byAuth && !byAuth.deleted_at) {
+          match = byAuth;
+        } else {
+          const { data: customers } = await adminSupabase
+            .from("customers")
+            .select("*");
+          match =
+            (customers || []).find(
+              (c) =>
+                !c.deleted_at &&
+                ((userPhone && normalizeDigits(String(c.phone || "")) === userPhone) ||
+                  (userEmail && String(c.email || "").toLowerCase().trim() === userEmail))
+            ) || null;
+        }
 
         if (match) {
           return {
@@ -188,16 +213,29 @@ export async function resolvePortalActor(
       );
 
       if (plumber) {
+        const plumberStatus = String(plumber.verification_status || plumber.status || "pending_review");
         return {
           role: "plumber",
           id: String(plumber.id),
           email: plumber.email ? String(plumber.email) : accEmail || undefined,
           phone: String(plumber.phone || ""),
           name: String(plumber.full_name || "Plumber"),
+          status: plumberStatus,
+          isApproved: plumberStatus === "approved" || plumber.is_approved === true,
         };
       }
     }
   }
 
   return null;
+}
+
+export async function requireApprovedPlumberActor(): Promise<
+  Extract<PortalActor, { role: "plumber" }> | null
+> {
+  const actor = await resolvePortalActor("plumber");
+  if (!actor || actor.role !== "plumber" || !actor.isApproved) {
+    return null;
+  }
+  return actor;
 }

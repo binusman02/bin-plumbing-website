@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   CheckCircle2,
@@ -11,7 +12,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { saveMarketplaceSettingsAction } from "@/app/actions/marketplace-actions";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import type { MarketplaceSettings } from "@/lib/marketplace";
+import { MAP_CONFIG } from "@/lib/map-config";
 
 interface SettingsManagerClientProps {
   initialSettings: MarketplaceSettings;
@@ -213,6 +216,23 @@ export default function SettingsManagerClient({
 
   return (
     <form onSubmit={handleSave} className="space-y-6">
+      {MAP_CONFIG.isUsingOsmFallback && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900 shadow-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <div>
+            <p className="font-bold">
+              Map Vector Style Not Configured (Using Public OSM Raster Fallback)
+            </p>
+            <p className="mt-1 leading-relaxed text-amber-800">
+              <code>NEXT_PUBLIC_MAP_STYLE_URL</code> is currently unset. The public OpenStreetMap
+              raster fallback is for development only and has no production SLA. Set{" "}
+              <code>NEXT_PUBLIC_MAP_STYLE_URL</code> to a domain-restricted MapTiler or Stadia
+              Maps style URL before production traffic. See{" "}
+              <code>docs/LIVE-TRACKING.md</code>.
+            </p>
+          </div>
+        </div>
+      )}
       {/* 1. Company Contact Details */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-base font-bold text-[#0B1F3A]">Company Contact & Identity</h2>
@@ -589,22 +609,24 @@ export default function SettingsManagerClient({
                   <p className="text-xs text-slate-500">{u.email}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <select
+                  <ClassicSelect
+                    size="sm"
                     value={u.role}
-                    onChange={(e) =>
+                    onChange={(val) =>
                       setAdminUsers((prev) =>
                         prev.map((item, i) =>
                           i === idx
-                            ? { ...item, role: e.target.value as "Owner" | "Admin" }
+                            ? { ...item, role: val as "Owner" | "Admin" }
                             : item
                         )
                       )
                     }
-                    className="h-9 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold"
-                  >
-                    <option value="Owner">Owner</option>
-                    <option value="Admin">Admin</option>
-                  </select>
+                    className="min-w-[100px]"
+                    options={[
+                      { value: "Owner", label: "Owner" },
+                      { value: "Admin", label: "Admin" },
+                    ]}
+                  />
                   <label className="flex items-center gap-1.5 text-xs font-semibold">
                     <input
                       type="checkbox"
@@ -639,14 +661,15 @@ export default function SettingsManagerClient({
               placeholder="Staff email"
               className="h-11 flex-1 rounded-xl border border-slate-200 px-3 text-sm"
             />
-            <select
+            <ClassicSelect
               value={newAdminRole}
-              onChange={(e) => setNewAdminRole(e.target.value as "Owner" | "Admin")}
-              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
-            >
-              <option value="Admin">Admin</option>
-              <option value="Owner">Owner</option>
-            </select>
+              onChange={(val) => setNewAdminRole(val as "Owner" | "Admin")}
+              className="sm:w-32"
+              options={[
+                { value: "Admin", label: "Admin" },
+                { value: "Owner", label: "Owner" },
+              ]}
+            />
             <button
               type="button"
               onClick={addAdminUser}

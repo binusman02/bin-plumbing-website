@@ -1,4 +1,8 @@
 import crypto from "crypto";
+import {
+  ensureMessageInDestination,
+  parseNotificationDestination,
+} from "@/lib/notification-navigation";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export interface NotificationRecord {
@@ -20,6 +24,8 @@ export interface NotificationRecord {
 export async function createNotification(input: {
   recipientId: string;
   recipientRole: "admin" | "customer" | "plumber";
+  actorRole?: "admin" | "customer" | "plumber";
+  actorId?: string;
   type: string;
   title: string;
   body?: string;
@@ -29,6 +35,17 @@ export async function createNotification(input: {
   dedupeKey?: string;
 }): Promise<NotificationRecord | null> {
   try {
+    // Never notify the actor who performed the action
+    if (input.actorRole && input.actorRole === input.recipientRole) {
+      if (
+        input.actorRole === "admin" ||
+        !input.actorId ||
+        input.actorId === input.recipientId
+      ) {
+        return null;
+      }
+    }
+
     const supabase = getServiceSupabase();
     const id = `notif-${crypto.randomUUID()}`;
     const nowIso = new Date().toISOString();
@@ -64,6 +81,151 @@ export async function createNotification(input: {
   }
 }
 
+async function reconcileViewedMessageNotifications(params: {
+  recipientRole: "admin" | "customer" | "plumber";
+  targetIds: string[];
+}): Promise<void> {
+  try {
+    const supabase = getServiceSupabase();
+    const { data: unreadMsgNotifs } = await supabase
+      .from("notifications")
+      .select("id, type, entity_type, entity_id, destination")
+      .eq("recipient_role", params.recipientRole)
+      .in("recipient_id", params.targetIds)
+      .is("read_at", null)
+      .is("deleted_at", null);
+
+    if (!unreadMsgNotifs || unreadMsgNotifs.length === 0) return;
+
+    const candidates = unreadMsgNotifs.filter(
+      (n) =>
+        n.entity_type === "message" ||
+        n.type === "new_message" ||
+        String(n.type || "").includes("message")
+    );
+    if (candidates.length === 0) return;
+
+    const msgIds = new Set<string>();
+    const tickets = new Set<string>();
+    const metaByNotifId = new Map<
+      string,
+      { messageId: string | null; ticket: string | null }
+    >();
+
+    for (const n of candidates) {
+      const entityId = String(n.entity_id || "").trim();
+      const parsed = parseNotificationDestination(String(n.destination || ""), {
+        entityType: String(n.entity_type || ""),
+        entityId,
+      });
+      const messageId =
+        parsed.messageId ||
+        (entityId && !/^BP-/i.test(entityId) ? entityId : null);
+      const ticket =
+        parsed.ticket || (entityId && /^BP-/i.test(entityId) ? entityId : null);
+
+      if (messageId) msgIds.add(messageId);
+      if (ticket) tickets.add(ticket);
+      metaByNotifId.set(String(n.id), { messageId, ticket });
+    }
+
+    const [byIdRes, byTicketRes] = await Promise.all([
+      msgIds.size > 0
+        ? supabase
+            .from("messages")
+            .select(
+              "id, ticket_number, sender_role, read_by, admin_read, deleted_for_everyone"
+            )
+            .in("id", Array.from(msgIds))
+        : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+      tickets.size > 0
+        ? supabase
+            .from("messages")
+            .select(
+              "id, ticket_number, sender_role, read_by, admin_read, deleted_for_everyone"
+            )
+            .in("ticket_number", Array.from(tickets))
+        : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    ]);
+
+    const msgMap = new Map<string, Record<string, unknown>>();
+    const ticketMsgsMap = new Map<string, Record<string, unknown>[]>();
+
+    for (const row of [...(byIdRes.data || []), ...(byTicketRes.data || [])]) {
+      const id = String(row.id);
+      msgMap.set(id, row);
+      const t = String(row.ticket_number || "");
+      if (t) {
+        const list = ticketMsgsMap.get(t) || [];
+        if (!list.some((x) => String(x.id) === id)) {
+          list.push(row);
+          ticketMsgsMap.set(t, list);
+        }
+      }
+    }
+
+    const allFoundMsgIds = Array.from(msgMap.keys());
+    const readReceiptMsgIds = new Set<string>();
+    if (allFoundMsgIds.length > 0) {
+      try {
+        const { data: rcpts } = await supabase
+          .from("message_receipts")
+          .select("message_id, read_at")
+          .in("message_id", allFoundMsgIds)
+          .eq("recipient_role", params.recipientRole)
+          .in("recipient_id", params.targetIds)
+          .not("read_at", "is", null);
+        for (const r of rcpts || []) {
+          readReceiptMsgIds.add(String(r.message_id));
+        }
+      } catch {
+        // Ignore if message_receipts table is unavailable
+      }
+    }
+
+    const isMessageViewed = (m: Record<string, unknown>): boolean => {
+      if (m.deleted_for_everyone === true) return true;
+      if (String(m.sender_role) === params.recipientRole) return true;
+      if (params.recipientRole === "admin" && m.admin_read === true) return true;
+      const readBy = Array.isArray(m.read_by) ? (m.read_by as string[]) : [];
+      if (readBy.includes(params.recipientRole)) return true;
+      if (readReceiptMsgIds.has(String(m.id))) return true;
+      return false;
+    };
+
+    const notifIdsToMarkRead: string[] = [];
+    for (const n of candidates) {
+      const meta = metaByNotifId.get(String(n.id));
+      if (!meta) continue;
+      if (meta.messageId) {
+        const msg = msgMap.get(meta.messageId);
+        if (!msg || isMessageViewed(msg)) {
+          notifIdsToMarkRead.push(String(n.id));
+          continue;
+        }
+      } else if (meta.ticket) {
+        const list = ticketMsgsMap.get(meta.ticket) || [];
+        const incoming = list.filter(
+          (m) => String(m.sender_role) !== params.recipientRole
+        );
+        if (incoming.length === 0 || incoming.every(isMessageViewed)) {
+          notifIdsToMarkRead.push(String(n.id));
+        }
+      }
+    }
+
+    if (notifIdsToMarkRead.length > 0) {
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from("notifications")
+        .update({ read_at: nowIso })
+        .in("id", notifIdsToMarkRead);
+    }
+  } catch {
+    // Non-blocking reconciliation
+  }
+}
+
 export async function listNotificationsForRecipient(params: {
   recipientRole: "admin" | "customer" | "plumber";
   recipientId: string;
@@ -76,6 +238,12 @@ export async function listNotificationsForRecipient(params: {
       params.recipientRole === "admin"
         ? ["admin", params.recipientId]
         : [params.recipientId];
+
+    // Ensure any notifications for already-viewed messages are automatically marked read
+    await reconcileViewedMessageNotifications({
+      recipientRole: params.recipientRole,
+      targetIds,
+    });
 
     const limit = Math.min(Math.max(params.limit || 30, 1), 100);
     const offset = Math.max(params.offset || 0, 0);
@@ -103,7 +271,22 @@ export async function listNotificationsForRecipient(params: {
       return { items: [], unreadCount: countRes.count || 0, hasMore: false };
     }
 
-    const rows = listRes.data as NotificationRecord[];
+    const rows = (listRes.data as NotificationRecord[]).map((row) => {
+      const normalizedDest = ensureMessageInDestination(
+        row.destination,
+        row.entity_type,
+        row.entity_id
+      );
+      if (normalizedDest && normalizedDest !== row.destination) {
+        supabase
+          .from("notifications")
+          .update({ destination: normalizedDest })
+          .eq("id", row.id)
+          .then(() => {});
+        return { ...row, destination: normalizedDest };
+      }
+      return row;
+    });
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
     const unreadCount = countRes.count ?? items.filter((n) => !n.read_at && !n.archived_at).length;
@@ -226,7 +409,7 @@ export async function verifyNotificationDestination(params: {
 
     const { data: notif } = await supabase
       .from("notifications")
-      .select("entity_type, entity_id")
+      .select("entity_type, entity_id, destination")
       .eq("id", params.notificationId)
       .eq("recipient_role", params.recipientRole)
       .in("recipient_id", targetIds)
@@ -239,19 +422,108 @@ export async function verifyNotificationDestination(params: {
 
     const entityType = String(notif.entity_type || "");
     const entityId = String(notif.entity_id || "").trim();
-    if (!entityType || !entityId) {
+    const destination = String(notif.destination || "").trim();
+    if (!entityType && !destination) {
       return { valid: true };
     }
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entityId);
+    if (entityType === "message") {
+      const parsed = parseNotificationDestination(destination, {
+        entityType,
+        entityId,
+      });
+      let ticketNumber = parsed.ticket || "";
 
-    if (entityType === "service_request" || entityType === "message" || entityType === "quotation") {
-      const q = supabase.from("service_requests").select("id, assigned_plumber_id");
-      const { data: req } = isUuid
-        ? await q.eq("id", entityId).maybeSingle()
-        : await q.eq("ticket_number", entityId).maybeSingle();
+      if (entityId && !/^BP-/i.test(entityId)) {
+        const { data: msgRow } = await supabase
+          .from("messages")
+          .select("id, ticket_number, is_internal")
+          .eq("id", entityId)
+          .maybeSingle();
+
+        if (msgRow?.ticket_number && !ticketNumber) {
+          ticketNumber = String(msgRow.ticket_number);
+        }
+        if (params.recipientRole === "customer" && msgRow?.is_internal) {
+          return {
+            valid: false,
+            reason: "Access denied: You do not have permission to view this message.",
+          };
+        }
+      } else if (!ticketNumber && /^BP-/i.test(entityId)) {
+        ticketNumber = entityId;
+      }
+
+      if (!ticketNumber) {
+        return {
+          valid: false,
+          reason: "The associated conversation could not be found.",
+        };
+      }
+
+      const q = supabase
+        .from("service_requests")
+        .select("id, ticket_number, customer_id, assigned_plumber_id");
+      const { data: req } = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        ticketNumber
+      )
+        ? await q.eq("id", ticketNumber).maybeSingle()
+        : await q.eq("ticket_number", ticketNumber).maybeSingle();
+
+      if (!req) {
+        return {
+          valid: false,
+          reason: "The associated service request no longer exists.",
+        };
+      }
+
+      if (
+        params.recipientRole === "customer" &&
+        req.customer_id &&
+        String(req.customer_id) !== params.recipientId
+      ) {
+        return {
+          valid: false,
+          reason: "Access denied: You do not have permission to view this conversation.",
+        };
+      }
+
+      if (
+        params.recipientRole === "plumber" &&
+        (!req.assigned_plumber_id || String(req.assigned_plumber_id) !== params.recipientId)
+      ) {
+        return {
+          valid: false,
+          reason: "Access denied: You are no longer assigned to this service request.",
+        };
+      }
+
+      return { valid: true };
+    }
+
+    if (entityType === "service_request" || entityType === "quotation") {
+      const parsed = parseNotificationDestination(destination);
+      const lookupTicket = parsed.ticket || entityId;
+      const lookupIsUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lookupTicket);
+      const q = supabase
+        .from("service_requests")
+        .select("id, customer_id, assigned_plumber_id");
+      const { data: req } = lookupIsUuid
+        ? await q.eq("id", lookupTicket).maybeSingle()
+        : await q.eq("ticket_number", lookupTicket).maybeSingle();
       if (!req) {
         return { valid: false, reason: "The associated service request no longer exists." };
+      }
+      if (
+        params.recipientRole === "customer" &&
+        req.customer_id &&
+        String(req.customer_id) !== params.recipientId
+      ) {
+        return {
+          valid: false,
+          reason: "Access denied: You do not have permission to view this service request.",
+        };
       }
       if (
         params.recipientRole === "plumber" &&

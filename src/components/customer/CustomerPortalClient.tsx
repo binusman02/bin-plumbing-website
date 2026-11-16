@@ -5,25 +5,34 @@ import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
   CreditCard,
+  Crosshair,
+  Eye,
+  Landmark,
   LayoutDashboard,
+  Loader2,
   MapPin,
   MessageSquare,
   MessageSquareWarning,
+  Navigation,
   Plus,
   Star,
   ThumbsDown,
   ThumbsUp,
+  Upload,
   User,
   Wrench,
 } from "lucide-react";
+import { LiveMap, type LiveMapMarker } from "@/components/map/LiveMap";
 import { WhatsAppChatWorkspace } from "@/components/chat/WhatsAppChatWorkspace";
+import { uploadChatFile } from "@/components/chat/ChatAttachment";
 import { ProfileManager } from "@/components/portal/ProfileManager";
 import {
   customerQuotationDecisionAction,
-  postCommunicationMessageAction,
   submitComplaintAction,
   submitCustomerRequestAction,
   submitCustomerReviewAction,
+  submitPaymentReceiptAction,
+  updateCustomerRequestLocationAction,
 } from "@/app/actions/marketplace-actions";
 import { logoutCustomerAction } from "@/app/actions/portal-auth";
 import { CustomerAuthView } from "@/components/customer/CustomerAuthView";
@@ -33,9 +42,23 @@ import {
   CustomerRequestDrawer,
 } from "@/components/customer/CustomerRequestModals";
 import { PortalShell, type PortalNavGroup } from "@/components/portal/PortalShell";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
+import { QuotationPreviewModal, type QuotationPreviewData } from "@/components/portal/QuotationPreviewModal";
+import {
+  useLiveTracking,
+  useNowTick,
+  useRoadRoute,
+  projectTrackedStatus,
+} from "@/hooks/useLiveTracking";
 import { usePortalRealtimeChat } from "@/hooks/usePortalRealtimeChat";
 import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 import { formatDateTime, formatNGN } from "@/lib/currency";
+import { calculateDistanceKm, formatDistance } from "@/lib/geo";
+import {
+  CUSTOMER_TRACKING_COPY,
+  deriveCustomerTrackingState,
+  formatAgo,
+} from "@/lib/live-location";
 import { getStatusMeta } from "@/lib/status-styles";
 import type {
   CustomerProfile,
@@ -52,6 +75,8 @@ interface CustomerPortalClientProps {
   quotations: StructuredQuotation[];
   payments: PaymentRecord[];
   messages: JobMessage[];
+  plumberAvatars?: Record<string, string>;
+  plumberLocations?: Record<string, { lat: number; lng: number; updatedAt?: string }>;
   activeLocations?: string[];
   bankDetails?: BankDetailsInfo;
 }
@@ -65,15 +90,21 @@ export default function CustomerPortalClient({
   quotations: initialQuotations,
   payments,
   messages: initialMessages,
+  plumberAvatars,
+  plumberLocations,
   activeLocations = [],
   bankDetails,
 }: CustomerPortalClientProps) {
   const router = useRouter();
   const lastSyncRef = useRef(0);
+  const myTicketSetRef = useRef<Set<string>>(new Set());
   const authenticatedCustomerId = initialCustomerId;
 
   // Dashboard states
   const [activeTab, setActiveTabState] = useState<CustomerTab>("home");
+  const [activeChatTicket, setActiveChatTicket] = useState<string>("");
+  const [activeChatMessageId, setActiveChatMessageId] = useState<string | null>(null);
+  const [chatNavKey, setChatNavKey] = useState<string>("");
 
   const setActiveTab = useCallback((tab: CustomerTab) => {
     setActiveTabState(tab);
@@ -84,13 +115,31 @@ export default function CustomerPortalClient({
       } else {
         url.searchParams.set("tab", tab);
       }
+      if (tab !== "messages") {
+        url.searchParams.delete("ticket");
+        url.searchParams.delete("message");
+      }
       window.history.replaceState(null, "", url.pathname + url.search + url.hash);
     }
   }, []);
 
   useEffect(() => {
     const syncFromUrl = () => {
-      const param = new URLSearchParams(window.location.search).get("tab") as CustomerTab | null;
+      const sp = new URLSearchParams(window.location.search);
+      const param = sp.get("tab") as CustomerTab | null;
+      const ticketParam = sp.get("ticket");
+      const messageParam = sp.get("message");
+
+      if (ticketParam !== null) {
+        setActiveChatTicket(ticketParam);
+      }
+      if (messageParam !== null) {
+        setActiveChatMessageId(messageParam);
+      }
+      if (ticketParam || messageParam) {
+        setChatNavKey(`url-${ticketParam || ""}-${messageParam || ""}`);
+      }
+
       if (
         param === "home" ||
         param === "requests" ||
@@ -99,6 +148,8 @@ export default function CustomerPortalClient({
         param === "profile"
       ) {
         setActiveTabState(param);
+      } else if (messageParam) {
+        setActiveTabState("messages");
       }
     };
     syncFromUrl();
@@ -110,6 +161,11 @@ export default function CustomerPortalClient({
   const [quotations, setQuotations] = useState<StructuredQuotation[]>(initialQuotations);
   const [messages, setMessages] = useState<JobMessage[]>(initialMessages);
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequestRecord | null>(null);
+  const [seenRequestStatuses, setSeenRequestStatuses] = useState<Record<string, string>>({});
+  const [previewQuote, setPreviewQuote] = useState<QuotationPreviewData | null>(null);
+  const homeReceiptInputRef = useRef<HTMLInputElement | null>(null);
+  const [homeReceiptTarget, setHomeReceiptTarget] = useState<ServiceRequestRecord | null>(null);
+  const [homeReceiptUploading, setHomeReceiptUploading] = useState<string | null>(null);
 
   useEffect(() => {
     setRequests(initialRequests);
@@ -123,10 +179,13 @@ export default function CustomerPortalClient({
     setMessages(initialMessages);
   }, [initialMessages]);
 
+  const liveTrackingRefreshRef = useRef<() => void>(() => {});
+
   const triggerPortalRefresh = useCallback(() => {
     const now = Date.now();
     if (now - lastSyncRef.current < 1500) return;
     lastSyncRef.current = now;
+    liveTrackingRefreshRef.current();
     startBackgroundTransition(() => {
       router.refresh();
     });
@@ -136,7 +195,10 @@ export default function CustomerPortalClient({
     role: "customer",
     userId: authenticatedCustomerId || undefined,
     enabled: Boolean(authenticatedCustomerId),
-    onDataSync: triggerPortalRefresh,
+    onDataSync: (data) => {
+      if (data?.ticketNumber && !myTicketSetRef.current.has(data.ticketNumber)) return;
+      triggerPortalRefresh();
+    },
   });
 
   useEffect(() => {
@@ -147,16 +209,17 @@ export default function CustomerPortalClient({
       }
     };
     document.addEventListener("visibilitychange", onVisible);
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible" && activeTab !== "messages") {
-        triggerPortalRefresh();
-      }
-    }, 20000);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      window.clearInterval(id);
     };
   }, [authenticatedCustomerId, activeTab, triggerPortalRefresh]);
+
+  // Overview Live Map state
+  const [overviewMapRequestId, setOverviewMapRequestId] = useState<string>("");
+  const [focusMarkerId, setFocusMarkerId] = useState<string | null>(null);
+  const [focusSeq, setFocusSeq] = useState(0);
+  const [locatingProperty, setLocatingProperty] = useState(false);
+  const [pickingPropertyOnMap, setPickingPropertyOnMap] = useState(false);
 
   // New Request Modal
   const [showNewRequestModal, setShowNewRequestModal] = useState(false);
@@ -166,9 +229,10 @@ export default function CustomerPortalClient({
   const [newTiming] = useState("Earliest Available");
   const [newPriority, setNewPriority] = useState<"standard" | "urgent">("standard");
   const [newDescription, setNewDescription] = useState("");
-
-  // Chat state
-  const [activeChatTicket] = useState("");
+  const [newCoords, setNewCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [newLocationSource, setNewLocationSource] = useState<
+    "gps" | "map_pin" | "address_only"
+  >("address_only");
 
   // Complaint / Feedback state
   const [feedbackTicket, setFeedbackTicket] = useState("");
@@ -185,6 +249,43 @@ export default function CustomerPortalClient({
     [customers, authenticatedCustomerId]
   );
 
+  const seenStorageKey = currentCustomer
+    ? `bin_customer_seen_requests_${currentCustomer.id}`
+    : null;
+
+  useEffect(() => {
+    if (!seenStorageKey || typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(seenStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setSeenRequestStatuses(parsed as Record<string, string>);
+        }
+      }
+    } catch {
+      // Ignore invalid storage
+    }
+  }, [seenStorageKey]);
+
+  const markRequestSeen = useCallback(
+    (requestId: string, status: string) => {
+      setSeenRequestStatuses((prev) => {
+        if (prev[requestId] === status) return prev;
+        const next = { ...prev, [requestId]: status };
+        if (seenStorageKey && typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(seenStorageKey, JSON.stringify(next));
+          } catch {
+            // Ignore storage quota errors
+          }
+        }
+        return next;
+      });
+    },
+    [seenStorageKey]
+  );
+
   const myRequests = useMemo(() => {
     if (!currentCustomer) return [];
     const norm = (s: string) => s.replace(/\D/g, "").slice(-10);
@@ -199,6 +300,214 @@ export default function CustomerPortalClient({
   const myTicketSet = useMemo(
     () => new Set(myRequests.map((r) => r.ticket_number)),
     [myRequests]
+  );
+
+  useEffect(() => {
+    myTicketSetRef.current = myTicketSet;
+  }, [myTicketSet]);
+
+  const activeTrackingRequests = useMemo(
+    () => myRequests.filter((r) => !["completed", "cancelled"].includes(r.status)),
+    [myRequests]
+  );
+
+  const activeMapRequest = useMemo(
+    () =>
+      activeTrackingRequests.find((r) => r.id === overviewMapRequestId) ||
+      activeTrackingRequests[0] ||
+      null,
+    [activeTrackingRequests, overviewMapRequestId]
+  );
+
+  const canTrackPlumberOnOverview = Boolean(
+    activeMapRequest &&
+      !["completed", "cancelled"].includes(activeMapRequest.status) &&
+      (activeMapRequest.assigned_plumber_id || activeMapRequest.assigned_technician)
+  );
+
+  const activeMapPlumberLoc = useMemo(() => {
+    if (!activeMapRequest || !canTrackPlumberOnOverview || !plumberLocations) return null;
+    if (activeMapRequest.assigned_plumber_id && plumberLocations[activeMapRequest.assigned_plumber_id]) {
+      return plumberLocations[activeMapRequest.assigned_plumber_id];
+    }
+    if (activeMapRequest.assigned_technician) {
+      return plumberLocations[activeMapRequest.assigned_technician.trim().toLowerCase()] || null;
+    }
+    return null;
+  }, [activeMapRequest, canTrackPlumberOnOverview, plumberLocations]);
+
+  const activeWatchTickets = useMemo(
+    () => activeTrackingRequests.map((r) => r.ticket_number),
+    [activeTrackingRequests]
+  );
+
+  const liveTracking = useLiveTracking({
+    as: "customer",
+    ticket: activeMapRequest?.ticket_number ?? undefined,
+    enabled: Boolean(authenticatedCustomerId && activeTab === "home" && activeMapRequest),
+    watchTickets: activeWatchTickets,
+  });
+
+  useEffect(() => {
+    liveTrackingRefreshRef.current = liveTracking.refresh;
+  }, [liveTracking.refresh]);
+
+  const nowMs = useNowTick(
+    10_000,
+    Boolean(authenticatedCustomerId && activeTab === "home" && canTrackPlumberOnOverview)
+  );
+
+  const trackedJob = useMemo(
+    () =>
+      liveTracking.snapshot?.jobs.find(
+        (j) => j.ticketNumber === activeMapRequest?.ticket_number
+      ) ?? null,
+    [liveTracking.snapshot, activeMapRequest?.ticket_number]
+  );
+
+  const trackedPlumber = useMemo(() => {
+    if (!canTrackPlumberOnOverview) return null;
+    if (trackedJob?.plumber) return trackedJob.plumber;
+    if (activeMapPlumberLoc) {
+      return {
+        plumberId: activeMapRequest?.assigned_plumber_id || "legacy",
+        name: activeMapRequest?.assigned_technician || "Assigned Plumber",
+        isAvailable: true,
+        ticketNumbers: activeMapRequest ? [activeMapRequest.ticket_number] : [],
+        lat: activeMapPlumberLoc.lat,
+        lng: activeMapPlumberLoc.lng,
+        accuracyM: null,
+        accuracyClass: "unknown" as const,
+        heading: null,
+        speed: null,
+        sharingEnabled: true,
+        status: "live" as const,
+        statusLabel: "LIVE",
+        ageSeconds: null,
+        coordinatesAt: activeMapPlumberLoc.updatedAt ?? null,
+        lastConfirmedAt: activeMapPlumberLoc.updatedAt ?? null,
+      };
+    }
+    return null;
+  }, [
+    canTrackPlumberOnOverview,
+    trackedJob,
+    activeMapPlumberLoc,
+    activeMapRequest,
+  ]);
+
+  const plumberStatus = useMemo(
+    () =>
+      trackedPlumber
+        ? projectTrackedStatus(trackedPlumber, nowMs, liveTracking.serverOffsetMs)
+        : null,
+    [trackedPlumber, nowMs, liveTracking.serverOffsetMs]
+  );
+
+  const directDistanceMeters = useMemo(() => {
+    if (
+      trackedPlumber?.lat == null ||
+      trackedPlumber?.lng == null ||
+      activeMapRequest?.customer_lat == null ||
+      activeMapRequest?.customer_lng == null
+    ) {
+      return null;
+    }
+    return (
+      calculateDistanceKm(
+        trackedPlumber.lat,
+        trackedPlumber.lng,
+        activeMapRequest.customer_lat,
+        activeMapRequest.customer_lng
+      ) * 1000
+    );
+  }, [trackedPlumber, activeMapRequest]);
+
+  const customerTrackingState = useMemo(
+    () =>
+      deriveCustomerTrackingState({
+        requestStatus: activeMapRequest?.status || "new",
+        hasAssignedPlumber: Boolean(
+          activeMapRequest?.assigned_plumber_id || activeMapRequest?.assigned_technician
+        ),
+        locationStatus: plumberStatus?.status ?? null,
+        distanceMeters: directDistanceMeters,
+      }),
+    [
+      activeMapRequest?.status,
+      activeMapRequest?.assigned_plumber_id,
+      activeMapRequest?.assigned_technician,
+      plumberStatus?.status,
+      directDistanceMeters,
+    ]
+  );
+
+  const { route: overviewRoadRoute } = useRoadRoute({
+    as: "customer",
+    ticket: activeMapRequest?.ticket_number ?? undefined,
+    plumber:
+      trackedPlumber?.lat != null && trackedPlumber?.lng != null
+        ? { lat: trackedPlumber.lat, lng: trackedPlumber.lng }
+        : null,
+    destination:
+      activeMapRequest?.customer_lat != null && activeMapRequest?.customer_lng != null
+        ? { lat: activeMapRequest.customer_lat, lng: activeMapRequest.customer_lng }
+        : null,
+    enabled: Boolean(
+      activeTab === "home" &&
+        canTrackPlumberOnOverview &&
+        trackedPlumber?.lat != null &&
+        trackedPlumber?.lng != null &&
+        activeMapRequest?.customer_lat != null &&
+        activeMapRequest?.customer_lng != null
+    ),
+  });
+
+  const saveCustomerPropertyLocation = useCallback(
+    async (
+      requestId: string,
+      lat: number,
+      lng: number,
+      source: "gps" | "map_pin" = "map_pin"
+    ) => {
+      // Optimistically show the house pin immediately on click
+      let prevCoords = null as { lat: number | undefined; lng: number | undefined } | null;
+      setRequests((prev) =>
+        prev.map((r) => {
+          if (r.id !== requestId) return r;
+          prevCoords = { lat: r.customer_lat, lng: r.customer_lng };
+          return { ...r, customer_lat: lat, customer_lng: lng };
+        })
+      );
+      setPickingPropertyOnMap(false);
+      setFocusMarkerId("customer-loc");
+      setFocusSeq((n) => n + 1);
+
+      const res = await updateCustomerRequestLocationAction(
+        requestId,
+        lat,
+        lng,
+        source
+      );
+      if (res.success) {
+        setActionFeedback("Your property location has been updated on the live map.");
+        broadcastRealtimeEvent("data_sync", { entity: "service_requests" });
+        liveTrackingRefreshRef.current();
+      } else {
+        if (prevCoords) {
+          const rollback = prevCoords;
+          setRequests((prev) =>
+            prev.map((r) =>
+              r.id === requestId
+                ? { ...r, customer_lat: rollback.lat, customer_lng: rollback.lng }
+                : r
+            )
+          );
+        }
+        setActionFeedback(res.error || "Could not update property location.");
+      }
+    },
+    []
   );
 
   const myMessages = useMemo(
@@ -248,6 +557,51 @@ export default function CustomerPortalClient({
     [quotations, myTicketSet]
   );
 
+  const unreadMessageTickets = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of myMessages) {
+      if (
+        !m.is_internal &&
+        m.sender_role !== "customer" &&
+        !(Array.isArray(m.read_by) && m.read_by.includes("customer"))
+      ) {
+        set.add(m.ticket_number);
+      }
+    }
+    return set;
+  }, [myMessages]);
+
+  const hasRequestSignal = useCallback(
+    (req: ServiceRequestRecord) => {
+      if (unreadMessageTickets.has(req.ticket_number)) {
+        return true;
+      }
+      const seenStatus = seenRequestStatuses[req.id];
+      if (seenStatus === undefined) {
+        return req.status !== "completed" && req.status !== "cancelled";
+      }
+      return seenStatus !== req.status;
+    },
+    [seenRequestStatuses, unreadMessageTickets]
+  );
+
+  const unseenRequestsCount = useMemo(
+    () => myRequests.filter((r) => hasRequestSignal(r)).length,
+    [myRequests, hasRequestSignal]
+  );
+
+  const awaitingPaymentRequests = useMemo(
+    () =>
+      myRequests.filter((r) => {
+        if (!["work_completed", "awaiting_final_payment"].includes(r.status)) return false;
+        const hasVerified = myPayments.some(
+          (p) => p.ticket_number === r.ticket_number && p.verification_status === "verified"
+        );
+        return !hasVerified;
+      }),
+    [myRequests, myPayments]
+  );
+
   const filteredRequests = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return myRequests;
@@ -274,7 +628,7 @@ export default function CustomerPortalClient({
           id: "requests",
           label: "My Requests",
           icon: Wrench,
-          badge: myRequests.filter((r) => r.status !== "completed" && r.status !== "cancelled").length,
+          badge: unseenRequestsCount || undefined,
           onClick: () => setActiveTab("requests"),
         },
         {
@@ -300,6 +654,33 @@ export default function CustomerPortalClient({
     { id: "payments", label: "Payments", icon: CreditCard, onClick: () => setActiveTab("payments") },
     { id: "profile", label: "Profile", icon: User, onClick: () => setActiveTab("profile") },
   ];
+
+  const openRequestDetail = (req: ServiceRequestRecord) => {
+    markRequestSeen(req.id, req.status);
+    if (unreadMessageTickets.has(req.ticket_number)) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.ticket_number === req.ticket_number && m.sender_role !== "customer"
+            ? { ...m, read_by: Array.from(new Set([...(m.read_by || []), "customer"])) }
+            : m
+        )
+      );
+    }
+    void fetch("/api/chat/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticketNumber: req.ticket_number, viewerRole: "customer" }),
+    }).then((res) => {
+      if (!res.ok) return;
+      broadcastRealtimeEvent("messages_read", {
+        ticketNumber: req.ticket_number,
+        viewerRole: "customer",
+      });
+      broadcastRealtimeEvent("notification_sync", { recipientRole: "customer" });
+      window.dispatchEvent(new Event("notifications-refresh"));
+    });
+    setSelectedRequest(req);
+  };
 
   const handleQuoteDecision = (quote: StructuredQuotation, decision: "approved" | "rejected") => {
     startTransition(async () => {
@@ -341,11 +722,16 @@ export default function CustomerPortalClient({
         preferredTiming: newTiming,
         priority: newPriority,
         issueDescription: newDescription.trim(),
+        customerLat: newCoords?.lat ?? undefined,
+        customerLng: newCoords?.lng ?? undefined,
+        customerLocationSource: newCoords ? newLocationSource : "address_only",
       });
       if (res.success && res.request) {
         setRequests((prev) => [res.request!, ...prev]);
         setShowNewRequestModal(false);
         setNewDescription("");
+        setNewCoords(null);
+        setNewLocationSource("address_only");
         setActionFeedback(`Request ${res.request.ticket_number} submitted.`);
         broadcastRealtimeEvent("data_sync", {
           entity: "service_requests",
@@ -376,8 +762,6 @@ export default function CustomerPortalClient({
     });
   };
 
-  const activeTicketForChat = activeChatTicket || myRequests[0]?.ticket_number || "";
-
   const pageTitleMap: Record<CustomerTab, string> = {
     home: "Overview",
     requests: "My Requests",
@@ -395,12 +779,30 @@ export default function CustomerPortalClient({
       bottomNavItems={bottomNavItems}
       userName={currentCustomer.full_name}
       userRoleLabel={currentCustomer.phone}
+      userAvatarUrl={currentCustomer.avatar_url || null}
       portalRole="customer"
-      onNotificationNavigate={(dest) => {
-        if (dest.includes("tab=messages")) setActiveTab("messages");
-        else if (dest.includes("tab=payments")) setActiveTab("payments");
-        else if (dest.includes("tab=requests")) setActiveTab("requests");
-        else setActiveTab("requests");
+      onNotificationNavigate={(dest, navReq) => {
+        if (
+          navReq?.tab === "messages" ||
+          dest.includes("tab=messages") ||
+          Boolean(navReq?.messageId)
+        ) {
+          setActiveTabState("messages");
+          setActiveChatTicket(navReq?.ticket || "");
+          setActiveChatMessageId(navReq?.messageId || null);
+          setChatNavKey(
+            navReq?.navKey || `nav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          );
+          if (typeof window !== "undefined") {
+            window.history.replaceState(null, "", navReq?.destination || dest);
+          }
+        } else if (dest.includes("tab=payments")) {
+          setActiveTab("payments");
+        } else if (dest.includes("tab=requests")) {
+          setActiveTab("requests");
+        } else {
+          setActiveTab("requests");
+        }
       }}
       onSignOut={async () => {
         await logoutCustomerAction();
@@ -464,6 +866,499 @@ export default function CustomerPortalClient({
             </div>
           </div>
 
+          <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-bold text-[#0B1F3A]">
+                  <MapPin className="h-4 w-4 text-[#F5B301]" />
+                  Live Service Map
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {activeMapRequest
+                    ? `${activeMapRequest.ticket_number} • ${activeMapRequest.address_in_kano}`
+                    : "No active job in progress. Submit a request to track your plumber live."}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {activeTrackingRequests.length > 1 && (
+                  <ClassicSelect
+                    value={activeMapRequest?.id || ""}
+                    onChange={(val) => {
+                      setOverviewMapRequestId(val);
+                      setFocusMarkerId(null);
+                    }}
+                    options={activeTrackingRequests.map((r) => ({
+                      value: r.id,
+                      label: `${r.ticket_number} (${r.problem_category || r.property_type})`,
+                    }))}
+                    ariaLabel="Select active request to track"
+                  />
+                )}
+
+                {canTrackPlumberOnOverview && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void liveTracking.refresh();
+                      triggerPortalRefresh();
+                      const hasPlumberCoords =
+                        trackedPlumber?.lat != null && trackedPlumber?.lng != null;
+                      setFocusMarkerId(hasPlumberCoords ? "plumber-loc" : null);
+                      setFocusSeq((n) => n + 1);
+                      if (!hasPlumberCoords) {
+                        setActionFeedback(
+                          `${activeMapRequest?.assigned_technician || "Your assigned plumber"} has not shared live GPS yet. Refreshing...`
+                        );
+                      }
+                    }}
+                    className="relative z-10 inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#132f57]"
+                  >
+                    <Navigation className="h-3.5 w-3.5 text-[#F5B301]" />
+                    Track Plumber
+                  </button>
+                )}
+
+                {activeMapRequest && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={locatingProperty}
+                      onClick={() => {
+                        if (typeof navigator === "undefined" || !navigator.geolocation) {
+                          setActionFeedback("Browser GPS is not available on this device.");
+                          return;
+                        }
+                        setLocatingProperty(true);
+                        navigator.geolocation.getCurrentPosition(
+                          async (pos) => {
+                            await saveCustomerPropertyLocation(
+                              activeMapRequest.id,
+                              pos.coords.latitude,
+                              pos.coords.longitude,
+                              "gps"
+                            );
+                            setLocatingProperty(false);
+                          },
+                          () => {
+                            setLocatingProperty(false);
+                            setActionFeedback(
+                              "Could not access GPS. Allow location permission or tap Pin on Map."
+                            );
+                          },
+                          { enableHighAccuracy: true, timeout: 10000 }
+                        );
+                      }}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {locatingProperty ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Crosshair className="h-3.5 w-3.5 text-[#F5B301]" />
+                      )}
+                      {activeMapRequest.customer_lat != null ? "Update My GPS" : "Share My GPS"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPickingPropertyOnMap((v) => !v)}
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${
+                        pickingPropertyOnMap
+                          ? "border-[#F5B301] bg-amber-50 text-[#0B1F3A]"
+                          : "border-slate-300 bg-white text-[#0B1F3A] hover:bg-slate-50"
+                      }`}
+                    >
+                      <MapPin className="h-3.5 w-3.5" />
+                      {pickingPropertyOnMap ? "Click Map to Set Pin..." : "Pin on Map"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {activeMapRequest && (() => {
+              const copy = CUSTOMER_TRACKING_COPY[customerTrackingState];
+              const isLive =
+                customerTrackingState === "live" ||
+                customerTrackingState === "approaching" ||
+                customerTrackingState === "arrived";
+              const isWarn =
+                customerTrackingState === "temporarily_unavailable" ||
+                customerTrackingState === "waiting_first_location";
+              return (
+                <div
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
+                    isLive
+                      ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
+                      : isWarn
+                      ? "border-amber-200 bg-amber-50/70 text-amber-900"
+                      : "border-slate-200 bg-slate-50 text-slate-700"
+                  }`}
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          isLive
+                            ? "bg-emerald-600 text-white"
+                            : isWarn
+                            ? "bg-amber-500 text-white"
+                            : "bg-slate-600 text-white"
+                        }`}
+                      >
+                        {copy.title}
+                      </span>
+                      {canTrackPlumberOnOverview &&
+                        trackedPlumber?.lat != null &&
+                        trackedPlumber?.lng != null &&
+                        activeMapRequest.customer_lat != null &&
+                        activeMapRequest.customer_lng != null &&
+                        (() => {
+                          if (
+                            overviewRoadRoute?.ok &&
+                            overviewRoadRoute.distanceM != null &&
+                            overviewRoadRoute.durationS != null
+                          ) {
+                            const mins = Math.max(
+                              1,
+                              Math.round(overviewRoadRoute.durationS / 60)
+                            );
+                            return (
+                              <span className="font-semibold">
+                                {formatDistance(overviewRoadRoute.distanceM / 1000)} by road (~{mins} min)
+                              </span>
+                            );
+                          }
+                          const km = calculateDistanceKm(
+                            trackedPlumber.lat,
+                            trackedPlumber.lng,
+                            activeMapRequest.customer_lat,
+                            activeMapRequest.customer_lng
+                          );
+                          return (
+                            <span className="font-semibold">
+                              {formatDistance(km)} direct distance
+                            </span>
+                          );
+                        })()}
+                    </div>
+                    <p className="text-[11px] opacity-90">
+                      {trackedJob?.tripState === "on_the_way"
+                        ? "Your plumber is on the way to your property."
+                        : copy.body}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    {trackedJob?.tripState === "on_the_way" && (
+                      <span className="rounded bg-emerald-600 px-2 py-0.5 font-bold text-white">
+                        On the way
+                      </span>
+                    )}
+                    {canTrackPlumberOnOverview &&
+                      trackedPlumber?.speed != null &&
+                      trackedPlumber.speed >= 0.8 && (
+                        <span className="rounded bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">
+                          Moving ({Math.round(trackedPlumber.speed * 3.6)} km/h)
+                        </span>
+                      )}
+                    {plumberStatus?.accuracyLabel && (
+                      <span className="rounded bg-white/80 px-2 py-0.5 font-medium text-slate-600">
+                        {plumberStatus.accuracyLabel}
+                      </span>
+                    )}
+                    {plumberStatus?.ageSeconds != null && (
+                      <span className="font-medium opacity-80">
+                        Updated {formatAgo(plumberStatus.ageSeconds)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-start">
+              <div className="lg:col-span-6">
+                <LiveMap
+                  heightClassName="h-72 md:h-auto md:aspect-square"
+                  interactivePicker={Boolean(activeMapRequest && pickingPropertyOnMap)}
+                  onPickLocation={(lat, lng) => {
+                    if (!activeMapRequest || !pickingPropertyOnMap) return;
+                    void saveCustomerPropertyLocation(activeMapRequest.id, lat, lng, "map_pin");
+                  }}
+                  focusMarkerId={focusMarkerId}
+                  focusSeq={focusSeq}
+                  remotePlumber={
+                    canTrackPlumberOnOverview &&
+                    trackedPlumber?.lat != null &&
+                    trackedPlumber?.lng != null
+                      ? {
+                          lat: trackedPlumber.lat,
+                          lng: trackedPlumber.lng,
+                          heading: trackedPlumber.heading,
+                          speed: trackedPlumber.speed,
+                          accuracyM: trackedPlumber.accuracyM,
+                          status: plumberStatus?.status || trackedPlumber.status,
+                          statusLabel: plumberStatus?.label || trackedPlumber.statusLabel,
+                          coordinatesAtMs: trackedPlumber.coordinatesAt
+                            ? Date.parse(trackedPlumber.coordinatesAt)
+                            : null,
+                          label:
+                            trackedPlumber.name ||
+                            activeMapRequest?.assigned_technician ||
+                            "Assigned Plumber",
+                        }
+                      : null
+                  }
+                  accuracyCircle={
+                    canTrackPlumberOnOverview &&
+                    trackedPlumber?.lat != null &&
+                    trackedPlumber?.lng != null &&
+                    trackedPlumber.accuracyM != null
+                      ? {
+                          lat: trackedPlumber.lat,
+                          lng: trackedPlumber.lng,
+                          radiusM: trackedPlumber.accuracyM,
+                        }
+                      : null
+                  }
+                  markers={(() => {
+                    const list: LiveMapMarker[] = [];
+                    if (
+                      activeMapRequest &&
+                      activeMapRequest.customer_lat != null &&
+                      activeMapRequest.customer_lng != null
+                    ) {
+                      list.push({
+                        id: "customer-loc",
+                        lat: activeMapRequest.customer_lat,
+                        lng: activeMapRequest.customer_lng,
+                        label: "Your Property",
+                        subtitle: activeMapRequest.address_in_kano,
+                        kind: "customer",
+                      });
+                    }
+                    return list;
+                  })()}
+                  roadRoutePoints={
+                    canTrackPlumberOnOverview &&
+                    overviewRoadRoute?.ok &&
+                    overviewRoadRoute.points &&
+                    overviewRoadRoute.points.length >= 2
+                      ? overviewRoadRoute.points
+                      : undefined
+                  }
+                  straightLine={
+                    canTrackPlumberOnOverview &&
+                    !(
+                      overviewRoadRoute?.ok &&
+                      overviewRoadRoute.points &&
+                      overviewRoadRoute.points.length >= 2
+                    ) &&
+                    trackedPlumber?.lat != null &&
+                    trackedPlumber?.lng != null &&
+                    activeMapRequest?.customer_lat != null &&
+                    activeMapRequest?.customer_lng != null
+                      ? [
+                          [trackedPlumber.lat, trackedPlumber.lng],
+                          [activeMapRequest.customer_lat, activeMapRequest.customer_lng],
+                        ]
+                      : undefined
+                  }
+                />
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:col-span-6">
+                {activeMapRequest ? (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                          Active Request
+                        </p>
+                        <p className="font-mono text-sm font-bold text-[#0B1F3A]">
+                          {activeMapRequest.ticket_number}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                          getStatusMeta(activeMapRequest.status).className
+                        }`}
+                      >
+                        {getStatusMeta(activeMapRequest.status).label}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-1.5">
+                      <p className="font-semibold text-[#0B1F3A]">
+                        {activeMapRequest.problem_category || activeMapRequest.property_type}
+                      </p>
+                      <p className="text-slate-600">{activeMapRequest.address_in_kano}</p>
+                      <p className="text-[11px] text-slate-500">
+                        Property GPS:{" "}
+                        {activeMapRequest.customer_lat != null && activeMapRequest.customer_lng != null
+                          ? "Pinned on map"
+                          : "Not pinned yet — tap Share My GPS or Pin on Map"}
+                      </p>
+                    </div>
+
+                    {canTrackPlumberOnOverview ? (
+                      <div className="rounded-lg border border-emerald-200 bg-white p-3 text-xs space-y-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                          Assigned Technician
+                        </p>
+                        <p className="text-sm font-bold text-[#0B1F3A]">
+                          {activeMapRequest.assigned_technician || "Assigned Plumber"}
+                        </p>
+                        <p className="text-slate-600">
+                          {activeMapPlumberLoc
+                            ? "Live GPS is active. It will stop automatically once your job is confirmed completed."
+                            : "Waiting for live GPS signal from your assigned technician."}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                        A technician has not been assigned yet. Once assigned, the{" "}
+                        <span className="font-semibold text-[#0B1F3A]">Track Plumber</span> button will appear at the top of the map.
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => openRequestDetail(activeMapRequest)}
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
+                      >
+                        Open Job Details
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveChatTicket(activeMapRequest.ticket_number);
+                          setActiveTab("messages");
+                        }}
+                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132f57]"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 text-[#F5B301]" />
+                        Message Technician
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-2 py-4 text-center">
+                    <p className="text-sm font-bold text-[#0B1F3A]">No Active Job to Track</p>
+                    <p className="text-xs text-slate-500">
+                      When you submit a new plumbing request, your property pin and live plumber tracking will appear right here.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {awaitingPaymentRequests.length > 0 && (
+            <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/70 p-5">
+              <div className="flex items-center gap-2">
+                <Landmark className="h-5 w-5 text-[#0B1F3A]" />
+                <h3 className="text-base font-bold text-[#0B1F3A]">
+                  Work Completed — Upload Payment Receipt
+                </h3>
+              </div>
+              <p className="text-xs text-slate-700">
+                Your job has been marked complete. Please transfer to the company bank account and upload your payment receipt so Admin can verify and close your ticket.
+              </p>
+              {bankDetails?.bankAccountNumber && (
+                <div className="rounded-lg border border-amber-200 bg-white p-3 text-xs text-slate-700">
+                  <span className="font-semibold">Bank:</span> {bankDetails.bankName || "Configured Bank"} •{" "}
+                  <span className="font-semibold">Account:</span> {bankDetails.bankAccountName || "Bin Plumbing Services Ltd"} •{" "}
+                  <span className="font-mono font-bold text-[#0B1F3A]">{bankDetails.bankAccountNumber}</span>
+                </div>
+              )}
+              <input
+                ref={homeReceiptInputRef}
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  const target = homeReceiptTarget;
+                  if (!file || !target) return;
+                  setHomeReceiptUploading(target.ticket_number);
+                  try {
+                    const attachment = await uploadChatFile(file);
+                    const res = await submitPaymentReceiptAction({
+                      requestId: target.id,
+                      ticketNumber: target.ticket_number,
+                      fileName: file.name,
+                      url: attachment.url,
+                      mimeType: attachment.mimeType,
+                      size: attachment.size,
+                    });
+                    if (res.success) {
+                      if (res.message) setMessages((prev) => [...prev, res.message!]);
+                      setActionFeedback(
+                        `Payment receipt uploaded for ${target.ticket_number}. Admin has been notified for verification.`
+                      );
+                      broadcastRealtimeEvent("data_sync", {
+                        entity: "payments",
+                        ticketNumber: target.ticket_number,
+                      });
+                    } else {
+                      setActionFeedback(res.error || "Could not upload payment receipt.");
+                    }
+                  } catch (err) {
+                    setActionFeedback(
+                      err instanceof Error ? err.message : "Failed to upload payment receipt."
+                    );
+                  } finally {
+                    setHomeReceiptUploading(null);
+                  }
+                }}
+              />
+              {awaitingPaymentRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <div>
+                    <span className="font-mono text-xs font-bold text-[#0B1F3A]">
+                      {req.ticket_number}
+                    </span>
+                    <p className="text-sm font-bold text-[#0B1F3A]">
+                      {req.problem_category || req.property_type}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Technician: {req.assigned_technician || "Assigned Plumber"}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={homeReceiptUploading === req.ticket_number}
+                      onClick={() => {
+                        setHomeReceiptTarget(req);
+                        homeReceiptInputRef.current?.click();
+                      }}
+                      className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#F5B301] px-4 text-xs font-bold text-[#07152B] hover:bg-[#e5a700] disabled:opacity-60"
+                    >
+                      {homeReceiptUploading === req.ticket_number ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      Upload Payment Receipt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openRequestDetail(req)}
+                      className="inline-flex h-10 items-center rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                    >
+                      View Details
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+
           {pendingQuotations.length > 0 && (
             <section className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/50 p-5">
               <h3 className="text-base font-bold text-[#0B1F3A]">
@@ -488,11 +1383,59 @@ export default function CustomerPortalClient({
                   <p className="mt-1 text-xs text-slate-600">
                     Labour: {formatNGN(q.labour_charge)} • Materials:{" "}
                     {formatNGN(q.materials_cost)}
+                    {q.transport_charge > 0 ? ` • Transport: ${formatNGN(q.transport_charge)}` : ""}
+                    {q.other_charges > 0 ? ` • Other: ${formatNGN(q.other_charges)}` : ""}
                   </p>
+                  {q.items && q.items.length > 0 && (
+                    <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
+                      <p className="mb-1 font-semibold text-[#0B1F3A]">Itemised Materials:</p>
+                      <ul className="space-y-0.5 text-slate-600">
+                        {q.items.map((item, idx) => (
+                          <li key={idx} className="flex justify-between gap-2">
+                            <span>
+                              {item.name}
+                              {item.quantity > 1 ? ` × ${item.quantity}` : ""}
+                            </span>
+                            <span className="font-medium text-slate-800">
+                              {formatNGN(item.unitPrice * item.quantity)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {q.notes && (
                     <p className="mt-2 text-sm text-slate-700">{q.notes}</p>
                   )}
-                  <div className="mt-4 flex gap-3">
+                  <div className="mt-4 flex flex-wrap gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const req = myRequests.find((r) => r.ticket_number === q.ticket_number);
+                        setPreviewQuote({
+                          id: q.id,
+                          ticketNumber: q.ticket_number,
+                          revisionNumber: q.revision_number,
+                          createdAt: q.created_at,
+                          status: q.customer_approval_status,
+                          plumberName: q.plumber_name,
+                          customerName: currentCustomer.full_name,
+                          customerPhone: currentCustomer.phone,
+                          customerAddress: req?.address_in_kano,
+                          serviceCategory: req?.problem_category,
+                          labourCharge: q.labour_charge,
+                          materialsCost: q.materials_cost,
+                          transportCharge: q.transport_charge || 0,
+                          otherCharges: q.other_charges || 0,
+                          totalAmount: q.total_amount,
+                          items: q.items,
+                          notes: q.notes,
+                        });
+                      }}
+                      className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                    >
+                      <Eye className="h-4 w-4" /> Preview / Print
+                    </button>
                     <button
                       type="button"
                       disabled={isPending}
@@ -537,18 +1480,31 @@ export default function CustomerPortalClient({
             <div className="space-y-3">
               {filteredRequests.map((req) => {
                 const badge = getStatusMeta(req.status);
+                const hasSignal = hasRequestSignal(req);
                 return (
                   <button
                     key={req.id}
                     type="button"
-                    onClick={() => setSelectedRequest(req)}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-[#F5B301]"
+                    onClick={() => openRequestDetail(req)}
+                    className={`w-full rounded-xl border p-4 text-left shadow-sm transition hover:border-[#F5B301] ${
+                      hasSignal
+                        ? "border-[#F5B301]/70 bg-amber-50/30"
+                        : "border-slate-200 bg-white"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className="font-mono text-xs font-bold text-[#0B1F3A]">
-                          {req.ticket_number}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {hasSignal && (
+                            <span
+                              className="inline-block h-2 w-2 rounded-full bg-[#F5B301]"
+                              title="New update or unread message"
+                            />
+                          )}
+                          <span className="font-mono text-xs font-bold text-[#0B1F3A]">
+                            {req.ticket_number}
+                          </span>
+                        </div>
                         <p className="mt-0.5 text-sm font-bold text-[#0B1F3A]">
                           {req.problem_category || req.property_type}
                         </p>
@@ -581,7 +1537,30 @@ export default function CustomerPortalClient({
           actorName={currentCustomer.full_name}
           requests={myRequests}
           initialMessages={myMessages}
-          initialTicket={activeTicketForChat || myRequests[0]?.ticket_number || null}
+          plumberAvatars={plumberAvatars}
+          initialTicket={
+            activeChatTicket ||
+            (activeChatMessageId ? null : myRequests[0]?.ticket_number || null)
+          }
+          initialMessageId={activeChatMessageId}
+          navigationKey={chatNavKey}
+          onTargetChange={(ticket, messageId) => {
+            setActiveChatTicket(ticket || "");
+            setActiveChatMessageId(messageId || null);
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href);
+              url.searchParams.set("tab", "messages");
+              if (ticket) url.searchParams.set("ticket", ticket);
+              else url.searchParams.delete("ticket");
+              if (messageId) url.searchParams.set("message", messageId);
+              else url.searchParams.delete("message");
+              window.history.replaceState(
+                null,
+                "",
+                url.pathname + url.search + url.hash
+              );
+            }
+          }}
           emptyTitle="No service conversations yet"
           emptyDescription="Messages with Bin Plumbing dispatch and your assigned plumber appear here."
           onTicketRead={(ticket) => {
@@ -665,28 +1644,27 @@ export default function CustomerPortalClient({
               </h3>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <select
+              <ClassicSelect
                 value={feedbackCategory}
-                onChange={(e) =>
-                  setFeedbackCategory(e.target.value as "feedback" | "complaint")
+                onChange={(val) =>
+                  setFeedbackCategory(val as "feedback" | "complaint")
                 }
-                className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
-              >
-                <option value="feedback">Service Feedback</option>
-                <option value="complaint">Report a Complaint</option>
-              </select>
-              <select
+                options={[
+                  { value: "feedback", label: "Service Feedback" },
+                  { value: "complaint", label: "Report a Complaint" },
+                ]}
+              />
+              <ClassicSelect
                 value={feedbackTicket}
-                onChange={(e) => setFeedbackTicket(e.target.value)}
-                className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
-              >
-                <option value="">General (no specific ticket)</option>
-                {myRequests.map((r) => (
-                  <option key={r.id} value={r.ticket_number}>
-                    {r.ticket_number}
-                  </option>
-                ))}
-              </select>
+                onChange={setFeedbackTicket}
+                options={[
+                  { value: "", label: "General (no specific ticket)" },
+                  ...myRequests.map((r) => ({
+                    value: r.ticket_number,
+                    label: r.ticket_number,
+                  })),
+                ]}
+              />
             </div>
             <textarea
               rows={3}
@@ -709,6 +1687,24 @@ export default function CustomerPortalClient({
 
       <CustomerRequestDrawer
         selectedRequest={selectedRequest}
+        assignedPlumberAvatar={
+          selectedRequest && plumberAvatars
+            ? (selectedRequest.assigned_plumber_id &&
+                plumberAvatars[selectedRequest.assigned_plumber_id]) ||
+              (selectedRequest.assigned_technician &&
+                plumberAvatars[selectedRequest.assigned_technician.trim().toLowerCase()]) ||
+              undefined
+            : undefined
+        }
+        assignedPlumberLocation={
+          selectedRequest && plumberLocations
+            ? (selectedRequest.assigned_plumber_id &&
+                plumberLocations[selectedRequest.assigned_plumber_id]) ||
+              (selectedRequest.assigned_technician &&
+                plumberLocations[selectedRequest.assigned_technician.trim().toLowerCase()]) ||
+              undefined
+            : undefined
+        }
         quotations={quotations}
         payments={payments}
         bankDetails={bankDetails}
@@ -730,22 +1726,23 @@ export default function CustomerPortalClient({
         }}
         onUploadPaymentProof={async (ticketNumber, fileName, url) => {
           const reqObj = requests.find((r) => r.ticket_number === ticketNumber);
-          const res = await postCommunicationMessageAction({
+          const res = await submitPaymentReceiptAction({
             requestId: reqObj?.id || selectedRequest?.id || "",
             ticketNumber,
-            senderRole: "customer",
-            senderName: currentCustomer.full_name,
-            recipientRole: "admin",
-            message: `Payment proof uploaded: ${fileName}`,
-            attachment: {
-              url,
-              name: fileName,
-              mimeType: "application/octet-stream",
-              size: 0,
-            },
+            fileName,
+            url,
           });
-          if (res.success && res.message) {
-            setMessages((prev) => [...prev, res.message!]);
+          if (res.success) {
+            if (res.message) setMessages((prev) => [...prev, res.message!]);
+            setActionFeedback(
+              `Payment receipt uploaded for ${ticketNumber}. Admin has been notified.`
+            );
+            broadcastRealtimeEvent("data_sync", {
+              entity: "payments",
+              ticketNumber,
+            });
+          } else {
+            throw new Error(res.error || "Failed to submit payment receipt.");
           }
         }}
       />
@@ -760,6 +1757,10 @@ export default function CustomerPortalClient({
         setNewAddress={setNewAddress}
         newDescription={newDescription}
         setNewDescription={setNewDescription}
+        coords={newCoords}
+        setCoords={setNewCoords}
+        locationSource={newLocationSource}
+        setLocationSource={setNewLocationSource}
         isPending={isPending}
         onClose={() => setShowNewRequestModal(false)}
         onSubmit={handleCreateRequest}
@@ -845,6 +1846,10 @@ export default function CustomerPortalClient({
           </div>
         </div>
       )}
+      <QuotationPreviewModal
+        quote={previewQuote}
+        onClose={() => setPreviewQuote(null)}
+      />
     </PortalShell>
   );
 }

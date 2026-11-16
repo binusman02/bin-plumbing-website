@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { CheckCircle2, Eye, EyeOff, ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import {
   addGalleryItemAction,
   deleteGalleryItemAction,
@@ -120,17 +121,11 @@ export function GalleryManagerClient({
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500">
               Service Category *
             </label>
-            <select
+            <ClassicSelect
               value={serviceCategory}
-              onChange={(e) => setServiceCategory(e.target.value)}
-              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"
-            >
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
+              onChange={setServiceCategory}
+              options={categories.map((cat) => ({ value: cat, label: cat }))}
+            />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500">

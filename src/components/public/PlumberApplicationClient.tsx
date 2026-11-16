@@ -14,6 +14,7 @@ import {
 import { submitPlumberApplicationAction } from "@/app/actions/marketplace-actions";
 import { logoutPlumberAction } from "@/app/actions/portal-auth";
 import { ApplicationAuthGate } from "@/components/public/plumber-application/ApplicationAuthGate";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import { getStatusMeta } from "@/lib/status-styles";
 import type { PlumberProfile } from "@/lib/marketplace";
 
@@ -385,17 +386,14 @@ export default function PlumberApplicationClient({
             <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
               Work Availability *
             </label>
-            <select
+            <ClassicSelect
               value={availability}
-              onChange={(e) => setAvailability(e.target.value)}
-              className="h-12 w-full rounded-xl border border-[#CBD5E1] bg-white px-3.5 text-base text-[#0B1F3A] focus:border-[#0B1F3A] focus:outline-none focus:ring-2 focus:ring-[#F5B301]/30"
-            >
-              {AVAILABILITY_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+              onChange={setAvailability}
+              options={AVAILABILITY_OPTIONS.map((opt) => ({
+                value: opt,
+                label: opt,
+              }))}
+            />
           </div>
         </div>
 

@@ -1,17 +1,29 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { cacheLife, cacheTag } from "next/cache";
 import { AlertCircle } from "lucide-react";
 import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
 import RequestFormClient from "@/components/public/RequestFormClient";
 
 export const metadata: Metadata = {
-  title: "Request a Plumber",
+  title: "Request a Plumber in Kano",
   description:
-    "Submit your plumbing service request online. Receive a tracking reference, inspection review, and transparent quotation approval.",
+    "Submit your plumbing service request in Kano online. Receive a tracking reference, on-site inspection review, and transparent itemised quotation.",
   alternates: { canonical: "/request" },
+  openGraph: {
+    title: "Request a Plumber in Kano | Bin Plumbing Services Ltd",
+    description:
+      "Book a reviewed plumber in Kano with upfront itemised quotation approval and live job tracking.",
+    url: "/request",
+    type: "website",
+  },
 };
 
 export default async function RequestPage() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings", "service-categories");
+
   const [settings, categories] = await Promise.all([
     getMarketplaceSettings(),
     getServiceCategories(true),

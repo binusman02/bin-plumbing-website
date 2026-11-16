@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
-  Bell,
+  BookOpen,
   ClipboardList,
   DollarSign,
   History,
@@ -42,6 +42,7 @@ const PAGE_TITLES: Array<{ prefix: string; title: string }> = [
   { prefix: "/admin/customers", title: "Customers Directory" },
   { prefix: "/admin/enquiries", title: "Direct Enquiries" },
   { prefix: "/admin/communications", title: "Communications Audit" },
+  { prefix: "/admin/guides", title: "Blog & Guides CMS" },
   { prefix: "/admin/gallery", title: "Gallery CMS" },
   { prefix: "/admin/complaints", title: "Complaints & Feedback" },
   { prefix: "/admin/audit-log", title: "Audit Log" },
@@ -57,7 +58,6 @@ export function AdminLayoutShell({
   children,
 }: AdminLayoutShellProps) {
   const pathname = usePathname() || "/admin";
-  const [persistentNotifCount, setPersistentNotifCount] = useState(0);
   const [liveUnreadEnquiries, setLiveUnreadEnquiries] =
     useState(unreadEnquiriesCount);
   const [liveUnreadCommunications, setLiveUnreadCommunications] = useState(
@@ -106,7 +106,7 @@ export function AdminLayoutShell({
       }
     };
 
-    const interval = window.setInterval(refreshSignals, 30000);
+    const interval = window.setInterval(refreshSignals, 45000);
     window.addEventListener("focus", refreshSignals);
     document.addEventListener("visibilitychange", refreshSignals);
     window.addEventListener("admin-signals-refresh", refreshSignals);
@@ -121,7 +121,7 @@ export function AdminLayoutShell({
       }).catch(() => {});
     };
     sendPresence();
-    const presenceInterval = window.setInterval(sendPresence, 20000);
+    const presenceInterval = window.setInterval(sendPresence, 45000);
 
     return () => {
       active = false;
@@ -153,7 +153,9 @@ export function AdminLayoutShell({
                 ? "enquiries"
                 : pathname.startsWith("/admin/communications")
                   ? "communications"
-                  : pathname.startsWith("/admin/gallery")
+                  : pathname.startsWith("/admin/guides")
+                    ? "guides"
+                    : pathname.startsWith("/admin/gallery")
                     ? "gallery"
                     : pathname.startsWith("/admin/complaints")
                       ? "complaints"
@@ -169,55 +171,111 @@ export function AdminLayoutShell({
     {
       label: "Operations",
       items: [
-        { id: "overview", label: "Overview", href: "/admin", icon: LayoutDashboard },
-        { id: "requests", label: "Service Requests", href: "/admin/requests", icon: ClipboardList },
-        { id: "plumbers", label: "Plumbers", href: "/admin/plumbers", icon: Wrench },
-        { id: "financials", label: "Financials", href: "/admin/financials", icon: DollarSign },
+        {
+          id: "overview",
+          label: "Overview",
+          shortLabel: "Overview",
+          href: "/admin",
+          icon: LayoutDashboard,
+        },
+        {
+          id: "requests",
+          label: "Service Requests",
+          shortLabel: "Pipelines",
+          href: "/admin/requests",
+          icon: ClipboardList,
+        },
+        {
+          id: "customers",
+          label: "Customers",
+          shortLabel: "Contacts",
+          href: "/admin/customers",
+          icon: Users,
+        },
+        {
+          id: "plumbers",
+          label: "Plumbers",
+          shortLabel: "Plumbers",
+          href: "/admin/plumbers",
+          icon: Wrench,
+        },
+        {
+          id: "financials",
+          label: "Financials",
+          shortLabel: "Finance",
+          href: "/admin/financials",
+          icon: DollarSign,
+        },
       ],
     },
     {
       label: "Clients & Inbox",
       items: [
-        { id: "customers", label: "Customers", href: "/admin/customers", icon: Users },
+        {
+          id: "communications",
+          label: "Communications",
+          shortLabel: "Messages",
+          href: "/admin/communications",
+          icon: MessageSquare,
+          badge: liveUnreadCommunications,
+        },
         {
           id: "enquiries",
           label: "Direct Enquiries",
+          shortLabel: "Enquiries",
           href: "/admin/enquiries",
           icon: Inbox,
           badge: liveUnreadEnquiries,
         },
         {
-          id: "communications",
-          label: "Communications",
-          href: "/admin/communications",
-          icon: MessageSquare,
-          badge: liveUnreadCommunications,
-        },
-        { id: "complaints", label: "Complaints & Feedback", href: "/admin/complaints", icon: AlertTriangle },
-        {
-          id: "notifications",
-          label: "Notifications",
-          href: "/admin/notifications",
-          icon: Bell,
-          badge: persistentNotifCount || undefined,
+          id: "complaints",
+          label: "Complaints & Feedback",
+          shortLabel: "Feedback",
+          href: "/admin/complaints",
+          icon: AlertTriangle,
         },
       ],
     },
     {
       label: "Content & System",
       items: [
-        { id: "gallery", label: "Gallery CMS", href: "/admin/gallery", icon: ImageIcon },
-        { id: "audit-log", label: "Audit Log", href: "/admin/audit-log", icon: History },
-        { id: "settings", label: "Settings", href: "/admin/settings", icon: Settings },
+        {
+          id: "guides",
+          label: "Blog & Guides",
+          shortLabel: "Blog",
+          href: "/admin/guides",
+          icon: BookOpen,
+        },
+        {
+          id: "gallery",
+          label: "Gallery CMS",
+          shortLabel: "Gallery",
+          href: "/admin/gallery",
+          icon: ImageIcon,
+        },
+        {
+          id: "audit-log",
+          label: "Audit Log",
+          shortLabel: "Audit",
+          href: "/admin/audit-log",
+          icon: History,
+        },
+        {
+          id: "settings",
+          label: "Settings",
+          shortLabel: "Settings",
+          href: "/admin/settings",
+          icon: Settings,
+        },
       ],
     },
   ];
 
   const bottomNavItems: PortalNavItem[] = [
     { id: "overview", label: "Home", shortLabel: "Home", href: "/admin", icon: LayoutDashboard },
-    { id: "requests", label: "Requests", shortLabel: "Requests", href: "/admin/requests", icon: ClipboardList },
+    { id: "requests", label: "Requests", shortLabel: "Pipelines", href: "/admin/requests", icon: ClipboardList },
+    { id: "customers", label: "Customers", shortLabel: "Contacts", href: "/admin/customers", icon: Users },
     { id: "plumbers", label: "Plumbers", shortLabel: "Plumbers", href: "/admin/plumbers", icon: Wrench },
-    { id: "financials", label: "Money", shortLabel: "Money", href: "/admin/financials", icon: DollarSign },
     { id: "more", label: "More", shortLabel: "More", icon: MoreHorizontal },
   ];
 
@@ -231,9 +289,8 @@ export function AdminLayoutShell({
       userName={userEmail || "Admin"}
       userRoleLabel="Operations Admin"
       portalRole="admin"
-      onUnreadCountChange={setPersistentNotifCount}
       onSignOut={() => logoutAdmin()}
-      storageKey="bin_admin_sidebar_collapsed"
+      storageKey="bin_admin_rail_collapsed"
     >
       {children}
     </PortalShell>

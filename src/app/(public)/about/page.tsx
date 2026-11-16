@@ -1,14 +1,22 @@
 import type { Metadata } from "next";
+import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, MapPin, Phone, Mail } from "lucide-react";
 import { getMarketplaceSettings } from "@/lib/marketplace";
 
 export const metadata: Metadata = {
-  title: "About Us",
+  title: "About Bin Plumbing Services Ltd | Kano Plumbing Company",
   description:
-    "Learn how Bin Plumbing Services Ltd coordinates residential and commercial plumbing work with transparent quotes and live request tracking.",
+    "Learn how Bin Plumbing Services Ltd coordinates residential and commercial plumbing work in Kano State with reviewed technicians, transparent quotes, and live tracking.",
   alternates: { canonical: "/about" },
+  openGraph: {
+    title: "About Bin Plumbing Services Ltd | Kano Plumbing Company",
+    description:
+      "How Bin Plumbing Services Ltd coordinates reviewed plumbers, itemised quotes, and live tracking across Kano.",
+    url: "/about",
+    type: "website",
+  },
 };
 
 const OPERATING_PRINCIPLES = [
@@ -31,6 +39,10 @@ const OPERATING_PRINCIPLES = [
 ];
 
 export default async function AboutPage() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings");
+
   const settings = await getMarketplaceSettings();
   const activeAreas = settings.active_coverage_locations || [];
 
@@ -72,17 +84,17 @@ export default async function AboutPage() {
                 </p>
               )}
 
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <Link
                   href="/request"
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#F5B301] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#F5B301] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
                 >
-                  Request a Plumber
-                  <ArrowRight className="h-4 w-4" />
+                  <span>Request a Plumber</span>
+                  <ArrowRight className="h-4 w-4 shrink-0" />
                 </Link>
                 <Link
                   href="/how-it-works"
-                  className="inline-flex h-12 items-center justify-center rounded-lg border border-[#0B1F3A] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
+                  className="inline-flex min-h-12 items-center justify-center whitespace-nowrap rounded-lg border border-[#0B1F3A] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
                 >
                   See How It Works
                 </Link>

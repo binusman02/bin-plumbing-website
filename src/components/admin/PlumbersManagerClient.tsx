@@ -271,48 +271,54 @@ export default function PlumbersManagerClient({
   };
 
   return (
-    <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Search */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:w-80">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    <div className="space-y-3 pb-20 lg:pb-4">
+      {/* Bigin-Style Command Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {STATUS_TABS.map((tab) => {
+            const count =
+              tab.id === "all"
+                ? plumbers.length
+                : plumbers.filter((p) => normalizeStatus(p.verification_status) === tab.id).length;
+            const active = statusFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition ${
+                  active
+                    ? "bg-[#0B1F3A] text-white shadow-2xs"
+                    : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="relative w-56 sm:w-64">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, phone, ref, location..."
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 focus:border-[#0B1F3A] focus:outline-none focus:ring-2 focus:ring-[#F5B301]/30"
+            placeholder="Search plumber, phone, ref, area..."
+            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2.5 text-xs text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
           />
         </div>
       </div>
 
-      {/* 6 Status Filter Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {STATUS_TABS.map((tab) => {
-          const count =
-            tab.id === "all"
-              ? plumbers.length
-              : plumbers.filter((p) => normalizeStatus(p.verification_status) === tab.id).length;
-          const active = statusFilter === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setStatusFilter(tab.id)}
-              className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold transition-colors ${
-                active
-                  ? "bg-[#0B1F3A] text-white"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {tab.label} ({count})
-            </button>
-          );
-        })}
-      </div>
-
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-xs">
           <HardHat className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <p className="text-base font-semibold text-slate-700">No plumbers match this filter</p>
           <p className="mt-1 text-sm text-slate-500">
@@ -322,16 +328,17 @@ export default function PlumbersManagerClient({
       ) : (
         <>
           {/* PC & Tablet Table */}
-          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs md:block">
+            <table className="w-full border-collapse text-left text-[13px]">
+              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50/90 text-[11px] font-semibold text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Plumber</th>
-                  <th className="px-4 py-3">Locations & Skills</th>
-                  <th className="hidden px-4 py-3 lg:table-cell">Experience & Jobs</th>
-                  <th className="px-4 py-3">Rating</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Applied</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Technician Name</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Phone / Ref</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Coverage Locations & Skills</th>
+                  <th className="hidden whitespace-nowrap px-3.5 py-2.5 lg:table-cell">Experience & Jobs</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Rating</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Verification Stage</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Applied Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -344,49 +351,72 @@ export default function PlumbersManagerClient({
                     <tr
                       key={p.id}
                       onClick={() => openDetail(p)}
-                      className="cursor-pointer transition-colors hover:bg-slate-50"
+                      className="group cursor-pointer transition-colors hover:bg-slate-50/90"
                     >
-                      <td className="px-4 py-3.5">
-                        <p className="font-bold text-[#0B1F3A]">{p.full_name}</p>
-                        <p className="text-xs text-slate-500">
-                          {p.phone} {p.application_ref ? `• ${p.application_ref}` : ""}
-                        </p>
+                      <td className="whitespace-nowrap px-3.5 py-2.5">
+                        <div className="inline-flex items-center gap-2">
+                          <Avatar name={p.full_name} src={p.avatar_url} size="xs" />
+                          <span className="font-semibold text-[#0B1F3A] group-hover:underline">
+                            {p.full_name}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <p className="flex items-center gap-1 text-slate-700">
-                          <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-600">
+                        {p.phone} {p.application_ref ? `• ${p.application_ref}` : ""}
+                      </td>
+                      <td className="px-3.5 py-2.5">
+                        <p className="flex items-center gap-1 text-xs text-slate-700">
+                          <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
                           <span className="truncate max-w-[200px]">
                             {p.preferred_locations.join(", ") || p.residential_location || "Not specified"}
                           </span>
                         </p>
-                        <p className="mt-0.5 truncate max-w-[220px] text-xs text-slate-500">
+                        <p className="mt-0.5 truncate max-w-[220px] text-[11px] text-slate-500">
                           {p.skills.join(", ") || "General Plumbing"}
                         </p>
                       </td>
-                      <td className="hidden px-4 py-3.5 text-slate-700 lg:table-cell">
-                        <p>{p.experience_years} yrs exp</p>
-                        <p className="text-xs text-slate-500">
-                          {p.total_jobs} completed • {assignedCount} assigned
-                        </p>
+                      <td className="hidden whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-700 lg:table-cell">
+                        <span>{p.experience_years} yrs exp</span>
+                        <span className="ml-2 text-slate-400">
+                          • {p.total_jobs} done • {assignedCount} active
+                        </span>
                       </td>
-                      <td className="px-4 py-3.5 text-slate-700">
-                        {p.total_jobs > 0 && p.rating != null ? `${p.rating.toFixed(1)} / 5` : "No ratings yet"}
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-700">
+                        {p.total_jobs > 0 && p.rating != null ? `${p.rating.toFixed(1)} / 5` : "—"}
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="whitespace-nowrap px-3.5 py-2.5">
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}
+                          className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${badge.className}`}
                         >
                           {badge.label}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-xs text-slate-500">
-                        {formatDateTime(p.created_at)}
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-500">
+                        {new Date(p.created_at).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/90 px-4 py-2.5 text-xs text-slate-600">
+              <div className="flex items-center gap-4">
+                <span>
+                  Total Plumbers <strong className="ml-1 font-bold text-slate-900">{plumbers.length}</strong>
+                </span>
+                <span>
+                  Approved Network{" "}
+                  <strong className="ml-1 font-bold text-emerald-700">
+                    {plumbers.filter((p) => p.verification_status === "approved").length}
+                  </strong>
+                </span>
+              </div>
+              <span className="font-semibold text-slate-700">1 to {filtered.length}</span>
+            </div>
           </div>
 
           {/* Mobile Cards */}

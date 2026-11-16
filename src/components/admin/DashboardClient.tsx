@@ -6,16 +6,21 @@ import { useRealtimeHub } from "@/lib/realtime-hub";
 import {
   AlertCircle,
   ArrowRight,
+  BookOpen,
   Briefcase,
   CheckCircle2,
   CreditCard,
+  Eye,
   FileText,
   HardHat,
+  Heart,
   Mail,
+  MessageCircle,
   MessageSquareWarning,
   Wallet,
 } from "lucide-react";
-import type { PlumberProfile, StructuredQuotation, ServiceRequestRecord } from "@/lib/marketplace";
+import type { GuideRecord, PlumberProfile, StructuredQuotation, ServiceRequestRecord } from "@/lib/marketplace";
+import type { BlogEngagementMap } from "@/lib/blog-engagement";
 import { formatDateTime, formatNGN } from "@/lib/currency";
 import { getStatusMeta } from "@/lib/status-styles";
 
@@ -47,6 +52,8 @@ interface DashboardClientProps {
   categoryBreakdown: { name: string; count: number }[];
   approvedPlumbers?: PlumberProfile[];
   initialOnlinePlumberIds?: string[];
+  recentGuides?: GuideRecord[];
+  blogEngagementMap?: BlogEngagementMap;
 }
 
 export function DashboardClient({
@@ -58,6 +65,8 @@ export function DashboardClient({
   categoryBreakdown,
   approvedPlumbers = [],
   initialOnlinePlumberIds = [],
+  recentGuides = [],
+  blogEngagementMap = {},
 }: DashboardClientProps) {
   const [onlinePlumberIds, setOnlinePlumberIds] = useState<string[]>(
     initialOnlinePlumberIds
@@ -573,6 +582,149 @@ export function DashboardClient({
             )}
           </section>
         </div>
+
+        {/* Recent Blog Posts & Engagement */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 font-heading text-lg font-bold text-[#0B1F3A]">
+                <BookOpen className="h-5 w-5 text-[#F5B301]" />
+                Recent Blog Posts &amp; Reader Engagement
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Latest English &amp; Hausa plumbing guides with live views, likes, and comments
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {(() => {
+                const entries = Object.values(blogEngagementMap);
+                const totalViews = entries.reduce((acc, e) => acc + (e.views || 0), 0);
+                const totalLikes = entries.reduce((acc, e) => acc + (e.likes || 0), 0);
+                const totalComments = entries.reduce(
+                  (acc, e) => acc + (e.comments?.length || 0),
+                  0
+                );
+                return (
+                  <>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                      <Eye className="h-3.5 w-3.5" />
+                      {totalViews} Views
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                      <Heart className="h-3.5 w-3.5" />
+                      {totalLikes} Likes
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      {totalComments} Comments
+                    </span>
+                  </>
+                );
+              })()}
+              <Link
+                href="/admin/guides"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#132E54]"
+              >
+                Manage Blog
+                <ArrowRight className="h-3.5 w-3.5 text-[#F5B301]" />
+              </Link>
+            </div>
+          </div>
+
+          {recentGuides.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              No blog posts yet.{" "}
+              <Link href="/admin/guides" className="font-semibold text-[#0B1F3A] underline">
+                Open Blog &amp; Guides
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {recentGuides.map((post) => {
+                const eng = blogEngagementMap[post.id] || {
+                  views: 0,
+                  likes: 0,
+                  comments: [],
+                };
+                const isPublished =
+                  post.status === "published" ||
+                  post.en_status === "published" ||
+                  post.ha_status === "published";
+                const enUrl = post.en_slug ? `/en/blog/${post.en_slug}` : null;
+                const haUrl = post.ha_slug ? `/ha/blog/${post.ha_slug}` : null;
+
+                return (
+                  <div
+                    key={post.id}
+                    className="flex flex-col justify-between rounded-xl border border-slate-200 p-4 transition hover:border-[#F5B301]"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
+                          {post.category || "Plumbing Guide"}
+                        </span>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            isPublished
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-amber-50 text-amber-800"
+                          }`}
+                        >
+                          {isPublished ? "Published" : "Draft"}
+                        </span>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-sm font-bold text-[#0B1F3A]">
+                        {post.en_title || post.title}
+                      </p>
+                      {post.ha_title && (
+                        <p className="mt-1 line-clamp-1 text-xs text-slate-500">
+                          HA: {post.ha_title}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex items-center gap-1">
+                          <Eye className="h-3.5 w-3.5" />
+                          {eng.views}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Heart className="h-3.5 w-3.5 text-rose-500" />
+                          {eng.likes}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          {eng.comments.length}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {enUrl && (
+                          <Link
+                            href={enUrl}
+                            target="_blank"
+                            className="font-semibold text-[#0B1F3A] hover:text-[#E0A200]"
+                          >
+                            EN
+                          </Link>
+                        )}
+                        {haUrl && (
+                          <Link
+                            href={haUrl}
+                            target="_blank"
+                            className="font-semibold text-[#0B1F3A] hover:text-[#E0A200]"
+                          >
+                            HA
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

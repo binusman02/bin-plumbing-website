@@ -10,11 +10,15 @@ import {
   Camera,
   CheckCircle2,
   Copy,
+  Crosshair,
   Loader2,
+  MapPin,
   MessageCircle,
   Trash2,
 } from "lucide-react";
 import { submitServiceRequest } from "@/app/actions/service-requests";
+import { LiveMap } from "@/components/map/LiveMap";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 
 const NIGERIAN_STATES = [
   "Abuja (FCT)",
@@ -78,6 +82,13 @@ export default function RequestFormClient({
     phone: string;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [customerCoords, setCustomerCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [customerLocationSource, setCustomerLocationSource] = useState<
+    "gps" | "map_pin" | "address_only"
+  >("address_only");
+  const [gpsNotice, setGpsNotice] = useState<string | null>(null);
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [locatingGps, setLocatingGps] = useState(false);
 
   // Restore session draft
   useEffect(() => {
@@ -184,6 +195,12 @@ export default function RequestFormClient({
         ...formData,
         cityOrLga: effectiveCityOrLga.trim(),
         photos: photos.map((p) => p.url),
+        customerLocationSource: customerCoords
+          ? customerLocationSource
+          : "address_only",
+        ...(customerCoords
+          ? { customerLat: customerCoords.lat, customerLng: customerCoords.lng }
+          : {}),
       });
       if (res.success && res.ticketNumber) {
         try {
@@ -340,18 +357,17 @@ export default function RequestFormClient({
             <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
               Service Category <span className="text-red-500">*</span>
             </label>
-            <select
+            <ClassicSelect
               value={formData.problemType}
-              onChange={(e) => setFormData((p) => ({ ...p, problemType: e.target.value }))}
-              className="h-12 w-full rounded-xl border border-[#CBD5E1] bg-white px-3.5 text-base text-[#0B1F3A] focus:border-[#0B1F3A] focus:outline-none focus:ring-2 focus:ring-[#F5B301]/30"
-            >
-              {serviceOptions.map((srv) => (
-                <option key={srv.id} value={srv.title}>
-                  {srv.title}
-                </option>
-              ))}
-              <option value="General Plumbing">General Plumbing / Other</option>
-            </select>
+              onChange={(val) => setFormData((p) => ({ ...p, problemType: val }))}
+              options={[
+                ...serviceOptions.map((srv) => ({
+                  value: srv.title,
+                  label: srv.title,
+                })),
+                { value: "General Plumbing", label: "General Plumbing / Other" },
+              ]}
+            />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
@@ -396,37 +412,31 @@ export default function RequestFormClient({
               <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
                 State <span className="text-red-500">*</span>
               </label>
-              <select
+              <ClassicSelect
                 value={formData.state}
-                onChange={(e) => setFormData((p) => ({ ...p, state: e.target.value }))}
-                className="h-12 w-full rounded-xl border border-[#CBD5E1] bg-white px-3.5 text-base text-[#0B1F3A]"
-              >
-                <option value="">Select State</option>
-                {NIGERIAN_STATES.map((st) => (
-                  <option key={st} value={st}>
-                    {st}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setFormData((p) => ({ ...p, state: val }))}
+                placeholder="Select State"
+                options={[
+                  { value: "", label: "Select State" },
+                  ...NIGERIAN_STATES.map((st) => ({ value: st, label: st })),
+                ]}
+              />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
                 City / Area / LGA <span className="text-red-500">*</span>
               </label>
               {activeLocations.length > 0 ? (
-                <select
+                <ClassicSelect
                   value={formData.cityOrLga}
-                  onChange={(e) => setFormData((p) => ({ ...p, cityOrLga: e.target.value }))}
-                  className="h-12 w-full rounded-xl border border-[#CBD5E1] bg-white px-3.5 text-base text-[#0B1F3A]"
-                >
-                  <option value="">Select Area</option>
-                  {activeLocations.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                  <option value="__other__">Other Area (Specify)</option>
-                </select>
+                  onChange={(val) => setFormData((p) => ({ ...p, cityOrLga: val }))}
+                  placeholder="Select Area"
+                  options={[
+                    { value: "", label: "Select Area" },
+                    ...activeLocations.map((loc) => ({ value: loc, label: loc })),
+                    { value: "__other__", label: "Other Area (Specify)" },
+                  ]}
+                />
               ) : (
                 <input
                   type="text"
@@ -469,6 +479,131 @@ export default function RequestFormClient({
               placeholder="House number, street name, and nearest landmark"
               className="h-12 w-full rounded-xl border border-[#CBD5E1] px-3.5 text-base text-[#0B1F3A]"
             />
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-[#0B1F3A]">
+                  Pin Exact Property Location (Optional)
+                </p>
+                <p className="text-xs text-slate-500">
+                  Helps the assigned plumber navigate directly to your property. You can also submit using your street address alone.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={locatingGps}
+                  onClick={() => {
+                    if (typeof navigator === "undefined" || !navigator.geolocation) {
+                      setGpsNotice("GPS is not available on this device. You can pin your property on the map or use your street address.");
+                      return;
+                    }
+                    setLocatingGps(true);
+                    setGpsNotice(null);
+                    navigator.geolocation.getCurrentPosition(
+                      (pos) => {
+                        setCustomerCoords({
+                          lat: pos.coords.latitude,
+                          lng: pos.coords.longitude,
+                        });
+                        setCustomerLocationSource("gps");
+                        setShowMapPicker(true);
+                        setLocatingGps(false);
+                      },
+                      (err) => {
+                        setLocatingGps(false);
+                        setGpsNotice(
+                          err.code === 1
+                            ? "Location permission was denied. No problem — you can pin your property on the map or continue with your street address."
+                            : "Could not detect GPS location. You can pin your property on the map or continue with your street address."
+                        );
+                      },
+                      { enableHighAccuracy: true, timeout: 10000 }
+                    );
+                  }}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition disabled:opacity-60 ${
+                    customerLocationSource === "gps" && customerCoords
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "bg-[#0B1F3A] text-white hover:bg-[#132f57]"
+                  }`}
+                >
+                  {locatingGps ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Crosshair className="h-3.5 w-3.5 text-[#F5B301]" />
+                  )}
+                  Use My Current GPS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMapPicker((v) => !v)}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${
+                    customerLocationSource === "map_pin" && customerCoords
+                      ? "border-[#F5B301] bg-amber-50 text-[#0B1F3A]"
+                      : "border-slate-300 bg-white text-[#0B1F3A] hover:bg-slate-100"
+                  }`}
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  {showMapPicker ? "Hide Map" : "Pin My Property on Map"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerCoords(null);
+                    setCustomerLocationSource("address_only");
+                    setShowMapPicker(false);
+                    setGpsNotice(null);
+                  }}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-xs font-semibold transition ${
+                    customerLocationSource === "address_only" && !customerCoords
+                      ? "border-slate-400 bg-slate-200/70 text-[#0B1F3A]"
+                      : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  Enter My Address Manually
+                </button>
+              </div>
+            </div>
+            {gpsNotice && (
+              <p className="text-xs font-medium text-amber-700">{gpsNotice}</p>
+            )}
+            {customerCoords && (
+              <p className="text-xs font-medium text-emerald-700">
+                Property pinned ({customerLocationSource === "gps" ? "via GPS" : "on map"}: {customerCoords.lat.toFixed(5)}, {customerCoords.lng.toFixed(5)}). Click the map to adjust if needed.
+              </p>
+            )}
+            {showMapPicker && (
+              <div className="space-y-1.5">
+                <LiveMap
+                  markers={
+                    customerCoords
+                      ? [
+                          {
+                            id: "customer-pin",
+                            lat: customerCoords.lat,
+                            lng: customerCoords.lng,
+                            label: "Your Property",
+                            kind: "customer",
+                          },
+                        ]
+                      : []
+                  }
+                  center={customerCoords || undefined}
+                  heightClassName="h-56"
+                  interactivePicker
+                  onPickLocation={(lat, lng) => {
+                    setCustomerCoords({ lat, lng });
+                    setCustomerLocationSource("map_pin");
+                    setGpsNotice(null);
+                  }}
+                />
+                <p className="text-[11px] text-slate-500">
+                  Tap anywhere on the map to place or move your property pin.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -523,16 +658,16 @@ export default function RequestFormClient({
               <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
                 Preferred Visit Time
               </label>
-              <select
+              <ClassicSelect
                 value={formData.preferredTime}
-                onChange={(e) => setFormData((p) => ({ ...p, preferredTime: e.target.value }))}
-                className="h-12 w-full rounded-xl border border-[#CBD5E1] bg-white px-3.5 text-base text-[#0B1F3A]"
-              >
-                <option value="Morning (8:00 AM – 12:00 PM)">Morning (8:00 AM – 12:00 PM)</option>
-                <option value="Afternoon (12:00 PM – 4:00 PM)">Afternoon (12:00 PM – 4:00 PM)</option>
-                <option value="Evening (4:00 PM – 6:30 PM)">Evening (4:00 PM – 6:30 PM)</option>
-                <option value="Anytime Today">Earliest Available</option>
-              </select>
+                onChange={(val) => setFormData((p) => ({ ...p, preferredTime: val }))}
+                options={[
+                  { value: "Morning (8:00 AM – 12:00 PM)", label: "Morning (8:00 AM – 12:00 PM)" },
+                  { value: "Afternoon (12:00 PM – 4:00 PM)", label: "Afternoon (12:00 PM – 4:00 PM)" },
+                  { value: "Evening (4:00 PM – 6:30 PM)", label: "Evening (4:00 PM – 6:30 PM)" },
+                  { value: "Anytime Today", label: "Earliest Available" },
+                ]}
+              />
             </div>
           </div>
 

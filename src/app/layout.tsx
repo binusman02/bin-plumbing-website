@@ -1,8 +1,11 @@
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
+import { cacheLife, cacheTag } from "next/cache";
 import { Plus_Jakarta_Sans, Inter } from "next/font/google";
 import "./globals.css";
 import { COMPANY } from "@/data/company";
 import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
+import { SITE_NAME, SITE_URL } from "@/lib/seo";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -19,7 +22,7 @@ const inter = Inter({
   display: "swap",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com.ng";
+const siteUrl = SITE_URL;
 
 export const viewport: Viewport = {
   themeColor: "#07152B",
@@ -32,11 +35,28 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: `${COMPANY.name} | Reliable Plumbing Services, Coordinated with Care`,
-    template: `%s | ${COMPANY.name}`,
+    default: `${SITE_NAME} | Plumber & Plumbing Services in Kano`,
+    template: `%s | ${SITE_NAME}`,
   },
-  description: `${COMPANY.name} coordinates plumbing services, itemised quotations, pipework, leak detection, drainage, bathroom sanitaryware, water storage, and pumps.`,
+  description: `${SITE_NAME} provides residential and commercial plumbing services in Kano State—pipe repairs, leak detection, water pumps, overhead tanks, bathrooms, and drainage with itemised quotes.`,
+  keywords: [
+    "Bin Plumbing Services Ltd",
+    "plumber in Kano",
+    "plumbing services in Kano",
+    "pumping machine repair in Kano",
+    "water leakage repair in Kano",
+    "water tank installation in Kano",
+    "bathroom plumbing installation in Kano",
+    "blocked drainage repair in Kano",
+    "mai aikin famfo Kano",
+    "gyaran injin famfo",
+  ],
+  category: "Home Services",
   applicationName: "Bin Plumbing",
+  icons: {
+    icon: "/images/logo/bin-plumbing-logo.jpg",
+    apple: "/icons/icon-192x192.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -67,7 +87,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/images/plumberz/carousel-1.jpg",
+        url: "/opengraph-image",
         width: 1200,
         height: 630,
         alt: "Bin Plumbing Services Ltd - Coordinated Plumbing Services",
@@ -78,15 +98,15 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: `${COMPANY.name} | Reliable Plumbing Services`,
     description: `Coordinated plumbing services with transparent itemised quotations.`,
-    images: ["/images/plumberz/carousel-1.jpg"],
+    images: ["/opengraph-image"],
   },
 };
 
-export default async function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+async function OrganizationJsonLd() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings", "service-categories");
+
   const [settings, activeServices] = await Promise.all([
     getMarketplaceSettings(),
     getServiceCategories(true),
@@ -100,6 +120,7 @@ export default async function RootLayout({
         "@id": `${siteUrl}/#website`,
         url: siteUrl,
         name: settings.company_name || COMPANY.name,
+        inLanguage: "en-NG",
       },
       {
         "@type": ["Plumber", "Organization"],
@@ -107,6 +128,7 @@ export default async function RootLayout({
         name: settings.company_name || COMPANY.name,
         legalName: settings.company_name || COMPANY.name,
         alternateName: COMPANY.shortName,
+        priceRange: "₦₦",
         url: siteUrl,
         logo: `${siteUrl}/images/logo/bin-plumbing-logo.jpg`,
         image: `${siteUrl}/opengraph-image`,
@@ -118,13 +140,18 @@ export default async function RootLayout({
           telephone: settings.company_phone,
           email: settings.company_email,
           contactType: "customer service",
-          availableLanguage: ["English"],
+          availableLanguage: ["English", "Hausa"],
         },
         address: {
           "@type": "PostalAddress",
           streetAddress: settings.company_address,
+          addressLocality: "Kano",
+          addressRegion: "Kano State",
           addressCountry: "NG",
         },
+        hasMap: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+          settings.company_address?.trim() || "Bin Plumbing Services Ltd, Kano, Nigeria"
+        )}`,
         ...(settings.active_coverage_locations.length > 0
           ? {
               areaServed: settings.active_coverage_locations.map((loc) => ({
@@ -151,16 +178,29 @@ export default async function RootLayout({
   };
 
   return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+    />
+  );
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
     <html
       lang="en-NG"
+      data-scroll-behavior="smooth"
       suppressHydrationWarning
       className={`${plusJakarta.variable} ${inter.variable} font-sans h-full antialiased scroll-smooth`}
     >
       <head>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
+        <Suspense fallback={null}>
+          <OrganizationJsonLd />
+        </Suspense>
       </head>
       <body
         suppressHydrationWarning

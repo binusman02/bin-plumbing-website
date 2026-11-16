@@ -28,6 +28,12 @@ export interface RealtimeHubOptions {
   onAdminSignal?: () => void;
   onNotificationSync?: (data: { recipientRole?: string }) => void;
   onDataSync?: (data: { entity?: string; ticketNumber?: string }) => void;
+  /**
+   * "A plumber's location changed" signal. It carries NO coordinates and no personal
+   * data; authorised viewers re-fetch through /api/tracking/snapshot.
+   */
+  onLocationSignal?: (data: { ticketNumbers: string[] }) => void;
+  onConnectionChange?: (connected: boolean) => void;
   onPresenceSync?: (online: {
     adminOnline: boolean;
     plumberOnline: boolean;
@@ -43,6 +49,8 @@ let sharedSubscribed = false;
 let latestPresencePayload: RealtimePresencePayload | null = null;
 const pendingBroadcasts: Array<{ event: string; payload: Record<string, unknown> }> = [];
 const hubListeners = new Set<{ current: RealtimeHubOptions }>();
+const locationSignalListeners = new Set<(data: { ticketNumbers: string[] }) => void>();
+const connectionListeners = new Set<(connected: boolean) => void>();
 
 function computePresenceSummary(ch: RealtimeChannel) {
   const state = ch.presenceState<RealtimePresencePayload>();
@@ -90,6 +98,12 @@ function getSharedChannel(): RealtimeChannel | null {
   if (typeof window === "undefined") return null;
   if (!sharedChannel) {
     const supabase = createClient();
+    for (const existing of supabase.getChannels()) {
+      if (existing.topic === `realtime:${CHANNEL_NAME}`) {
+        void supabase.removeChannel(existing);
+      }
+    }
+    sharedSubscribed = false;
     const ch = supabase.channel(CHANNEL_NAME, {
       config: { broadcast: { self: false } },
     });
@@ -109,11 +123,6 @@ function getSharedChannel(): RealtimeChannel | null {
           const ticketNumber = String(payload.ticketNumber);
           for (const listener of hubListeners) {
             listener.current.onMessageSignal?.({ ticketNumber });
-          }
-        }
-        if (payload?.message) {
-          for (const listener of hubListeners) {
-            listener.current.onMessage?.(payload.message as JobMessage);
           }
         }
       })
@@ -188,6 +197,16 @@ function getSharedChannel(): RealtimeChannel | null {
           }
         }
       })
+      .on("broadcast", { event: "location_update" }, ({ payload }) => {
+        const raw = Array.isArray(payload?.ticketNumbers) ? payload.ticketNumbers : [];
+        const ticketNumbers = raw
+          .filter((t: unknown): t is string => typeof t === "string")
+          .slice(0, 20);
+        for (const listener of hubListeners) {
+          listener.current.onLocationSignal?.({ ticketNumbers });
+        }
+        for (const cb of locationSignalListeners) cb({ ticketNumbers });
+      })
       .on("broadcast", { event: "data_sync" }, ({ payload }) => {
         const data = {
           entity: typeof payload?.entity === "string" ? payload.entity : undefined,
@@ -260,8 +279,15 @@ function getSharedChannel(): RealtimeChannel | null {
 
     sharedChannel = ch;
     ch.subscribe(async (status) => {
+      const connected = status === "SUBSCRIBED";
+      if (sharedSubscribed !== connected) {
+        sharedSubscribed = connected;
+        for (const listener of hubListeners) {
+          listener.current.onConnectionChange?.(connected);
+        }
+        for (const cb of connectionListeners) cb(connected);
+      }
       if (status === "SUBSCRIBED") {
-        sharedSubscribed = true;
         if (latestPresencePayload) {
           await ch.track(latestPresencePayload);
         }
@@ -291,6 +317,7 @@ export function broadcastRealtimeEvent(
     | "plumber_availability"
     | "admin_signal"
     | "notification_sync"
+    | "location_update"
     | "data_sync",
   payload: Record<string, unknown>
 ): void {
@@ -311,6 +338,28 @@ export function broadcastRealtimeEvent(
   } catch {
     // Ignore transient broadcast errors
   }
+}
+
+export function isRealtimeConnected(): boolean {
+  return sharedSubscribed;
+}
+
+/**
+ * Subscribe to location-changed signals without touching presence tracking.
+ * Signals contain no coordinates; call /api/tracking/snapshot to read data.
+ */
+export function subscribeLocationSignals(
+  onSignal: (data: { ticketNumbers: string[] }) => void,
+  onConnection?: (connected: boolean) => void
+): () => void {
+  locationSignalListeners.add(onSignal);
+  if (onConnection) connectionListeners.add(onConnection);
+  getSharedChannel(); // make sure the shared channel exists/subscribes
+  if (onConnection) onConnection(sharedSubscribed);
+  return () => {
+    locationSignalListeners.delete(onSignal);
+    if (onConnection) connectionListeners.delete(onConnection);
+  };
 }
 
 export function useRealtimeHub(options: RealtimeHubOptions) {

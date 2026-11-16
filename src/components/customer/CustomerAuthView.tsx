@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, Loader2, Lock, Smartphone } from "lucide-react";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import {
   loginCustomerWithPasswordAction,
   registerCustomerWithPasswordAction,
@@ -317,17 +318,13 @@ export function CustomerAuthView({ activeLocations = [] }: CustomerAuthViewProps
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={AUTH_LABEL_CLASS}>State *</label>
-              <select
+              <ClassicSelect
+                variant="dark"
                 value={regState}
-                onChange={(e) => setRegState(e.target.value)}
-                className={AUTH_INPUT_CLASS}
-              >
-                {NIGERIAN_STATES.map((s) => (
-                  <option key={s} value={s} className="bg-[#0B1F3A]">
-                    {s}
-                  </option>
-                ))}
-              </select>
+                onChange={setRegState}
+                placeholder="Select state"
+                options={NIGERIAN_STATES.map((s) => ({ value: s, label: s }))}
+              />
             </div>
             <div>
               <label className={AUTH_LABEL_CLASS}>City / Area *</label>

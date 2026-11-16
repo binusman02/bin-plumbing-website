@@ -5,6 +5,7 @@ import { Archive, ArrowLeft, CheckCircle2, Download, Eye, Mail, Search, Trash2, 
 import { deleteEnquiry } from "@/app/actions/admin-management";
 import { saveEnquiryNoteAction } from "@/app/actions/marketplace-actions";
 import { ActionMenu, ConfirmDialog } from "@/components/ui";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import { formatDateTime } from "@/lib/currency";
 import { getStatusMeta } from "@/lib/status-styles";
 
@@ -133,31 +134,11 @@ export function EnquiriesManagerClient({
   };
 
   return (
-    <div className="space-y-6 pb-20 lg:pb-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-[#0B1F3A]">Direct Enquiries</h2>
-          <p className="text-sm text-slate-500">
-            Contact page submissions with status tracking, internal notes, and CSV export.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={filtered.length === 0}
-            className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0B1F3A] hover:bg-slate-50 disabled:opacity-50"
-          >
-            <Download className="h-4 w-4" />
-            Export CSV
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-2 overflow-x-auto pb-1">
+    <div className="space-y-3 pb-20 lg:pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
           {[
-            { id: "all", label: "All" },
+            { id: "all", label: "All Enquiries" },
             { id: "new", label: "New" },
             { id: "contacted", label: "Contacted" },
             { id: "closed", label: "Closed" },
@@ -166,52 +147,72 @@ export function EnquiriesManagerClient({
               tab.id === "all"
                 ? enriched.length
                 : enriched.filter((e) => e.resolvedStatus === tab.id).length;
+            const active = statusFilter === tab.id;
             return (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setStatusFilter(tab.id)}
-                className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold ${
-                  statusFilter === tab.id
-                    ? "bg-[#0B1F3A] text-white"
-                    : "border border-slate-200 bg-white text-slate-700"
+                className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition ${
+                  active
+                    ? "bg-[#0B1F3A] text-white shadow-2xs"
+                    : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                {tab.label} ({count})
+                <span>{tab.label}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {count}
+                </span>
               </button>
             );
           })}
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, phone, area..."
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm"
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-52 sm:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search sender, phone, area..."
+              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2.5 text-xs text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={filtered.length === 0}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </button>
         </div>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-xs">
           <Mail className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <p className="text-base font-semibold text-slate-700">No enquiries found</p>
         </div>
       ) : (
         <>
-          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs md:block">
+            <table className="w-full border-collapse text-left text-[13px]">
+              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50/90 text-[11px] font-semibold text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Sender</th>
-                  <th className="px-4 py-3">Area</th>
-                  <th className="px-4 py-3">Message</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Sender Name</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Phone</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Location / Area</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Message Summary</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Stage</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Date</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -220,29 +221,35 @@ export function EnquiriesManagerClient({
                   return (
                     <tr
                       key={item.id}
-                      className="hover:bg-slate-50"
+                      className="group transition-colors hover:bg-slate-50/90"
                     >
-                      <td onClick={() => openDetail(item)} className="cursor-pointer whitespace-nowrap px-4 py-3.5 text-xs text-slate-500">
-                        {formatDateTime(item.created_at)}
+                      <td onClick={() => openDetail(item)} className="cursor-pointer whitespace-nowrap px-3.5 py-2.5 font-semibold text-[#0B1F3A] group-hover:underline">
+                        {item.full_name}
                       </td>
-                      <td onClick={() => openDetail(item)} className="cursor-pointer px-4 py-3.5">
-                        <p className="font-bold text-[#0B1F3A]">{item.full_name}</p>
-                        <p className="text-xs text-slate-500">{item.phone}</p>
+                      <td onClick={() => openDetail(item)} className="cursor-pointer whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-600">
+                        {item.phone}
                       </td>
-                      <td onClick={() => openDetail(item)} className="cursor-pointer px-4 py-3.5 text-slate-700">
+                      <td onClick={() => openDetail(item)} className="cursor-pointer whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-700">
                         {item.area_in_kano || "Not specified"}
                       </td>
-                      <td onClick={() => openDetail(item)} className="cursor-pointer max-w-xs truncate px-4 py-3.5 text-slate-700">
+                      <td onClick={() => openDetail(item)} className="cursor-pointer max-w-xs truncate px-3.5 py-2.5 text-xs text-slate-700">
                         {item.message}
                       </td>
-                      <td onClick={() => openDetail(item)} className="cursor-pointer px-4 py-3.5">
+                      <td onClick={() => openDetail(item)} className="cursor-pointer whitespace-nowrap px-3.5 py-2.5">
                         <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}
+                          className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${badge.className}`}
                         >
                           {badge.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 text-right">
+                      <td onClick={() => openDetail(item)} className="cursor-pointer whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-500">
+                        {new Date(item.created_at).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-right">
                         <ActionMenu
                           items={[
                             {
@@ -383,17 +390,17 @@ export function EnquiriesManagerClient({
 
               <div>
                 <label className="mb-1 block text-sm font-semibold text-[#0B1F3A]">Status</label>
-                <select
+                <ClassicSelect
                   value={editStatus}
-                  onChange={(e) =>
-                    setEditStatus(e.target.value as "new" | "contacted" | "closed")
+                  onChange={(val) =>
+                    setEditStatus(val as "new" | "contacted" | "closed")
                   }
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"
-                >
-                  <option value="new">New</option>
-                  <option value="contacted">Contacted</option>
-                  <option value="closed">Closed</option>
-                </select>
+                  options={[
+                    { value: "new", label: "New" },
+                    { value: "contacted", label: "Contacted" },
+                    { value: "closed", label: "Closed" },
+                  ]}
+                />
               </div>
 
               <div>

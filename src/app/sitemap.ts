@@ -1,23 +1,19 @@
 import type { MetadataRoute } from "next";
-import { getGuides, getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
-
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
+import {
+  getAllGalleryItems,
+  getGuides,
+  getMarketplaceSettings,
+  getServiceCategories,
+} from "@/lib/marketplace";
+import { SITE_URL, slugifySeo } from "@/lib/seo";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com.ng";
   const now = new Date();
 
-  const staticRoutes = [
+  const staticRoutes: MetadataRoute.Sitemap = [
     "",
     "/services",
     "/areas",
-    "/guides",
     "/how-it-works",
     "/about",
     "/gallery",
@@ -28,7 +24,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     "/privacy",
     "/terms",
   ].map((route) => ({
-    url: `${baseUrl}${route}`,
+    url: `${SITE_URL}${route}`,
     lastModified: now,
     changeFrequency: route === "" ? ("daily" as const) : ("weekly" as const),
     priority:
@@ -41,37 +37,129 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             : 0.7,
   }));
 
-  const [categories, settings, guides] = await Promise.all([
+  const blogIndexRoutes: MetadataRoute.Sitemap = [
+    {
+      url: `${SITE_URL}/en/blog`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+      alternates: {
+        languages: {
+          "en-NG": `${SITE_URL}/en/blog`,
+          ha: `${SITE_URL}/ha/blog`,
+        },
+      },
+    },
+    {
+      url: `${SITE_URL}/ha/blog`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+      alternates: {
+        languages: {
+          "en-NG": `${SITE_URL}/en/blog`,
+          ha: `${SITE_URL}/ha/blog`,
+        },
+      },
+    },
+  ];
+
+  const [categories, settings, guides, galleryItems] = await Promise.all([
     getServiceCategories(true),
     getMarketplaceSettings(),
     getGuides(true),
+    getAllGalleryItems(true),
   ]);
 
-  const serviceEntries = categories
+  const galleryImages = galleryItems
+    .map((g) => g.image_url)
+    .filter((u): u is string => Boolean(u))
+    .map((u) =>
+      u.startsWith("http") ? u : `${SITE_URL}${u.startsWith("/") ? "" : "/"}${u}`
+    );
+
+  const enrichedStaticRoutes = staticRoutes.map((entry) =>
+    entry.url === `${SITE_URL}/gallery` && galleryImages.length > 0
+      ? { ...entry, images: galleryImages }
+      : entry
+  );
+
+  const serviceEntries: MetadataRoute.Sitemap = categories
     .filter((c) => c.slug || c.title)
     .map((c) => ({
-      url: `${baseUrl}/services/${c.slug || slugify(c.title)}`,
+      url: `${SITE_URL}/services/${c.slug || slugifySeo(c.title || "")}`,
       lastModified: now,
       changeFrequency: "weekly" as const,
-      priority: 0.8,
+      priority: 0.85,
     }));
 
-  const hasAddress = Boolean(settings.company_address?.trim());
-  const areaEntries = hasAddress
-    ? (settings.active_coverage_locations || []).map((area) => ({
-        url: `${baseUrl}/areas/${slugify(area)}`,
-        lastModified: now,
-        changeFrequency: "weekly" as const,
-        priority: 0.7,
-      }))
-    : [];
-
-  const guideEntries = guides.map((g) => ({
-    url: `${baseUrl}/guides/${g.slug}`,
-    lastModified: new Date(g.updated_at || g.created_at),
-    changeFrequency: "monthly" as const,
-    priority: 0.6,
+  const areaEntries: MetadataRoute.Sitemap = (
+    settings.active_coverage_locations || []
+  ).map((area) => ({
+    url: `${SITE_URL}/areas/${slugifySeo(area)}`,
+    lastModified: now,
+    changeFrequency: "weekly" as const,
+    priority: 0.75,
   }));
 
-  return [...staticRoutes, ...serviceEntries, ...areaEntries, ...guideEntries];
+  const blogArticleEntries: MetadataRoute.Sitemap = [];
+  for (const g of guides) {
+    const enReady = g.en_status === "published" && Boolean(g.en_slug.trim());
+    const haReady = g.ha_status === "published" && Boolean(g.ha_slug.trim());
+    const lastModified = new Date(g.updated_at || g.created_at);
+    const alternates =
+      enReady && haReady
+        ? {
+            languages: {
+              "en-NG": `${SITE_URL}/en/blog/${g.en_slug}`,
+              ha: `${SITE_URL}/ha/blog/${g.ha_slug}`,
+            },
+          }
+        : undefined;
+
+    if (enReady) {
+      blogArticleEntries.push({
+        url: `${SITE_URL}/en/blog/${g.en_slug}`,
+        lastModified,
+        changeFrequency: "monthly",
+        priority: 0.7,
+        ...(alternates ? { alternates } : {}),
+        ...(g.featured_image
+          ? {
+              images: [
+                g.featured_image.startsWith("http")
+                  ? g.featured_image
+                  : `${SITE_URL}${g.featured_image}`,
+              ],
+            }
+          : {}),
+      });
+    }
+    if (haReady) {
+      blogArticleEntries.push({
+        url: `${SITE_URL}/ha/blog/${g.ha_slug}`,
+        lastModified,
+        changeFrequency: "monthly",
+        priority: 0.7,
+        ...(alternates ? { alternates } : {}),
+        ...(g.featured_image
+          ? {
+              images: [
+                g.featured_image.startsWith("http")
+                  ? g.featured_image
+                  : `${SITE_URL}${g.featured_image}`,
+              ],
+            }
+          : {}),
+      });
+    }
+  }
+
+  return [
+    ...enrichedStaticRoutes,
+    ...blogIndexRoutes,
+    ...serviceEntries,
+    ...areaEntries,
+    ...blogArticleEntries,
+  ];
 }

@@ -120,6 +120,33 @@ export default async function ServiceAreasPage() {
                   </div>
                 </div>
               </div>
+
+              <div className="overflow-hidden rounded-xl border border-[#E3E8EF] bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-[#E3E8EF] px-5 py-3.5">
+                  <p className="font-heading text-sm font-bold text-[#0B1F3A]">
+                    Kano Coverage Map
+                  </p>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      address || "Kano, Nigeria"
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-[#0B1F3A] underline decoration-[#F5B301] underline-offset-4 hover:text-[#E0A200]"
+                  >
+                    Open in Google Maps
+                  </a>
+                </div>
+                <iframe
+                  title="Bin Plumbing Service Areas Map"
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(
+                    address || "Kano, Nigeria"
+                  )}&t=&z=12&ie=UTF8&iwloc=&output=embed`}
+                  className="h-72 w-full border-0"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
             </div>
           )}
         </div>

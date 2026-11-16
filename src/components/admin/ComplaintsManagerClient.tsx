@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { AlertCircle, CheckCircle2, MessageSquareWarning, Search, Star, X } from "lucide-react";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import type { ComplaintRecord, ReviewRecord } from "@/lib/marketplace";
 import { moderateReviewAction, updateComplaintStatusAction } from "@/app/actions/marketplace-actions";
 import { getStatusMeta } from "@/lib/status-styles";
@@ -265,16 +266,16 @@ export function ComplaintsManagerClient({ initialComplaints, initialReviews = []
                 <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
                   Status
                 </label>
-                <select
+                <ClassicSelect
                   value={nextStatus}
-                  onChange={(e) => setNextStatus(e.target.value as ComplaintRecord["status"])}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-[#0B1F3A] focus:outline-none focus:ring-2 focus:ring-[#F5B301]/30"
-                >
-                  <option value="new">New</option>
-                  <option value="under_review">Under Review</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="closed">Closed</option>
-                </select>
+                  onChange={(val) => setNextStatus(val as ComplaintRecord["status"])}
+                  options={[
+                    { value: "new", label: "New" },
+                    { value: "under_review", label: "Under Review" },
+                    { value: "resolved", label: "Resolved" },
+                    { value: "closed", label: "Closed" },
+                  ]}
+                />
               </div>
 
               <div>

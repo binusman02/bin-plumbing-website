@@ -6,9 +6,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const ticketNumber = typeof body?.ticketNumber === "string" ? body.ticketNumber : "";
+    const roleInput = body?.viewerRole || body?.actorRole;
     const preferredRole =
-      body?.viewerRole === "admin" || body?.viewerRole === "plumber" || body?.viewerRole === "customer"
-        ? body.viewerRole
+      roleInput === "admin" || roleInput === "plumber" || roleInput === "customer"
+        ? roleInput
         : undefined;
 
     if (!ticketNumber) {

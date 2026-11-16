@@ -1,3 +1,4 @@
+import { cacheLife, cacheTag } from "next/cache";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import WhatsAppFloatingButton from "@/components/layout/WhatsAppFloatingButton";
@@ -8,6 +9,10 @@ export default async function PublicLayout({
 }: {
   children: React.ReactNode;
 }) {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings");
+
   const settings = await getMarketplaceSettings();
 
   return (

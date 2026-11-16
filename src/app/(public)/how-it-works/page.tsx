@@ -3,10 +3,17 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "How It Works",
+  title: "How Our Kano Plumbing Service Works",
   description:
-    "See our 10-step managed plumbing workflow from request submission and inspection to quotation approval and job completion.",
+    "See how Bin Plumbing Services Ltd works in Kano—from submitting your request and on-site inspection to itemised quote approval and completion.",
   alternates: { canonical: "/how-it-works" },
+  openGraph: {
+    title: "How Our Kano Plumbing Service Works | Bin Plumbing Services Ltd",
+    description:
+      "Step-by-step overview from request submission and inspection to quotation approval and live tracking.",
+    url: "/how-it-works",
+    type: "website",
+  },
 };
 
 const WORKFLOW_STEPS = [
@@ -122,17 +129,17 @@ export default function HowItWorksPage() {
               Submit a service request in a couple of minutes or track an existing ticket.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Link
               href="/request"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#F5B301] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
+              className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#F5B301] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
             >
-              Request a Plumber
-              <ArrowRight className="h-4 w-4" />
+              <span>Request a Plumber</span>
+              <ArrowRight className="h-4 w-4 shrink-0" />
             </Link>
             <Link
               href="/tracking"
-              className="inline-flex h-12 items-center justify-center rounded-lg border border-[#0B1F3A] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
+              className="inline-flex min-h-12 items-center justify-center whitespace-nowrap rounded-lg border border-[#0B1F3A] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
             >
               Track Request
             </Link>

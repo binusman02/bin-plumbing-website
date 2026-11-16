@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   Copy,
@@ -13,6 +14,7 @@ import {
   Reply,
   Search,
   Send,
+  ShieldAlert,
   Smile,
   Trash2,
   X,
@@ -30,6 +32,10 @@ import {
   uploadChatFile,
 } from "@/components/chat/ChatAttachment";
 import { Avatar } from "@/components/ui";
+import {
+  NOTIFICATION_NAV_EVENT,
+  type NotificationNavigationRequest,
+} from "@/lib/notification-navigation";
 import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 import { getStatusMeta } from "@/lib/status-styles";
 import type { ChatAttachment, JobMessage, ServiceRequestRecord } from "@/lib/marketplace";
@@ -41,9 +47,13 @@ interface WhatsAppChatWorkspaceProps {
   requests: ServiceRequestRecord[];
   initialMessages: JobMessage[];
   initialTicket?: string | null;
+  initialMessageId?: string | null;
+  navigationKey?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
   onTicketRead?: (ticketNumber: string) => void;
+  onTargetChange?: (ticket: string | null, messageId: string | null) => void;
+  plumberAvatars?: Record<string, string>;
 }
 
 function formatDayLabel(iso: string): string {
@@ -84,9 +94,13 @@ export function WhatsAppChatWorkspace({
   requests,
   initialMessages,
   initialTicket = null,
+  initialMessageId = null,
+  navigationKey = null,
   emptyTitle = "No conversations yet",
   emptyDescription = "Messages for your service requests and active jobs will appear here.",
   onTicketRead,
+  onTargetChange,
+  plumberAvatars,
 }: WhatsAppChatWorkspaceProps) {
   const [messages, setMessages] = useState<JobMessage[]>(initialMessages);
   const [selectedTicket, setSelectedTicket] = useState<string | null>(initialTicket);
@@ -94,6 +108,21 @@ export function WhatsAppChatWorkspace({
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearch, setThreadSearch] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
+
+  // Target message deep-linking & highlight states
+  const [pendingScrollTarget, setPendingScrollTarget] = useState<{
+    ticket: string;
+    messageId: string;
+    navKey: string;
+  } | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [highlightPulseCount, setHighlightPulseCount] = useState(0);
+  const [targetLoading, setTargetLoading] = useState(false);
+  const [targetStatusBanner, setTargetStatusBanner] = useState<{
+    type: "error" | "warning";
+    title: string;
+    message: string;
+  } | null>(null);
 
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyTo] = useState<JobMessage | null>(null);
@@ -121,10 +150,24 @@ export function WhatsAppChatWorkspace({
   });
 
   const endRef = useRef<HTMLDivElement | null>(null);
+  const messagesFeedRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftsRef = useRef<Record<string, string>>({});
   const prevTicketRef = useRef<string | null>(initialTicket);
+  const suppressAutoScrollBottomRef = useRef<boolean>(Boolean(initialMessageId));
+  const lastHandledNavKeyRef = useRef<string>("");
+  const messagesRef = useRef<JobMessage[]>(messages);
+  const requestsRef = useRef<ServiceRequestRecord[]>(requests);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    requestsRef.current = requests;
+  }, [requests]);
 
   useEffect(() => {
     setMessages((prev) => {
@@ -145,9 +188,182 @@ export function WhatsAppChatWorkspace({
     });
   }, [initialMessages]);
 
+  const executeTargetNavigation = useCallback(
+    async (
+      rawTicket: string | null | undefined,
+      rawMessageId: string | null | undefined,
+      navKey: string
+    ) => {
+      const cleanTicket = (rawTicket || "").trim();
+      const cleanMsgId = (rawMessageId || "").trim();
+      if (!cleanTicket && !cleanMsgId) return;
+
+      // Clear search filters so the target conversation & message are visible
+      setListSearch("");
+      setUnreadOnly(false);
+      setThreadSearchOpen(false);
+      setThreadSearch("");
+      setTargetStatusBanner(null);
+
+      if (cleanMsgId) {
+        suppressAutoScrollBottomRef.current = true;
+      }
+
+      const currentRequests = requestsRef.current;
+      const currentMessages = messagesRef.current;
+
+      // Immediate local selection & scroll for already-loaded messages on repeated clicks
+      if (cleanTicket && cleanMsgId) {
+        const localAllowed = currentRequests.some(
+          (r) => r.ticket_number === cleanTicket
+        );
+        const localMsg = currentMessages.find(
+          (m) => m.id === cleanMsgId && m.ticket_number === cleanTicket
+        );
+        if (
+          localAllowed &&
+          localMsg &&
+          !localMsg.deleted_for_everyone &&
+          !(
+            Array.isArray(localMsg.deleted_by_ids) &&
+            localMsg.deleted_by_ids.includes(actorId)
+          ) &&
+          !(actorRole === "customer" && localMsg.is_internal)
+        ) {
+          setSelectedTicket(cleanTicket);
+          setPendingScrollTarget({
+            ticket: cleanTicket,
+            messageId: cleanMsgId,
+            navKey,
+          });
+        }
+      } else if (cleanTicket && !cleanMsgId) {
+        const localAllowed = currentRequests.some(
+          (r) => r.ticket_number === cleanTicket
+        );
+        if (localAllowed) {
+          suppressAutoScrollBottomRef.current = false;
+          setSelectedTicket(cleanTicket);
+        }
+      }
+
+      // Server verification & message hydration (handles permissions, older messages, and deleted messages)
+      setTargetLoading(true);
+      try {
+        const qs = new URLSearchParams();
+        if (cleanTicket) qs.set("ticket", cleanTicket);
+        if (cleanMsgId) qs.set("message", cleanMsgId);
+        qs.set("role", actorRole);
+
+        const res = await fetch(`/api/chat/resolve-target?${qs.toString()}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => null);
+
+        if (
+          !res.ok ||
+          data?.status === "access_denied" ||
+          data?.status === "unauthorized" ||
+          data?.status === "not_found"
+        ) {
+          setPendingScrollTarget(null);
+          setHighlightedMessageId(null);
+          const isDenied =
+            res.status === 403 ||
+            res.status === 401 ||
+            data?.status === "access_denied" ||
+            data?.status === "unauthorized";
+          setSelectedTicket(null);
+          setTargetStatusBanner({
+            type: isDenied ? "error" : "warning",
+            title: isDenied ? "Access Denied" : "Destination Unavailable",
+            message:
+              data?.reason ||
+              (isDenied
+                ? "Access denied: You do not have permission to view this conversation or message."
+                : "The requested conversation or message could not be found."),
+          });
+          return;
+        }
+
+        if (Array.isArray(data?.messages)) {
+          const fetched: JobMessage[] = data.messages;
+          setMessages((prev) => {
+            const byId = new Map<string, JobMessage>();
+            for (const m of prev) byId.set(m.id, m);
+            for (const m of fetched) byId.set(m.id, m);
+            return Array.from(byId.values()).sort((a, b) =>
+              a.created_at.localeCompare(b.created_at)
+            );
+          });
+        }
+
+        const resolvedTicket = String(data?.ticketNumber || cleanTicket);
+        if (resolvedTicket) {
+          setSelectedTicket(resolvedTicket);
+        }
+
+        if (data?.status === "message_deleted") {
+          suppressAutoScrollBottomRef.current = true;
+          setPendingScrollTarget(null);
+          setHighlightedMessageId(null);
+          setTargetStatusBanner({
+            type: "warning",
+            title: "Original Message Unavailable",
+            message:
+              data?.reason ||
+              "The specific message from this notification has been deleted and is no longer available.",
+          });
+          return;
+        }
+
+        if (data?.messageId) {
+          suppressAutoScrollBottomRef.current = true;
+          setPendingScrollTarget({
+            ticket: resolvedTicket,
+            messageId: String(data.messageId),
+            navKey,
+          });
+        } else {
+          suppressAutoScrollBottomRef.current = false;
+        }
+      } catch {
+        // Ignore transient network errors if local fast-path already resolved
+      } finally {
+        setTargetLoading(false);
+      }
+    },
+    [actorRole, actorId]
+  );
+
+  // Trigger target navigation when initialTicket / initialMessageId / navigationKey props change
   useEffect(() => {
-    if (initialTicket) setSelectedTicket(initialTicket);
-  }, [initialTicket]);
+    if (!initialTicket && !initialMessageId) return;
+    const effectiveKey =
+      navigationKey || `prop-${initialTicket || ""}-${initialMessageId || ""}`;
+    if (lastHandledNavKeyRef.current === effectiveKey) return;
+    lastHandledNavKeyRef.current = effectiveKey;
+    executeTargetNavigation(initialTicket, initialMessageId, effectiveKey);
+  }, [initialTicket, initialMessageId, navigationKey, executeTargetNavigation]);
+
+  // Listen for explicit notification click events even when URL and props are unchanged
+  useEffect(() => {
+    const handleNavEvent = (ev: Event) => {
+      const custom = ev as CustomEvent<NotificationNavigationRequest>;
+      const detail = custom.detail;
+      if (!detail) return;
+      if (!detail.ticket && !detail.messageId) return;
+      if (lastHandledNavKeyRef.current === detail.navKey) return;
+      lastHandledNavKeyRef.current = detail.navKey;
+      onTargetChange?.(detail.ticket, detail.messageId);
+      executeTargetNavigation(detail.ticket, detail.messageId, detail.navKey);
+    };
+
+    window.addEventListener(NOTIFICATION_NAV_EVENT, handleNavEvent);
+    return () => {
+      window.removeEventListener(NOTIFICATION_NAV_EVENT, handleNavEvent);
+    };
+  }, [executeTargetNavigation, onTargetChange]);
 
   // Preserve per-conversation drafts when switching threads
   useEffect(() => {
@@ -167,8 +383,15 @@ export function WhatsAppChatWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTicket]);
 
+  const syncInFlightRef = useRef<string | null>(null);
+  const lastSyncAtRef = useRef<Record<string, number>>({});
   const syncTicketMessages = useCallback(
-    async (ticket: string) => {
+    async (ticket: string, force = false) => {
+      if (syncInFlightRef.current === ticket) return;
+      const now = Date.now();
+      if (!force && now - (lastSyncAtRef.current[ticket] || 0) < 5000) return;
+      syncInFlightRef.current = ticket;
+      lastSyncAtRef.current[ticket] = now;
       try {
         const res = await fetch(
           `/api/chat/presence?ticket=${encodeURIComponent(ticket)}&role=${actorRole}`,
@@ -192,15 +415,20 @@ export function WhatsAppChatWorkspace({
         }
       } catch {
         // Ignore transient network errors
+      } finally {
+        if (syncInFlightRef.current === ticket) {
+          syncInFlightRef.current = null;
+        }
       }
     },
     [actorRole]
   );
 
-  // Presence heartbeat, offline unload signal, visibility listener & online reconnect sync
+  // Presence heartbeat & offline unload signal (independent of selectedTicket)
   useEffect(() => {
     let active = true;
     const pingPresence = () => {
+      if (document.visibilityState === "hidden") return;
       fetch("/api/chat/presence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -214,25 +442,7 @@ export function WhatsAppChatWorkspace({
     };
 
     pingPresence();
-    const timer = setInterval(pingPresence, 25000);
-    const syncTimer = setInterval(() => {
-      if (document.visibilityState === "visible" && selectedTicket) {
-        void syncTicketMessages(selectedTicket);
-      }
-    }, 5000);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        setVisTick((v) => v + 1);
-        pingPresence();
-        if (selectedTicket) syncTicketMessages(selectedTicket);
-      }
-    };
-
-    const handleOnline = () => {
-      pingPresence();
-      if (selectedTicket) syncTicketMessages(selectedTicket);
-    };
+    const timer = setInterval(pingPresence, 45000);
 
     const handlePageHide = () => {
       const payload = JSON.stringify({ role: actorRole, action: "offline" });
@@ -244,19 +454,42 @@ export function WhatsAppChatWorkspace({
       }
     };
 
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("online", handleOnline);
     window.addEventListener("pagehide", handlePageHide);
-
     return () => {
       active = false;
       clearInterval(timer);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [actorRole]);
+
+  // Fallback ticket message sync, visibility listener & online reconnect sync
+  useEffect(() => {
+    const syncTimer = setInterval(() => {
+      if (document.visibilityState === "visible" && selectedTicket) {
+        void syncTicketMessages(selectedTicket);
+      }
+    }, 45000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        setVisTick((v) => v + 1);
+        if (selectedTicket) void syncTicketMessages(selectedTicket);
+      }
+    };
+
+    const handleOnline = () => {
+      if (selectedTicket) void syncTicketMessages(selectedTicket, true);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
       clearInterval(syncTimer);
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
-      window.removeEventListener("pagehide", handlePageHide);
     };
-  }, [actorRole, selectedTicket, syncTicketMessages]);
+  }, [selectedTicket, syncTicketMessages]);
 
   useRealtimeHub({
     role: actorRole,
@@ -352,6 +585,7 @@ export function WhatsAppChatWorkspace({
         unreadCount: number;
         lastActivity: string;
         isOnline: boolean;
+        avatarUrl?: string;
       }
     >();
 
@@ -374,6 +608,14 @@ export function WhatsAppChatWorkspace({
             Boolean(req.assigned_plumber_id && presence.onlinePlumberIds.includes(req.assigned_plumber_id))
           : presence.adminOnline;
 
+      const avatarUrl =
+        actorRole !== "plumber" && plumberAvatars
+          ? (req.assigned_plumber_id && plumberAvatars[req.assigned_plumber_id]) ||
+            (req.assigned_technician &&
+              plumberAvatars[req.assigned_technician.trim().toLowerCase()]) ||
+            undefined
+          : undefined;
+
       map.set(req.ticket_number, {
         ticket: req.ticket_number,
         req,
@@ -382,6 +624,7 @@ export function WhatsAppChatWorkspace({
         unreadCount: 0,
         lastActivity: req.updated_at || req.created_at,
         isOnline,
+        avatarUrl,
       });
     }
 
@@ -420,7 +663,7 @@ export function WhatsAppChatWorkspace({
         );
       })
       .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
-  }, [requests, visibleMessages, actorRole, presence, listSearch, unreadOnly]);
+  }, [requests, visibleMessages, actorRole, presence, listSearch, unreadOnly, plumberAvatars]);
 
   const activeThread = useMemo(
     () => threads.find((t) => t.ticket === selectedTicket) || null,
@@ -446,7 +689,8 @@ export function WhatsAppChatWorkspace({
     return first?.id || null;
   }, [threadMessages, actorRole]);
 
-  // Mark active thread messages as read ONLY when page is visible
+  // Mark active thread messages & linked message notifications as read ONLY when page is visible
+  const lastReadSyncedTicketRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedTicket) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
@@ -455,7 +699,9 @@ export function WhatsAppChatWorkspace({
       const inReadBy = Array.isArray(m.read_by) && m.read_by.includes(actorRole);
       return !inReadBy;
     });
-    if (!hasUnread) return;
+    const isNewlyOpenedTicket = lastReadSyncedTicketRef.current !== selectedTicket;
+    if (!hasUnread && !isNewlyOpenedTicket) return;
+    lastReadSyncedTicketRef.current = selectedTicket;
 
     fetch("/api/chat/read", {
       method: "POST",
@@ -468,6 +714,7 @@ export function WhatsAppChatWorkspace({
           ticketNumber: selectedTicket,
           viewerRole: actorRole,
         });
+        broadcastRealtimeEvent("notification_sync", { recipientRole: actorRole });
         setMessages((prev) =>
           prev.map((m) =>
             m.ticket_number === selectedTicket && m.sender_role !== actorRole
@@ -487,9 +734,122 @@ export function WhatsAppChatWorkspace({
       .catch(() => {});
   }, [selectedTicket, visibleMessages, actorRole, onTicketRead, visTick]);
 
+  // Coordinate scrolling & highlighting with actual DOM rendering of the target message
   useEffect(() => {
+    if (!pendingScrollTarget) return;
+    if (selectedTicket !== pendingScrollTarget.ticket) return;
+
+    const targetId = pendingScrollTarget.messageId;
+    const existsInThread = threadMessages.some((m) => m.id === targetId);
+    if (!existsInThread) return;
+
+    let cancelled = false;
+    let observer: MutationObserver | null = null;
+
+    const scrollAndHighlight = (el: HTMLElement) => {
+      if (cancelled) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedMessageId(targetId);
+      setHighlightPulseCount((c) => c + 1);
+      setPendingScrollTarget(null);
+
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedMessageId((curr) => (curr === targetId ? null : curr));
+      }, 4500);
+    };
+
+    const escapeAttr = (val: string) =>
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(val)
+        : val.replace(/["\\]/g, "\\$&");
+
+    const tryLocateElement = (): boolean => {
+      const container = messagesFeedRef.current || document;
+      const el = container.querySelector<HTMLElement>(
+        `[data-message-id="${escapeAttr(targetId)}"]`
+      );
+      if (el) {
+        requestAnimationFrame(() => scrollAndHighlight(el));
+        return true;
+      }
+      return false;
+    };
+
+    if (!tryLocateElement() && messagesFeedRef.current) {
+      observer = new MutationObserver(() => {
+        if (tryLocateElement() && observer) {
+          observer.disconnect();
+          observer = null;
+        }
+      });
+      observer.observe(messagesFeedRef.current, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      if (observer) observer.disconnect();
+    };
+  }, [pendingScrollTarget, selectedTicket, threadMessages]);
+
+  useEffect(() => {
+    if (
+      suppressAutoScrollBottomRef.current ||
+      pendingScrollTarget ||
+      highlightedMessageId
+    ) {
+      return;
+    }
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadMessages.length, selectedTicket]);
+  }, [threadMessages.length, selectedTicket, pendingScrollTarget, highlightedMessageId]);
+
+  const handleSelectThread = (ticket: string) => {
+    suppressAutoScrollBottomRef.current = false;
+    setPendingScrollTarget(null);
+    setHighlightedMessageId(null);
+    setTargetStatusBanner(null);
+    setSelectedTicket(ticket);
+    onTargetChange?.(ticket, null);
+  };
+
+  // Press Escape on desktop to close overlays or exit the currently open chat
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (editingMsg) {
+        setEditingMsg(null);
+        setEditDraft("");
+        return;
+      }
+      if (emojiOpen) {
+        setEmojiOpen(false);
+        return;
+      }
+      if (threadSearchOpen) {
+        setThreadSearchOpen(false);
+        setThreadSearch("");
+        return;
+      }
+      if (replyTo) {
+        setReplyTo(null);
+        return;
+      }
+      if (selectedTicket) {
+        setPendingScrollTarget(null);
+        setHighlightedMessageId(null);
+        setTargetStatusBanner(null);
+        setSelectedTicket(null);
+        onTargetChange?.(null, null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editingMsg, emojiOpen, threadSearchOpen, replyTo, selectedTicket, onTargetChange]);
 
   const handleDraftChange = (val: string) => {
     setDraft(val);
@@ -515,10 +875,14 @@ export function WhatsAppChatWorkspace({
     if (!selectedTicket) return;
     if (!draft.trim() && !pendingFile) return;
     setSendError(null);
+    suppressAutoScrollBottomRef.current = false;
+    setHighlightedMessageId(null);
 
     const targetTicket = selectedTicket;
     const targetReqId = activeThread?.req?.id || targetTicket;
-    const isInternal = actorRole === "admin" && visibilityMode === "private_plumber";
+    const isInternal =
+      (actorRole === "admin" || actorRole === "plumber") &&
+      (visibilityMode === "private_plumber" || Boolean(replyTo?.is_internal));
 
     startTransition(async () => {
       try {
@@ -547,7 +911,7 @@ export function WhatsAppChatWorkspace({
           setPendingFile(null);
           setReplyTo(null);
           setEmojiOpen(false);
-          broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket, message: sentMsg });
+          broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket });
           broadcastRealtimeEvent("notification_sync", {});
         } else {
           setSendError(res.error || "Could not send message.");
@@ -574,7 +938,7 @@ export function WhatsAppChatWorkspace({
         setMessages((prev) => prev.map((m) => (m.id === target.id ? res.message! : m)));
         setEditingMsg(null);
         setEditDraft("");
-        broadcastRealtimeEvent("new_message", { ticketNumber: target.ticket_number, message: res.message });
+        broadcastRealtimeEvent("new_message", { ticketNumber: target.ticket_number });
       } else {
         setSendError(res.error || "Could not edit message.");
       }
@@ -612,7 +976,7 @@ export function WhatsAppChatWorkspace({
       {/* LEFT PANEL: CONVERSATION LIST */}
       <aside
         className={`flex w-full flex-col border-r border-slate-200 bg-white md:w-80 lg:w-96 ${
-          selectedTicket ? "hidden md:flex" : "flex"
+          selectedTicket || targetStatusBanner ? "hidden md:flex" : "flex"
         }`}
       >
         <div className="border-b border-slate-200 p-3.5">
@@ -654,13 +1018,13 @@ export function WhatsAppChatWorkspace({
                 <button
                   key={t.ticket}
                   type="button"
-                  onClick={() => setSelectedTicket(t.ticket)}
+                  onClick={() => handleSelectThread(t.ticket)}
                   className={`flex w-full items-start gap-3 px-3.5 py-3 text-left transition ${
                     active ? "bg-[#0B1F3A]/5" : "hover:bg-slate-50"
                   }`}
                 >
                   <div className="relative shrink-0">
-                    <Avatar name={t.title} size="md" />
+                    <Avatar name={t.title} src={t.avatarUrl} size="md" />
                     {t.isOnline && (
                       <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
                     )}
@@ -698,18 +1062,58 @@ export function WhatsAppChatWorkspace({
       {/* RIGHT PANEL: ACTIVE CONVERSATION */}
       <section
         className={`flex flex-1 flex-col bg-[#F4F6F9] ${
-          selectedTicket ? "flex" : "hidden md:flex"
+          selectedTicket || targetStatusBanner ? "flex" : "hidden md:flex"
         }`}
       >
         {!activeThread ? (
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0B1F3A]/10 text-[#0B1F3A]">
-              <MessageSquare className="h-7 w-7" />
-            </div>
-            <h3 className="mt-4 text-base font-bold text-[#0B1F3A]">Select a conversation</h3>
-            <p className="mt-1 max-w-sm text-xs text-slate-500">
-              Choose a service request thread on the left to view messages, delivery receipts, and attachments.
-            </p>
+            {targetStatusBanner ? (
+              <div
+                role="alert"
+                data-testid="chat-target-status-banner"
+                className={`max-w-md rounded-2xl border p-6 text-left shadow-sm ${
+                  targetStatusBanner.type === "error"
+                    ? "border-rose-200 bg-rose-50 text-rose-950"
+                    : "border-amber-200 bg-amber-50 text-amber-950"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  {targetStatusBanner.type === "error" ? (
+                    <ShieldAlert className="mt-0.5 h-6 w-6 shrink-0 text-rose-600" />
+                  ) : (
+                    <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+                  )}
+                  <div className="flex-1">
+                    <h3 className="text-base font-bold">
+                      {targetStatusBanner.title}
+                    </h3>
+                    <p className="mt-1 text-xs leading-relaxed opacity-90">
+                      {targetStatusBanner.message}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetStatusBanner(null);
+                        onTargetChange?.(null, null);
+                      }}
+                      className="mt-4 inline-flex h-9 items-center justify-center rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-semibold text-white hover:bg-[#132f57]"
+                    >
+                      Back to Conversations
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0B1F3A]/10 text-[#0B1F3A]">
+                  <MessageSquare className="h-7 w-7" />
+                </div>
+                <h3 className="mt-4 text-base font-bold text-[#0B1F3A]">Select a conversation</h3>
+                <p className="mt-1 max-w-sm text-xs text-slate-500">
+                  Choose a service request thread on the left to view messages, delivery receipts, and attachments.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -718,13 +1122,17 @@ export function WhatsAppChatWorkspace({
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedTicket(null)}
+                  onClick={() => {
+                    setSelectedTicket(null);
+                    setTargetStatusBanner(null);
+                    onTargetChange?.(null, null);
+                  }}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-700 md:hidden"
                   aria-label="Back to conversations"
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </button>
-                <Avatar name={activeThread.title} size="sm" />
+                <Avatar name={activeThread.title} src={activeThread.avatarUrl} size="sm" />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="truncate text-sm font-bold text-[#0B1F3A]">{activeThread.title}</p>
@@ -771,6 +1179,45 @@ export function WhatsAppChatWorkspace({
               </button>
             </header>
 
+            {targetStatusBanner && (
+              <div
+                role="alert"
+                data-testid="chat-target-status-banner"
+                className={`flex items-start justify-between gap-3 border-b px-4 py-2.5 text-xs ${
+                  targetStatusBanner.type === "error"
+                    ? "border-rose-200 bg-rose-50 text-rose-900"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  {targetStatusBanner.type === "error" ? (
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                  ) : (
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  )}
+                  <div>
+                    <span className="font-bold">{targetStatusBanner.title}: </span>
+                    <span>{targetStatusBanner.message}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTargetStatusBanner(null)}
+                  className="rounded p-0.5 opacity-70 hover:opacity-100"
+                  aria-label="Dismiss notice"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {targetLoading && (
+              <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-1.5 text-[11px] font-medium text-slate-600">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0B1F3A]" />
+                <span>Locating message...</span>
+              </div>
+            )}
+
             {threadSearchOpen && (
               <div className="border-b border-slate-200 bg-white px-4 py-2">
                 <input
@@ -784,7 +1231,7 @@ export function WhatsAppChatWorkspace({
             )}
 
             {/* Messages Feed */}
-            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div ref={messagesFeedRef} className="flex-1 space-y-3 overflow-y-auto p-4">
               {threadMessages.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-xs text-slate-500">
                   No messages in this conversation yet. Send a message below to begin.
@@ -804,9 +1251,17 @@ export function WhatsAppChatWorkspace({
                     Boolean(msg.read_at) ||
                     (Array.isArray(msg.read_by) && msg.read_by.some((r) => r !== msg.sender_role));
                   const isDelivered = Boolean(msg.delivered_at);
+                  const isHighlighted = highlightedMessageId === msg.id;
 
                   return (
-                    <div key={msg.id} className="space-y-2">
+                    <div
+                      key={msg.id}
+                      id={`chat-msg-${msg.id}`}
+                      data-message-id={msg.id}
+                      data-highlighted={isHighlighted ? "true" : "false"}
+                      data-highlight-pulse={isHighlighted ? String(highlightPulseCount) : undefined}
+                      className="space-y-2 scroll-mt-20"
+                    >
                       {showDay && (
                         <div className="flex justify-center py-1">
                           <span className="rounded-full bg-white px-3 py-0.5 text-[10px] font-semibold text-slate-500 shadow-sm">
@@ -825,12 +1280,16 @@ export function WhatsAppChatWorkspace({
                       )}
                       <div className={`group flex ${isMine ? "justify-end" : "justify-start"}`}>
                         <div
-                          className={`relative max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[70%] ${
+                          className={`relative max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm transition-all duration-300 sm:max-w-[70%] ${
                             msg.is_internal
                               ? "border border-amber-300 bg-amber-50 text-amber-950"
                               : isMine
                                 ? "bg-[#0B1F3A] text-white"
                                 : "border border-slate-200 bg-white text-slate-800"
+                          } ${
+                            isHighlighted
+                              ? "ring-4 ring-[#F5B301] ring-offset-2 shadow-xl"
+                              : ""
                           }`}
                         >
                           <div className="mb-1 flex items-center justify-between gap-3 text-[11px]">
@@ -854,7 +1313,12 @@ export function WhatsAppChatWorkspace({
                               <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
                                 <button
                                   type="button"
-                                  onClick={() => setReplyTo(msg)}
+                                  onClick={() => {
+                                    setReplyTo(msg);
+                                    if (msg.is_internal && (actorRole === "admin" || actorRole === "plumber")) {
+                                      setVisibilityMode("private_plumber");
+                                    }
+                                  }}
                                   title="Reply"
                                   className="rounded p-0.5 hover:bg-black/10"
                                 >
@@ -1004,7 +1468,14 @@ export function WhatsAppChatWorkspace({
               {replyTo && (
                 <div className="mb-2 flex items-center justify-between rounded-lg border-l-4 border-[#F5B301] bg-slate-50 px-3 py-1.5 text-xs">
                   <div className="min-w-0">
-                    <p className="font-semibold text-[#0B1F3A]">Replying to {replyTo.sender_name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-semibold text-[#0B1F3A]">Replying to {replyTo.sender_name}</p>
+                      {replyTo.is_internal && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                          <Lock className="h-2.5 w-2.5" /> Locked (Hidden from customer)
+                        </span>
+                      )}
+                    </div>
                     <p className="truncate text-slate-500">{replyTo.message || "Attachment"}</p>
                   </div>
                   <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply">
@@ -1018,29 +1489,31 @@ export function WhatsAppChatWorkspace({
                 </div>
               )}
 
-              {actorRole === "admin" && (
+              {(actorRole === "admin" || actorRole === "plumber") && (
                 <div className="mb-2 flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={Boolean(replyTo?.is_internal)}
                     onClick={() => setVisibilityMode("public_customer")}
-                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
-                      visibilityMode === "public_customer"
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+                      visibilityMode === "public_customer" && !replyTo?.is_internal
                         ? "bg-[#0B1F3A] text-white"
                         : "bg-slate-100 text-slate-600"
                     }`}
                   >
-                    Customer & Team
+                    {actorRole === "admin" ? "Customer & Team" : "Customer & Admin"}
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisibilityMode("private_plumber")}
                     className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
-                      visibilityMode === "private_plumber"
+                      visibilityMode === "private_plumber" || replyTo?.is_internal
                         ? "bg-amber-500 text-white"
                         : "bg-slate-100 text-slate-600"
                     }`}
                   >
-                    <Lock className="h-3 w-3" /> Internal Note
+                    <Lock className="h-3 w-3" />{" "}
+                    {actorRole === "admin" ? "Internal Note (Team Only)" : "Private to Admin"}
                   </button>
                 </div>
               )}

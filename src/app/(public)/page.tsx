@@ -1,17 +1,26 @@
 import type { Metadata } from "next";
+import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Phone, ShieldCheck, Star } from "lucide-react";
-import { getApprovedReviews, getMarketplaceSettings } from "@/lib/marketplace";
+import { getAllGalleryItems, getApprovedReviews, getMarketplaceSettings } from "@/lib/marketplace";
 import { FaqAccordion, type FaqItem } from "@/components/public/FaqAccordion";
+import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 
 export const metadata: Metadata = {
   title: {
-    absolute: "Bin Plumbing Services Ltd | Managed Plumbing Services",
+    absolute: "Plumber in Kano | Bin Plumbing Services Ltd",
   },
   description:
-    "Request residential and commercial plumbing inspections, installations, and repairs with transparent quotation approval and live job tracking.",
+    "Need a reliable plumber in Kano? Bin Plumbing Services Ltd coordinates residential and commercial plumbing repairs, water pump servicing, leak detection, and installations with upfront itemised quotes.",
   alternates: { canonical: "/" },
+  openGraph: {
+    title: "Plumber in Kano | Bin Plumbing Services Ltd",
+    description:
+      "Request residential and commercial plumbing inspections, water pump repairs, and leak detection in Kano with transparent quotation approval and live job tracking.",
+    url: "/",
+    type: "website",
+  },
 };
 
 const HOW_IT_WORKS_HIGHLIGHTS = [
@@ -57,9 +66,14 @@ const WHY_CHOOSE_POINTS = [
 ];
 
 export default async function HomePage() {
-  const [settings, approvedReviews] = await Promise.all([
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings", "reviews", "gallery");
+
+  const [settings, approvedReviews, publishedGallery] = await Promise.all([
     getMarketplaceSettings(),
     getApprovedReviews(),
+    getAllGalleryItems(true),
   ]);
   const activeAreas = settings.active_coverage_locations || [];
   const phone = settings.company_phone;
@@ -86,8 +100,25 @@ export default async function HomePage() {
     },
   ];
 
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.a,
+      },
+    })),
+  };
+
   return (
     <div className="bg-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+      />
       {/* 1. Full-Width Hero */}
       <section className="relative overflow-hidden bg-[#07152B] text-white">
         <Image
@@ -314,6 +345,35 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* 4B. Recent Work Gallery Preview (only when published photos exist) */}
+      {publishedGallery.length > 0 && (
+        <section className="border-t border-[#E3E8EF] bg-white py-14 md:py-20">
+          <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
+            <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+              <div className="max-w-2xl">
+                <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+                  Completed Work
+                </p>
+                <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
+                  Recent Project Gallery
+                </h2>
+                <p className="mt-2 text-base leading-relaxed text-[#5B6675] md:text-lg">
+                  Photos from completed residential and commercial plumbing jobs.
+                </p>
+              </div>
+              <Link
+                href="/gallery"
+                className="inline-flex items-center gap-1.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:text-[#E0A200]"
+              >
+                View full gallery
+                <ArrowRight className="h-4 w-4 text-[#F5B301]" />
+              </Link>
+            </div>
+            <PublicGalleryClient items={publishedGallery.slice(0, 3)} />
+          </div>
+        </section>
+      )}
+
       {/* 5. FAQ Accordion Section (Light Grey) */}
       <section className="bg-[#F4F6F9] py-14 md:py-24">
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
@@ -384,6 +444,40 @@ export default async function HomePage() {
           </div>
         </section>
       )}
+
+      {/* Helpful Guides & Local Coverage Strip */}
+      <section className="border-t border-[#E3E8EF] bg-[#F4F6F9] py-10">
+        <div className="mx-auto flex max-w-[1200px] flex-col items-start justify-between gap-4 px-4 sm:px-6 md:flex-row md:items-center lg:px-8">
+          <div>
+            <h2 className="font-heading text-xl font-bold text-[#0B1F3A]">
+              Plumbing Guides &amp; Kano Service Coverage
+            </h2>
+            <p className="mt-1 text-sm text-[#5B6675]">
+              Explore practical maintenance tips in English or Hausa, or check the areas we currently serve in Kano.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            <Link
+              href="/en/blog"
+              className="inline-flex h-10 items-center rounded-lg border border-[#0B1F3A] bg-white px-4 text-xs font-semibold text-[#0B1F3A] hover:bg-[#0B1F3A] hover:text-white"
+            >
+              Guides (English)
+            </Link>
+            <Link
+              href="/ha/blog"
+              className="inline-flex h-10 items-center rounded-lg border border-[#0B1F3A] bg-white px-4 text-xs font-semibold text-[#0B1F3A] hover:bg-[#0B1F3A] hover:text-white"
+            >
+              Labaran Famfo (Hausa)
+            </Link>
+            <Link
+              href="/areas"
+              className="inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white px-4 text-xs font-semibold text-[#0B1F3A] hover:border-[#F5B301]"
+            >
+              Kano Service Areas
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* 6. Full-Width Navy CTA Banner */}
       <section className="relative overflow-hidden bg-[#07152B] py-16 text-white md:py-24">

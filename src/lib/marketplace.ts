@@ -3,6 +3,14 @@ import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { getRequiredAnonKey, getRequiredSupabaseUrl, getServiceSupabase } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/notifications";
+import { reconcilePlumberSharing, reconcileSharingForRequest } from "@/lib/live-location-server";
+import {
+  decodeQuotationNotes,
+  encodeQuotationNotes,
+  type QuotationLineItem,
+} from "@/lib/quotation-items";
+import { BILINGUAL_BLOG_STARTER_ARTICLES } from "@/data/bilingual-blog-starter";
+export type { QuotationLineItem };
 
 // ---------------------------------------------------------------------------
 // TYPES & INTERFACES
@@ -64,6 +72,8 @@ export interface ServiceRequestRecord {
   quoted_amount?: number;
   internal_notes?: string;
   history: RequestHistoryEntry[];
+  customer_lat?: number;
+  customer_lng?: number;
   archived_at?: string | null;
   deleted_at?: string | null;
   created_at: string;
@@ -133,6 +143,9 @@ export interface PlumberProfile {
   total_jobs: number;
   notes?: string;
   avatar_url?: string;
+  current_lat?: number;
+  current_lng?: number;
+  location_updated_at?: string;
   admin_notes?: string;
   onboarding_notes?: string;
   agreement_url?: string;
@@ -171,6 +184,7 @@ export interface StructuredQuotation {
   revision_number: number;
   parent_quotation_id?: string;
   notes?: string;
+  items?: QuotationLineItem[];
   avatar_url?: string;
   created_at: string;
   updated_at?: string;
@@ -394,7 +408,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Leak Detection & Repairs",
     short_description: "Systematic diagnostics for hidden wall moisture, underground seepages, and dripping valves.",
     description: "Systematic diagnostics for hidden wall moisture, underground seepages, dripping valves, and sudden water pressure drops.",
-    image: "/images/services/leak-detection.jpg",
+    image: "/images/services/real-work-pipe-repair.png",
     icon_name: "Search",
     sort_order: 2,
     order: 2,
@@ -409,7 +423,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Drainage & Blockage Issues",
     short_description: "Clearing blocked waste lines, foul-smelling sewer traps, and clogged sinks.",
     description: "Clearing blocked waste lines, inspecting foul-smelling sewer traps, unclogging sinks, and ensuring correct falls on gravity-flow drains.",
-    image: "/images/services/drainage-unblocking.jpg",
+    image: "/images/services/drainage-under-sink.jpg",
     icon_name: "Droplet",
     sort_order: 3,
     order: 3,
@@ -424,7 +438,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Bathroom & Toilet Plumbing",
     short_description: "Installation and maintenance for WCs, cistern mechanisms, basins, and shower mixers.",
     description: "Precision installation and maintenance for water closets (WC), cistern mechanisms, wash hand basins, shower valves, and mixer taps.",
-    image: "/images/services/bathroom-toilet-plumbing.jpg",
+    image: "/images/services/bathroom-sanitaryware.jpg",
     icon_name: "Bath",
     sort_order: 4,
     order: 4,
@@ -439,7 +453,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Kitchen Plumbing",
     short_description: "Installation and repairs for kitchen sinks, spray taps, grease traps, and waste pipes.",
     description: "Installation and repairs for double and single kitchen sinks, flexible spray taps, grease traps, dishwasher inlets, and waste pipes.",
-    image: "/images/services/kitchen-plumbing.jpg",
+    image: "/images/gallery/real-work-kitchen-sink-tap.jpg",
     icon_name: "Utensils",
     sort_order: 5,
     order: 5,
@@ -454,7 +468,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Water Storage & Supply Systems",
     short_description: "Overhead and surface tank connections, float switches, and distribution manifolds.",
     description: "Overhead and surface poly tank connections, float switch installations, overflow control, and distribution manifold plumbing.",
-    image: "/images/services/water-tank-installation.jpg",
+    image: "/images/gallery/real-work-water-tank-fitting.jpg",
     icon_name: "Database",
     sort_order: 6,
     order: 6,
@@ -469,7 +483,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Pump Installation & Repairs",
     short_description: "Booster, surface transfer, and submersible pumps with non-return valves and pressure controls.",
     description: "Booster pumps, surface transfer pumps, and submersible pumps connected with proper non-return valves and electrical pressure controls.",
-    image: "/images/services/pump-installation.jpg",
+    image: "/images/gallery/real-work-external-pipe-valve.jpg",
     icon_name: "Zap",
     sort_order: 7,
     order: 7,
@@ -484,7 +498,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Commercial & Facility Plumbing",
     short_description: "Coordinated plumbing for offices, schools, plazas, hotels, and workshops.",
     description: "Plumbing coordination for office complexes, schools, plazas, hotels, and workshops requiring structured multi-point installations.",
-    image: "/images/services/commercial-plumbing.jpg",
+    image: "/images/gallery/real-work-residential-building.jpg",
     icon_name: "Building2",
     sort_order: 8,
     order: 8,
@@ -499,7 +513,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
     title: "Preventative Plumbing Maintenance",
     short_description: "Scheduled audits and servicing to catch joint leaks, pressure faults, and pipe wear early.",
     description: "Scheduled audits and preventative servicing to catch slight joint leaks, calcification, pressure faults, and pipe degradation early.",
-    image: "/images/services/plumbing-maintenance.jpg",
+    image: "/images/services/tap-fittings-repair.jpg",
     icon_name: "ShieldCheck",
     sort_order: 9,
     order: 9,
@@ -612,6 +626,8 @@ export function mapRequestRow(
     quoted_amount: row.quoted_amount != null ? Number(row.quoted_amount) : undefined,
     internal_notes: row.internal_notes ? String(row.internal_notes) : undefined,
     history: reqHistory,
+    customer_lat: row.customer_lat != null ? Number(row.customer_lat) : undefined,
+    customer_lng: row.customer_lng != null ? Number(row.customer_lng) : undefined,
     archived_at: row.archived_at ? String(row.archived_at) : null,
     deleted_at: row.deleted_at ? String(row.deleted_at) : null,
     created_at: String(row.created_at),
@@ -658,6 +674,9 @@ export function mapPlumberRow(
     total_jobs: Number(row.total_jobs || 0),
     notes: row.notes ? String(row.notes) : undefined,
     avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
+    current_lat: row.current_lat != null ? Number(row.current_lat) : undefined,
+    current_lng: row.current_lng != null ? Number(row.current_lng) : undefined,
+    location_updated_at: row.location_updated_at ? String(row.location_updated_at) : undefined,
     documents: plumberDocs.map(toDocObj),
     created_at: String(row.created_at),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
@@ -684,6 +703,10 @@ function mapCustomerRow(row: Record<string, unknown>): CustomerProfile {
 }
 
 export function mapQuotationRow(row: Record<string, unknown>): StructuredQuotation {
+  const decoded = decodeQuotationNotes(row.notes ? String(row.notes) : null);
+  const directItems = Array.isArray(row.items)
+    ? (row.items as QuotationLineItem[])
+    : decoded.items;
   return {
     id: String(row.id),
     request_id: String(row.request_id || ""),
@@ -707,7 +730,8 @@ export function mapQuotationRow(row: Record<string, unknown>): StructuredQuotati
     admin_approved: row.admin_approved !== false,
     revision_number: Number(row.revision_number || 1),
     parent_quotation_id: row.parent_quotation_id ? String(row.parent_quotation_id) : undefined,
-    notes: row.notes ? String(row.notes) : undefined,
+    notes: decoded.notes || undefined,
+    items: directItems.length > 0 ? directItems : undefined,
     avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
     created_at: String(row.created_at),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
@@ -869,6 +893,7 @@ export async function createUniversalServiceRequest(data: {
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
+  createdByRole?: "admin" | "customer" | "plumber";
 }): Promise<ServiceRequestRecord> {
   const resolvedAddress = (data.address || data.addressInKano || "").trim();
   const resolvedCity = (data.cityLga || data.cityOrLga || "").trim();
@@ -988,9 +1013,12 @@ export async function createUniversalServiceRequest(data: {
   };
   await supabase.from("request_history").insert(historyPayload);
 
+  const creatorRole = data.createdByRole || "customer";
+
   await createNotification({
     recipientId: "admin",
     recipientRole: "admin",
+    actorRole: creatorRole,
     type: "new_request",
     title: `New Service Request: ${ticketNumber}`,
     body: `${data.customerName || "Customer"} • ${data.problemCategory || "Plumbing"} (${data.cityLga || "Kano"})`,
@@ -1003,6 +1031,8 @@ export async function createUniversalServiceRequest(data: {
     await createNotification({
       recipientId: customerId,
       recipientRole: "customer",
+      actorRole: creatorRole,
+      actorId: creatorRole === "customer" ? customerId : undefined,
       type: "request_submitted",
       title: `Request Received: ${ticketNumber}`,
       body: `We have received your ${data.problemCategory || "plumbing"} request and will coordinate inspection shortly.`,
@@ -1042,10 +1072,10 @@ export async function getServiceRequestByTicket(
 
   if (!row) return null;
 
-  if (phone) {
+  if (phone !== undefined) {
     const cleanPhone = normalizePhoneDigits(phone).slice(-10);
     const reqPhone = normalizePhoneDigits(String(row.customer_phone || "")).slice(-10);
-    if (cleanPhone && reqPhone && !reqPhone.includes(cleanPhone) && !cleanPhone.includes(reqPhone)) {
+    if (cleanPhone.length < 10 || reqPhone.length < 10 || cleanPhone !== reqPhone) {
       return null;
     }
   }
@@ -1130,6 +1160,17 @@ export async function updateServiceRequest(
 
   if (historyEntry) {
     await appendRequestHistoryEntry(String(existing.id), historyEntry);
+  }
+
+  // Tracking lifecycle: when a job ends or changes hands, stop sharing for any
+  // plumber who is Off Duty and has no other active job.
+  if (updates.status !== undefined || updates.assigned_plumber_id !== undefined) {
+    const affected = new Set<string>();
+    if (existing.assigned_plumber_id) affected.add(String(existing.assigned_plumber_id));
+    if (updated?.assigned_plumber_id) affected.add(String(updated.assigned_plumber_id));
+    for (const pid of affected) {
+      await reconcilePlumberSharing(pid);
+    }
   }
 
   const { data: histRows } = await supabase
@@ -1253,12 +1294,22 @@ export async function submitStructuredQuotation(params: {
   isSmallJob?: boolean;
   smallJobReason?: string;
   notes?: string;
+  items?: QuotationLineItem[];
+  actorRole?: "admin" | "plumber";
 }): Promise<StructuredQuotation> {
   const supabase = getServiceSupabase();
   const settings = await getMarketplaceSettings();
+  const validItems = (params.items || []).filter((it) => it.name.trim().length > 0);
+  const computedItemsTotal = validItems.reduce(
+    (sum, it) => sum + Math.max(1, Number(it.quantity) || 1) * Math.max(0, Number(it.unitPrice) || 0),
+    0
+  );
+  const effectiveMaterialsCost =
+    validItems.length > 0 ? computedItemsTotal : params.materialsCost;
+
   const breakdown = computeQuotationBreakdown({
     labourCharge: params.labourCharge,
-    materialsCost: params.materialsCost,
+    materialsCost: effectiveMaterialsCost,
     transportCharge: params.transportCharge,
     otherCharges: params.otherCharges,
     isSmallJob: params.isSmallJob,
@@ -1293,7 +1344,7 @@ export async function submitStructuredQuotation(params: {
     admin_approved: true,
     revision_number: nextRevision,
     parent_quotation_id: parentId,
-    notes: params.notes || null,
+    notes: encodeQuotationNotes(params.notes, validItems),
     created_at: nowIso,
     updated_at: nowIso,
   };
@@ -1337,6 +1388,7 @@ export async function submitStructuredQuotation(params: {
       await createNotification({
         recipientId: String(reqRow.customer_id),
         recipientRole: "customer",
+        actorRole: params.actorRole || "plumber",
         type: "quotation_ready",
         title: `Quotation Ready: ${params.ticketNumber}`,
         body: `₦${breakdown.totalAmount.toLocaleString()} submitted by ${params.plumberName}. Review & approve to proceed.`,
@@ -1350,6 +1402,7 @@ export async function submitStructuredQuotation(params: {
   await createNotification({
     recipientId: "admin",
     recipientRole: "admin",
+    actorRole: params.actorRole || "plumber",
     type: "quotation_submitted",
     title: `Quotation Submitted: ${params.ticketNumber}`,
     body: `${params.plumberName} submitted Rev #${nextRevision} (₦${breakdown.totalAmount.toLocaleString()}).`,
@@ -1365,7 +1418,8 @@ export async function setCustomerQuotationApproval(
   quotationId: string,
   decision: "approved" | "rejected",
   customerName = "Customer",
-  feedback?: string
+  feedback?: string,
+  actorRole: "admin" | "customer" = "customer"
 ): Promise<StructuredQuotation | null> {
   const supabase = getServiceSupabase();
   const nowIso = new Date().toISOString();
@@ -1408,6 +1462,7 @@ export async function setCustomerQuotationApproval(
   await createNotification({
     recipientId: "admin",
     recipientRole: "admin",
+    actorRole,
     type: "quotation_decision",
     title:
       decision === "approved"
@@ -1423,6 +1478,7 @@ export async function setCustomerQuotationApproval(
     await createNotification({
       recipientId: String(updated.plumber_id),
       recipientRole: "plumber",
+      actorRole,
       type: "quotation_decision",
       title:
         decision === "approved"
@@ -1722,6 +1778,17 @@ export async function registerCustomer(data: {
   const nowIso = new Date().toISOString();
 
   if (existing) {
+    const existingRaw = existing as CustomerProfile & { auth_user_id?: string | null };
+    if (existing.password_hash || existingRaw.auth_user_id) {
+      throw new Error("An account with this phone number already exists. Please sign in instead.");
+    }
+    if (
+      existing.email &&
+      data.email &&
+      existing.email.trim().toLowerCase() !== data.email.trim().toLowerCase()
+    ) {
+      throw new Error("This phone number is already linked to another email address.");
+    }
     const { data: updated, error: updateErr } = await supabase
       .from("customers")
       .update({
@@ -1913,6 +1980,7 @@ export async function verifyPaymentById(
       .update({ status: "completed", updated_at: nowIso })
       .eq("id", updated.request_id);
     if (completeErr) return false;
+    await reconcileSharingForRequest(String(updated.request_id));
 
     await appendRequestHistoryEntry(String(updated.request_id), {
       actor,
@@ -1940,6 +2008,7 @@ export async function verifyPaymentById(
       await createNotification({
         recipientId: String(reqRow.customer_id),
         recipientRole: "customer",
+        actorRole: "admin",
         type: status === "verified" ? "payment_verified" : "payment_rejected",
         title:
           status === "verified"
@@ -1956,6 +2025,7 @@ export async function verifyPaymentById(
       await createNotification({
         recipientId: String(reqRow.assigned_plumber_id),
         recipientRole: "plumber",
+        actorRole: "admin",
         type: "payment_verified",
         title: `Job Payment Verified: ${updated.ticket_number}`,
         body: `Customer payment of ₦${Number(updated.total_payment).toLocaleString()} has been verified.`,
@@ -2121,49 +2191,63 @@ export async function postJobMessage(params: {
     }
   }
 
-  if (!params.isInternal && params.ticketNumber) {
-    const { data: reqRow } = await supabase
-      .from("service_requests")
-      .select("customer_id, assigned_plumber_id")
-      .eq("ticket_number", params.ticketNumber)
-      .maybeSingle();
+  if (params.ticketNumber) {
+    const exactMessageId = String(inserted.id);
+    const encodedTicket = encodeURIComponent(params.ticketNumber);
+    const encodedMessageId = encodeURIComponent(exactMessageId);
+    const preview = params.message?.trim()
+      ? params.message.trim().slice(0, 90)
+      : "Sent an attachment";
 
-    const preview = params.message?.trim() ? params.message.trim().slice(0, 90) : "Sent an attachment";
-    if (params.senderRole !== "admin") {
-      await createNotification({
-        recipientId: "admin",
-        recipientRole: "admin",
-        type: "new_message",
-        title: `Message on ${params.ticketNumber}`,
-        body: `${params.senderName}: ${preview}`,
-        entityType: "message",
-        entityId: String(inserted.id),
-        destination: `/admin/communications?ticket=${params.ticketNumber}`,
-      });
-    }
-    if (params.recipientRole === "customer" && reqRow?.customer_id && params.senderRole !== "customer") {
-      await createNotification({
-        recipientId: String(reqRow.customer_id),
-        recipientRole: "customer",
-        type: "new_message",
-        title: `New Message: ${params.ticketNumber}`,
-        body: `${params.senderName}: ${preview}`,
-        entityType: "message",
-        entityId: String(inserted.id),
-        destination: `/customer?tab=messages&ticket=${params.ticketNumber}`,
-      });
-    }
-    if (params.recipientRole === "plumber" && reqRow?.assigned_plumber_id && params.senderRole !== "plumber") {
-      await createNotification({
-        recipientId: String(reqRow.assigned_plumber_id),
-        recipientRole: "plumber",
-        type: "new_message",
-        title: `New Message: ${params.ticketNumber}`,
-        body: `${params.senderName}: ${preview}`,
-        entityType: "message",
-        entityId: String(inserted.id),
-        destination: `/plumber?tab=messages&ticket=${params.ticketNumber}`,
-      });
+    const notifiedKeys = new Set<string>();
+    for (const target of recipientTargets) {
+      if (target.recipientRole === params.senderRole) continue;
+      if (params.isInternal && target.recipientRole === "customer") continue;
+
+      const key = `${target.recipientRole}:${target.recipientId}`;
+      if (notifiedKeys.has(key)) continue;
+      notifiedKeys.add(key);
+
+      if (target.recipientRole === "admin") {
+        await createNotification({
+          recipientId: "admin",
+          recipientRole: "admin",
+          actorRole: params.senderRole,
+          actorId: params.senderId || undefined,
+          type: "new_message",
+          title: `Message on ${params.ticketNumber}`,
+          body: `${params.senderName}: ${preview}`,
+          entityType: "message",
+          entityId: exactMessageId,
+          destination: `/admin/communications?ticket=${encodedTicket}&message=${encodedMessageId}`,
+        });
+      } else if (target.recipientRole === "customer" && target.recipientId) {
+        await createNotification({
+          recipientId: String(target.recipientId),
+          recipientRole: "customer",
+          actorRole: params.senderRole,
+          actorId: params.senderId || undefined,
+          type: "new_message",
+          title: `New Message: ${params.ticketNumber}`,
+          body: `${params.senderName}: ${preview}`,
+          entityType: "message",
+          entityId: exactMessageId,
+          destination: `/customer?tab=messages&ticket=${encodedTicket}&message=${encodedMessageId}`,
+        });
+      } else if (target.recipientRole === "plumber" && target.recipientId) {
+        await createNotification({
+          recipientId: String(target.recipientId),
+          recipientRole: "plumber",
+          actorRole: params.senderRole,
+          actorId: params.senderId || undefined,
+          type: "new_message",
+          title: `New Message: ${params.ticketNumber}`,
+          body: `${params.senderName}: ${preview}`,
+          entityType: "message",
+          entityId: exactMessageId,
+          destination: `/plumber?tab=messages&ticket=${encodedTicket}&message=${encodedMessageId}`,
+        });
+      }
     }
   }
 
@@ -2399,10 +2483,12 @@ export async function markTicketMessagesReadForActor(params: {
     .select("id, sender_role, is_internal, read_by, admin_read")
     .eq("ticket_number", params.ticketNumber);
 
+  const ticketMsgIds: string[] = [];
   if (rows) {
     for (const m of rows) {
-      if (m.sender_role === params.actorRole) continue;
       if (params.actorRole === "customer" && m.is_internal) continue;
+      ticketMsgIds.push(String(m.id));
+      if (m.sender_role === params.actorRole) continue;
       const readBy: string[] = Array.isArray(m.read_by) ? [...m.read_by] : [];
       const needsAdminRead = params.actorRole === "admin" && m.admin_read === false;
       if (!readBy.includes(params.actorRole) || needsAdminRead) {
@@ -2419,17 +2505,34 @@ export async function markTicketMessagesReadForActor(params: {
     }
   }
 
-  // 3. Clear matching new_message notifications for this recipient
+  // 3. Also mark any unread message notifications for this ticket/recipient as read
   try {
+    const targetRecipientIds =
+      params.actorRole === "admin"
+        ? Array.from(new Set(["admin", params.actorId]))
+        : [params.actorId];
+    const entityTargets = Array.from(
+      new Set([...ticketMsgIds, params.ticketNumber])
+    );
+    if (entityTargets.length > 0) {
+      await supabase
+        .from("notifications")
+        .update({ read_at: nowIso })
+        .eq("recipient_role", params.actorRole)
+        .in("recipient_id", targetRecipientIds)
+        .is("read_at", null)
+        .in("entity_id", entityTargets);
+    }
     await supabase
       .from("notifications")
       .update({ read_at: nowIso })
       .eq("recipient_role", params.actorRole)
-      .eq("type", "new_message")
+      .in("recipient_id", targetRecipientIds)
       .is("read_at", null)
-      .ilike("destination", `%${params.ticketNumber}%`);
+      .eq("entity_type", "message")
+      .ilike("destination", `%ticket=${encodeURIComponent(params.ticketNumber)}%`);
   } catch {
-    // Ignore if notifications table is not yet migrated
+    // Non-blocking notification read sync
   }
 
   return updated;
@@ -2594,19 +2697,6 @@ export async function markTicketMessagesRead(
     }
   }
 
-  // Also clear matching unread message notifications for this ticket & role
-  try {
-    await supabase
-      .from("notifications")
-      .update({ read_at: new Date().toISOString() })
-      .eq("recipient_role", viewerRole)
-      .eq("type", "new_message")
-      .is("read_at", null)
-      .ilike("destination", `%${ticketNumber}%`);
-  } catch {
-    // Ignore if notifications table is not yet migrated
-  }
-
   return updated;
 }
 
@@ -2644,7 +2734,7 @@ export async function deleteJobMessageById(params: {
     if (msg.sender_role !== params.actorRole && params.actorRole !== "admin") {
       return false;
     }
-    await supabase
+    const { error } = await supabase
       .from("messages")
       .update({
         deleted_for_everyone: true,
@@ -2652,16 +2742,28 @@ export async function deleteJobMessageById(params: {
         attachment: null,
       })
       .eq("id", params.messageId);
+    if (error && error.message.includes("deleted_for_everyone")) {
+      await supabase
+        .from("messages")
+        .update({
+          message: "This message was deleted",
+          attachment: null,
+        })
+        .eq("id", params.messageId);
+    }
     return true;
   }
 
   const deletedBy: string[] = Array.isArray(msg.deleted_by_ids) ? [...msg.deleted_by_ids] : [];
   if (!deletedBy.includes(params.actorId)) {
     deletedBy.push(params.actorId);
-    await supabase
+    const { error } = await supabase
       .from("messages")
       .update({ deleted_by_ids: deletedBy })
       .eq("id", params.messageId);
+    if (error && error.message.includes("deleted_by_ids")) {
+      await supabase.from("messages").delete().eq("id", params.messageId);
+    }
   }
   return true;
 }
@@ -3165,6 +3267,9 @@ export async function moderateReview(
   });
 }
 
+export type GuideArticleStatus = "draft" | "review" | "published";
+export type BlogLanguage = "en" | "ha";
+
 export interface GuideRecord {
   id: string;
   slug: string;
@@ -3172,60 +3277,313 @@ export interface GuideRecord {
   summary: string;
   content: string;
   category: string;
-  status: "draft" | "published";
+  status: GuideArticleStatus;
   needs_owner_review: boolean;
   created_at: string;
   updated_at: string;
+  // Bilingual English fields
+  en_title: string;
+  en_slug: string;
+  en_summary: string;
+  en_content: string;
+  en_seo_title: string;
+  en_meta_description: string;
+  en_image_alt: string;
+  en_status: GuideArticleStatus;
+  // Bilingual Hausa fields
+  ha_title: string;
+  ha_slug: string;
+  ha_summary: string;
+  ha_content: string;
+  ha_seo_title: string;
+  ha_meta_description: string;
+  ha_image_alt: string;
+  ha_status: GuideArticleStatus;
+  // Shared editorial & SEO metadata
+  featured_image: string;
+  image_attribution: string;
+  target_service_slug: string;
+  main_keyword: string;
+  supporting_keywords: string[];
+  author_name: string;
+  published_at: string | null;
+}
+
+function normalizeGuideStatus(val: unknown): GuideArticleStatus {
+  if (val === "published" || val === "review") return val;
+  return "draft";
+}
+
+function normalizeGuideRecord(raw: Record<string, unknown>): GuideRecord {
+  const legacySlug = String(raw.slug || "");
+  const starterMatch = legacySlug
+    ? BILINGUAL_BLOG_STARTER_ARTICLES.find(
+        (s) => s.slug === legacySlug || s.en_slug === legacySlug
+      )
+    : undefined;
+  const hasBilingualCols = raw.en_title !== undefined || raw.ha_title !== undefined;
+
+  const legacyTitle = String(raw.title || "");
+  const legacySummary = String(raw.summary || "");
+  const legacyContent = String(raw.content || "");
+  const legacyStatus = normalizeGuideStatus(raw.status);
+
+  const enTitle = String(raw.en_title || "") || starterMatch?.en_title || legacyTitle;
+  const enSlug = String(raw.en_slug || "") || starterMatch?.en_slug || legacySlug;
+  const enSummary = String(raw.en_summary || "") || starterMatch?.en_summary || legacySummary;
+  const enContent = String(raw.en_content || "") || starterMatch?.en_content || legacyContent;
+  const enStatus = raw.en_status
+    ? normalizeGuideStatus(raw.en_status)
+    : legacyStatus;
+
+  const haTitle = String(raw.ha_title || "") || (!hasBilingualCols ? starterMatch?.ha_title || "" : "");
+  const haSlug = String(raw.ha_slug || "") || (!hasBilingualCols ? starterMatch?.ha_slug || "" : "");
+  const haSummary = String(raw.ha_summary || "") || (!hasBilingualCols ? starterMatch?.ha_summary || "" : "");
+  const haContent = String(raw.ha_content || "") || (!hasBilingualCols ? starterMatch?.ha_content || "" : "");
+  const haStatus = raw.ha_status
+    ? normalizeGuideStatus(raw.ha_status)
+    : !hasBilingualCols && starterMatch?.ha_slug
+    ? legacyStatus
+    : "draft";
+
+  return {
+    id: String(raw.id || ""),
+    slug: legacySlug || enSlug || haSlug,
+    title: legacyTitle || enTitle || haTitle,
+    summary: legacySummary || enSummary,
+    content: legacyContent || enContent,
+    category: String(raw.category || starterMatch?.category || "Plumbing Tips"),
+    status:
+      enStatus === "published" || haStatus === "published"
+        ? "published"
+        : legacyStatus,
+    needs_owner_review: raw.needs_owner_review !== false,
+    created_at: String(raw.created_at || new Date().toISOString()),
+    updated_at: String(raw.updated_at || raw.created_at || new Date().toISOString()),
+    en_title: enTitle,
+    en_slug: enSlug,
+    en_summary: enSummary,
+    en_content: enContent,
+    en_seo_title: String(raw.en_seo_title || "") || starterMatch?.en_seo_title || "",
+    en_meta_description:
+      String(raw.en_meta_description || "") || starterMatch?.en_meta_description || "",
+    en_image_alt: String(raw.en_image_alt || "") || starterMatch?.en_image_alt || "",
+    en_status: enStatus,
+    ha_title: haTitle,
+    ha_slug: haSlug,
+    ha_summary: haSummary,
+    ha_content: haContent,
+    ha_seo_title: String(raw.ha_seo_title || "") || starterMatch?.ha_seo_title || "",
+    ha_meta_description:
+      String(raw.ha_meta_description || "") || starterMatch?.ha_meta_description || "",
+    ha_image_alt: String(raw.ha_image_alt || "") || starterMatch?.ha_image_alt || "",
+    ha_status: haStatus,
+    featured_image: String(raw.featured_image || "") || starterMatch?.featured_image || "",
+    image_attribution:
+      String(raw.image_attribution || "") || starterMatch?.image_attribution || "",
+    target_service_slug:
+      String(raw.target_service_slug || "") || starterMatch?.target_service_slug || "",
+    main_keyword: String(raw.main_keyword || "") || starterMatch?.main_keyword || "",
+    supporting_keywords:
+      Array.isArray(raw.supporting_keywords) && raw.supporting_keywords.length > 0
+        ? raw.supporting_keywords.map(String).filter(Boolean)
+        : starterMatch?.supporting_keywords || [],
+    author_name: String(raw.author_name || starterMatch?.author_name || "Bin Plumbing Editorial Team"),
+    published_at: raw.published_at
+      ? String(raw.published_at)
+      : legacyStatus === "published"
+      ? String(raw.updated_at || raw.created_at || new Date().toISOString())
+      : null,
+  };
+}
+
+function getStarterGuidesFallback(publishedOnly = false): GuideRecord[] {
+  const ts = "2026-11-15T08:00:00.000Z";
+  const normalized = BILINGUAL_BLOG_STARTER_ARTICLES.map((item) =>
+    normalizeGuideRecord({
+      ...item,
+      created_at: ts,
+      updated_at: ts,
+      published_at: item.status === "published" ? ts : null,
+    } as Record<string, unknown>)
+  );
+  if (!publishedOnly) return normalized;
+  return normalized.filter(
+    (g) =>
+      g.status === "published" ||
+      g.en_status === "published" ||
+      g.ha_status === "published"
+  );
 }
 
 export async function getGuides(publishedOnly = false): Promise<GuideRecord[]> {
   "use cache";
   cacheLife("minutes");
   cacheTag("guides");
-  if (isBuildPhase()) return [];
+  if (isBuildPhase()) return getStarterGuidesFallback(publishedOnly);
   try {
     const supabase = getServiceSupabase();
-    let q = supabase.from("guides").select("*").order("created_at", { ascending: false });
-    if (publishedOnly) q = q.eq("status", "published");
-    const { data, error } = await q;
-    if (error) return [];
-    return (data || []) as GuideRecord[];
+    const { data, error } = await supabase
+      .from("guides")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error || !data || data.length === 0) {
+      return getStarterGuidesFallback(publishedOnly);
+    }
+    const normalized = data.map((row) =>
+      normalizeGuideRecord(row as Record<string, unknown>)
+    );
+    if (!publishedOnly) return normalized;
+    return normalized.filter(
+      (g) =>
+        g.status === "published" ||
+        g.en_status === "published" ||
+        g.ha_status === "published"
+    );
   } catch {
-    return [];
+    return getStarterGuidesFallback(publishedOnly);
   }
 }
 
+export async function getPublishedBlogPosts(lang: BlogLanguage): Promise<GuideRecord[]> {
+  const all = await getGuides(true);
+  return all.filter((g) =>
+    lang === "en"
+      ? g.en_status === "published" && Boolean(g.en_slug.trim())
+      : g.ha_status === "published" && Boolean(g.ha_slug.trim())
+  );
+}
+
+export async function getBlogPostBySlug(
+  lang: BlogLanguage,
+  slug: string
+): Promise<GuideRecord | null> {
+  const clean = slug.trim().toLowerCase();
+  if (!clean) return null;
+  const posts = await getPublishedBlogPosts(lang);
+  return (
+    posts.find((g) =>
+      lang === "en" ? g.en_slug.toLowerCase() === clean : g.ha_slug.toLowerCase() === clean
+    ) || null
+  );
+}
+
 export async function upsertGuide(
-  guide: Partial<GuideRecord> & { slug: string; title: string },
+  guide: Partial<GuideRecord> & { slug?: string; title?: string },
   actor = "Admin"
 ): Promise<GuideRecord | null> {
   const supabase = getServiceSupabase();
   const now = new Date().toISOString();
-  const id = guide.id || `guide-${Date.now().toString(36)}`;
-  const row = {
+
+  const enTitle = (guide.en_title ?? guide.title ?? "").trim();
+  const enSlug = (guide.en_slug ?? guide.slug ?? "").trim().toLowerCase();
+  const enSummary = (guide.en_summary ?? guide.summary ?? "").trim();
+  const enContent = guide.en_content ?? guide.content ?? "";
+  const enStatus = normalizeGuideStatus(guide.en_status ?? guide.status);
+
+  const haTitle = (guide.ha_title ?? "").trim();
+  const haSlug = (guide.ha_slug ?? "").trim().toLowerCase();
+  const haSummary = (guide.ha_summary ?? "").trim();
+  const haContent = guide.ha_content ?? "";
+  const haStatus = normalizeGuideStatus(guide.ha_status ?? "draft");
+
+  const anyPublished = enStatus === "published" || haStatus === "published";
+  const overallStatus: GuideArticleStatus = anyPublished
+    ? "published"
+    : enStatus === "review" || haStatus === "review"
+    ? "review"
+    : "draft";
+
+  let resolvedId = (guide.id || "").trim();
+  const lookupSlug = enSlug || haSlug;
+  if (!resolvedId && lookupSlug) {
+    const { data: existing } = await supabase
+      .from("guides")
+      .select("id")
+      .eq("slug", lookupSlug)
+      .maybeSingle();
+    if (existing?.id) {
+      resolvedId = String(existing.id);
+    }
+  }
+  const id =
+    resolvedId ||
+    `guide-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const canonicalLegacySlug = enSlug || haSlug || id;
+  const canonicalLegacyTitle = enTitle || haTitle || "Untitled Guide";
+
+  const fullRow = {
     id,
-    slug: guide.slug.trim().toLowerCase(),
-    title: guide.title.trim(),
-    summary: guide.summary || "",
-    content: guide.content || "",
-    category: guide.category || "Plumbing Tips",
-    status: guide.status || "draft",
+    slug: canonicalLegacySlug,
+    title: canonicalLegacyTitle,
+    summary: enSummary || haSummary,
+    content: enContent || haContent,
+    category: (guide.category || "Plumbing Tips").trim(),
+    status: overallStatus,
     needs_owner_review: guide.needs_owner_review ?? true,
     updated_at: now,
+    en_title: enTitle,
+    en_slug: enSlug,
+    en_summary: enSummary,
+    en_content: enContent,
+    en_seo_title: (guide.en_seo_title || "").trim(),
+    en_meta_description: (guide.en_meta_description || "").trim(),
+    en_image_alt: (guide.en_image_alt || "").trim(),
+    en_status: enStatus,
+    ha_title: haTitle,
+    ha_slug: haSlug,
+    ha_summary: haSummary,
+    ha_content: haContent,
+    ha_seo_title: (guide.ha_seo_title || "").trim(),
+    ha_meta_description: (guide.ha_meta_description || "").trim(),
+    ha_image_alt: (guide.ha_image_alt || "").trim(),
+    ha_status: haStatus,
+    featured_image: (guide.featured_image || "").trim(),
+    image_attribution: (guide.image_attribution || "").trim(),
+    target_service_slug: (guide.target_service_slug || "").trim(),
+    main_keyword: (guide.main_keyword || "").trim(),
+    supporting_keywords: Array.isArray(guide.supporting_keywords)
+      ? guide.supporting_keywords.map((k) => k.trim()).filter(Boolean)
+      : [],
+    author_name: (guide.author_name || "Bin Plumbing Editorial Team").trim(),
+    published_at: anyPublished ? guide.published_at || now : guide.published_at || null,
   };
-  const { data, error } = await supabase
+
+  let { data, error } = await supabase
     .from("guides")
-    .upsert(row, { onConflict: "id" })
+    .upsert(fullRow, { onConflict: "id" })
     .select("*")
     .single();
-  if (error) return null;
+
+  if (error && /en_title|ha_title|featured_image|column/i.test(error.message)) {
+    // Fallback if migration 20261115_bilingual_blog_seo.sql has not yet been applied
+    const legacyRow = {
+      id,
+      slug: canonicalLegacySlug,
+      title: canonicalLegacyTitle,
+      summary: enSummary || haSummary,
+      content: enContent || haContent,
+      category: (guide.category || "Plumbing Tips").trim(),
+      status: overallStatus === "published" ? "published" : "draft",
+      needs_owner_review: guide.needs_owner_review ?? true,
+      updated_at: now,
+    };
+    ({ data, error } = await supabase
+      .from("guides")
+      .upsert(legacyRow, { onConflict: "id" })
+      .select("*")
+      .single());
+  }
+
+  if (error || !data) return null;
 
   await appendAuditLog({
     actor,
     action: "Saved Guide",
     entity_type: "guide",
     entity_id: id,
-    new_value: `${row.title} (${row.status})`,
+    new_value: `${canonicalLegacyTitle} (EN:${enStatus} / HA:${haStatus})`,
   });
-  return data as GuideRecord;
+  return normalizeGuideRecord(data as Record<string, unknown>);
 }

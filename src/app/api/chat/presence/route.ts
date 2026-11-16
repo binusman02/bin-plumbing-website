@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
+import { getServiceSupabase } from "@/lib/supabase/admin";
 import {
   acknowledgeMessageDeliveryForActor,
   clearChatPresence,
-  getAllPlumbers,
   getChatPresenceStatus,
   getMessagesForAuthorizedTicket,
   updateChatPresence,
@@ -23,19 +23,12 @@ export async function GET(request: Request) {
   }
 
   const ticket = url.searchParams.get("ticket");
-  const presence = await getChatPresenceStatus();
-
-  // Only expose plumber availability map to admin/plumber, or minimal presence to customer
-  const plumberAvailability: Record<string, boolean> = {};
-  if (actor.role === "admin" || actor.role === "plumber") {
-    const plumbers = await getAllPlumbers();
-    for (const p of plumbers) {
-      plumberAvailability[p.id] = Boolean(p.is_available);
-    }
-  }
 
   if (ticket) {
-    const ctx = await verifyTicketAccess(actor, ticket);
+    const [presence, ctx] = await Promise.all([
+      getChatPresenceStatus(),
+      verifyTicketAccess(actor, ticket),
+    ]);
     if (!ctx) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -54,9 +47,25 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json(
-      { presence, plumberAvailability, messages: ticketMessages },
+      { presence, plumberAvailability: {}, messages: ticketMessages },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
+  }
+
+  const plumberAvailability: Record<string, boolean> = {};
+  const [presence, plumberRows] = await Promise.all([
+    getChatPresenceStatus(),
+    actor.role === "admin" || actor.role === "plumber"
+      ? getServiceSupabase()
+          .from("plumbers")
+          .select("id, is_available")
+          .is("deleted_at", null)
+          .then((r) => r.data || [])
+      : Promise.resolve([]),
+  ]);
+
+  for (const p of plumberRows) {
+    plumberAvailability[String(p.id)] = Boolean(p.is_available);
   }
 
   return NextResponse.json(

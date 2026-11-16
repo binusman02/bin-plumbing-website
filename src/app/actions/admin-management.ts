@@ -43,11 +43,16 @@ export async function updateRequestStatus(
 export async function createAdminServiceRequest(data: {
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
   priority: "standard" | "urgent";
   propertyType: string;
+  problemCategory?: string;
   addressInKano: string;
+  cityLga?: string;
   preferredTiming: string;
+  preferredDate?: string;
   issueDescription: string;
+  assignedPlumberId?: string;
   assignedTechnician?: string;
   quotedAmount?: number;
   internalNotes?: string;
@@ -66,20 +71,41 @@ export async function createAdminServiceRequest(data: {
     const created = await createUniversalServiceRequest({
       customerName: data.customerName,
       customerPhone: data.customerPhone,
+      customerEmail: data.customerEmail,
       priority: data.priority || "standard",
       propertyType: data.propertyType || "Residential / Home",
-      address: data.addressInKano,
+      problemCategory: data.problemCategory || data.propertyType || "General Plumbing",
+      addressInKano: data.addressInKano,
+      cityOrLga: data.cityLga || "",
       preferredTiming: data.preferredTiming || "Immediate dispatch",
+      preferredDate: data.preferredDate || new Date().toISOString().slice(0, 10),
       issueDescription: data.issueDescription,
+      createdByRole: "admin",
     });
 
-    if (data.assignedTechnician || data.quotedAmount !== undefined || data.internalNotes || data.status) {
-      await updateServiceRequest(created.id, {
-        assigned_technician: data.assignedTechnician || null,
-        quoted_amount: data.quotedAmount ?? null,
-        internal_notes: data.internalNotes || null,
-        status: (data.status as RequestStatus) || (data.assignedTechnician ? "scheduled" : "new"),
-      });
+    let finalRequest = created;
+    if (
+      data.assignedPlumberId ||
+      data.assignedTechnician ||
+      data.quotedAmount !== undefined ||
+      data.internalNotes ||
+      data.status
+    ) {
+      const updated = await updateServiceRequest(
+        created.ticket_number,
+        {
+          assigned_plumber_id: data.assignedPlumberId || null,
+          assigned_technician: data.assignedTechnician || null,
+          quoted_amount: data.quotedAmount ?? null,
+          internal_notes: data.internalNotes || null,
+          status: (data.status as RequestStatus) || (data.assignedTechnician ? "scheduled" : "new"),
+        },
+        {
+          actor: admin.fullName,
+          action: "Created Service Request via Admin CRM",
+        }
+      );
+      if (updated) finalRequest = updated;
     }
 
     revalidatePath("/admin");
@@ -87,7 +113,7 @@ export async function createAdminServiceRequest(data: {
     revalidatePath("/admin/customers");
     revalidatePath("/plumber");
     revalidatePath("/tracking");
-    return { success: true, ticketNumber: created.ticket_number };
+    return { success: true, ticketNumber: created.ticket_number, request: finalRequest };
   } catch (err: unknown) {
     return { success: false, error: (err as Error).message };
   }

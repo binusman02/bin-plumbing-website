@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Lock, Mail, ArrowRight, Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import { loginAdmin } from "@/app/actions/admin-auth";
 import { requestPasswordResetAction } from "@/app/actions/portal-auth";
@@ -15,7 +14,6 @@ import {
 } from "@/components/auth/AuthLayout";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -71,8 +69,7 @@ export default function AdminLoginPage() {
       setErrorMessage(result.error);
       setLoading(false);
     } else {
-      router.push(redirectTo);
-      router.refresh();
+      window.location.assign(redirectTo);
     }
   };
 

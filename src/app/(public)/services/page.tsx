@@ -1,20 +1,34 @@
 import type { Metadata } from "next";
+import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Phone } from "lucide-react";
-import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
+import { getAllGalleryItems, getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
+import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 
 export const metadata: Metadata = {
-  title: "Plumbing Services",
+  title: "Plumbing Services in Kano",
   description:
-    "Browse residential and commercial plumbing services including pipework, leak detection, pump setup, tank installation, and drainage repairs.",
+    "Browse residential and commercial plumbing services in Kano: pipework, leak detection, water pump repair, overhead tank installation, bathrooms, and drainage.",
   alternates: { canonical: "/services" },
+  openGraph: {
+    title: "Plumbing Services in Kano | Bin Plumbing Services Ltd",
+    description:
+      "Browse residential and commercial plumbing services in Kano including pipework, leak detection, pump setup, tank installation, and drainage repairs.",
+    url: "/services",
+    type: "website",
+  },
 };
 
 export default async function ServicesPage() {
-  const [settings, dbCategories] = await Promise.all([
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings", "service-categories", "gallery");
+
+  const [settings, dbCategories, publishedGallery] = await Promise.all([
     getMarketplaceSettings(),
     getServiceCategories(true),
+    getAllGalleryItems(true),
   ]);
   const activeAreas = settings.active_coverage_locations || [];
   const phone = settings.company_phone;
@@ -32,7 +46,7 @@ export default async function ServicesPage() {
       image: c.image || "/images/services/pipework-roughin.jpg",
     }));
 
-  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com").replace(/\/+$/, "");
+  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com.ng").replace(/\/+$/, "");
 
   const servicesJsonLd = {
     "@context": "https://schema.org",
@@ -139,6 +153,35 @@ export default async function ServicesPage() {
         </div>
       </section>
 
+      {/* Recent Completed Work Gallery */}
+      {publishedGallery.length > 0 && (
+        <section className="border-t border-[#E3E8EF] bg-white py-14 md:py-20">
+          <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
+            <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wider text-[#F5B301]">
+                  Completed Work
+                </p>
+                <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[36px]">
+                  Recent Plumbing Projects
+                </h2>
+                <p className="mt-2 text-base text-[#5B6675]">
+                  Real installations and repairs completed by our technicians.
+                </p>
+              </div>
+              <Link
+                href="/gallery"
+                className="inline-flex items-center gap-1.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:text-[#E0A200]"
+              >
+                View full gallery
+                <ArrowRight className="h-4 w-4 text-[#F5B301]" />
+              </Link>
+            </div>
+            <PublicGalleryClient items={publishedGallery.slice(0, 6)} />
+          </div>
+        </section>
+      )}
+
       {/* Bottom CTA */}
       <section className="bg-[#F4F6F9] py-14 md:py-20">
         <div className="mx-auto flex max-w-[1200px] flex-col items-start justify-between gap-6 px-4 sm:px-6 lg:flex-row lg:items-center lg:px-8">
@@ -150,21 +193,21 @@ export default async function ServicesPage() {
               Describe the problem in our request form or call us to discuss your plumbing needs.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Link
               href="/request"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#F5B301] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
+              className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#F5B301] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
             >
-              Request a Plumber
-              <ArrowRight className="h-4 w-4" />
+              <span>Request a Plumber</span>
+              <ArrowRight className="h-4 w-4 shrink-0" />
             </Link>
             {phone && (
               <a
                 href={`tel:${phone.replace(/\s+/g, "")}`}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-[#0B1F3A] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
+                className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#0B1F3A] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
               >
-                <Phone className="h-4 w-4" />
-                {phone}
+                <Phone className="h-4 w-4 shrink-0" />
+                <span>{phone}</span>
               </a>
             )}
           </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   CheckCircle2,
+  Eye,
   Loader2,
   MessageCircle,
   Phone,
@@ -12,6 +13,8 @@ import {
   X,
 } from "lucide-react";
 import { Avatar, Badge, Tabs, Timeline } from "@/components/ui";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
+import { QuotationPreviewModal, type QuotationPreviewData } from "@/components/portal/QuotationPreviewModal";
 import { formatDateTime, formatNGN } from "@/lib/currency";
 import type {
   JobMessage,
@@ -107,6 +110,7 @@ export function RequestDetailDrawer({
   onQuotationDecision,
 }: RequestDetailDrawerProps) {
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("details");
+  const [previewQuote, setPreviewQuote] = useState<QuotationPreviewData | null>(null);
 
   if (!selected) return null;
 
@@ -246,31 +250,28 @@ export function RequestDetailDrawer({
                   <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
                     Status
                   </label>
-                  <select
+                  <ClassicSelect
                     value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
-                  >
-                    {REQUEST_STATUS_OPTIONS.filter((o) => o.value !== "all").map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setEditStatus}
+                    options={REQUEST_STATUS_OPTIONS.filter((o) => o.value !== "all").map((opt) => ({
+                      value: opt.value,
+                      label: opt.label,
+                    }))}
+                  />
                 </div>
 
                 <div>
                   <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
                     Priority
                   </label>
-                  <select
+                  <ClassicSelect
                     value={editPriority}
-                    onChange={(e) => setEditPriority(e.target.value as "standard" | "urgent")}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
-                  >
-                    <option value="standard">Standard</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
+                    onChange={(val) => setEditPriority(val as "standard" | "urgent")}
+                    options={[
+                      { value: "standard", label: "Standard" },
+                      { value: "urgent", label: "Urgent" },
+                    ]}
+                  />
                 </div>
 
                 <div>
@@ -301,27 +302,26 @@ export function RequestDetailDrawer({
                         );
                       })()}
                   </div>
-                  <select
+                  <ClassicSelect
                     value={editPlumberId}
-                    onChange={(e) => setEditPlumberId(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
-                  >
-                    <option value="">-- Unassigned --</option>
-                    {approvedPlumbers.map((p) => {
-                      const isOnline = onlinePlumberIds.includes(p.id);
-                      const isAvail = availabilityMap[p.id] ?? p.is_available;
-                      const statusText = !isOnline
-                        ? "Offline"
-                        : isAvail
-                          ? "Online • Available"
-                          : "Online • Unavailable";
-                      return (
-                        <option key={p.id} value={p.id}>
-                          {p.full_name} ({p.phone}) — {statusText}
-                        </option>
-                      );
-                    })}
-                  </select>
+                    onChange={setEditPlumberId}
+                    options={[
+                      { value: "", label: "-- Unassigned --" },
+                      ...approvedPlumbers.map((p) => {
+                        const isOnline = onlinePlumberIds.includes(p.id);
+                        const isAvail = availabilityMap[p.id] ?? p.is_available;
+                        const statusText = !isOnline
+                          ? "Offline"
+                          : isAvail
+                            ? "Online • Available"
+                            : "Online • Unavailable";
+                        return {
+                          value: p.id,
+                          label: `${p.full_name} (${p.phone}) — ${statusText}`,
+                        };
+                      }),
+                    ]}
+                  />
                 </div>
 
                 <div>
@@ -393,30 +393,79 @@ export function RequestDetailDrawer({
                       </div>
                       <p className="mt-1 text-xs text-slate-600">
                         Labour: {formatNGN(q.labour_charge)} • Materials:{" "}
-                        {formatNGN(q.materials_cost)} • Commission:{" "}
-                        {formatNGN(q.company_commission)}
+                        {formatNGN(q.materials_cost)}
+                        {q.transport_charge > 0 ? ` • Transport: ${formatNGN(q.transport_charge)}` : ""}
+                        {q.other_charges > 0 ? ` • Other: ${formatNGN(q.other_charges)}` : ""}
+                        {" "}• Commission: {formatNGN(q.company_commission)}
                       </p>
-                      {q.notes && <p className="mt-1.5 text-xs text-slate-700">{q.notes}</p>}
-                      {q.customer_approval_status !== "approved" && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => onQuotationDecision(q, "approved")}
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                          >
-                            Record Customer Acceptance
-                          </button>
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => onQuotationDecision(q, "rejected")}
-                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
-                          >
-                            Reject Quote
-                          </button>
+                      {q.items && q.items.length > 0 && (
+                        <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                          <p className="mb-1 font-semibold text-[#0B1F3A]">Itemised Materials:</p>
+                          <ul className="space-y-0.5 text-slate-600">
+                            {q.items.map((item, idx) => (
+                              <li key={idx} className="flex justify-between gap-2">
+                                <span>
+                                  {item.name}
+                                  {item.quantity > 1 ? ` × ${item.quantity}` : ""}
+                                </span>
+                                <span className="font-medium text-slate-800">
+                                  {formatNGN(item.unitPrice * item.quantity)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
+                      {q.notes && <p className="mt-1.5 text-xs text-slate-700">{q.notes}</p>}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewQuote({
+                              id: q.id,
+                              ticketNumber: q.ticket_number,
+                              revisionNumber: q.revision_number,
+                              createdAt: q.created_at,
+                              status: q.customer_approval_status,
+                              plumberName: q.plumber_name,
+                              customerName: contact.name,
+                              customerPhone: contact.phone,
+                              customerAddress: selected.address_in_kano,
+                              serviceCategory: selected.problem_category,
+                              labourCharge: q.labour_charge,
+                              materialsCost: q.materials_cost,
+                              transportCharge: q.transport_charge || 0,
+                              otherCharges: q.other_charges || 0,
+                              totalAmount: q.total_amount,
+                              items: q.items,
+                              notes: q.notes,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> Preview / Print
+                        </button>
+                        {q.customer_approval_status !== "approved" && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => onQuotationDecision(q, "approved")}
+                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                            >
+                              Record Customer Acceptance
+                            </button>
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => onQuotationDecision(q, "rejected")}
+                              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            >
+                              Reject Quote
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   );
                 })
@@ -556,6 +605,10 @@ export function RequestDetailDrawer({
           </div>
         </div>
       </div>
+      <QuotationPreviewModal
+        quote={previewQuote}
+        onClose={() => setPreviewQuote(null)}
+      />
     </div>
   );
 }

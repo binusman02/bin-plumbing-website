@@ -1,17 +1,29 @@
 import type { Metadata } from "next";
+import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getMarketplaceSettings } from "@/lib/marketplace";
 import { FaqAccordion, type FaqItem } from "@/components/public/FaqAccordion";
 
 export const metadata: Metadata = {
-  title: "Frequently Asked Questions",
+  title: "Plumbing FAQs | Bin Plumbing Services Ltd Kano",
   description:
-    "Answers to common questions about requesting a plumber, inspection quotations, active service areas, and request tracking.",
+    "Answers to common questions about requesting a plumber in Kano, on-site inspection quotations, active coverage areas, and live request tracking.",
   alternates: { canonical: "/faq" },
+  openGraph: {
+    title: "Plumbing FAQs | Bin Plumbing Services Ltd Kano",
+    description:
+      "Answers to common questions about requesting a plumber, inspection quotes, and tracking in Kano.",
+    url: "/faq",
+    type: "website",
+  },
 };
 
 export default async function FaqPage() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings");
+
   const settings = await getMarketplaceSettings();
   const activeAreas = settings.active_coverage_locations || [];
 
@@ -97,19 +109,19 @@ export default async function FaqPage() {
                 Send us an enquiry or submit a service request directly.
               </p>
             </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <Link
                 href="/contact"
-                className="inline-flex h-12 items-center justify-center rounded-lg border border-white/40 px-6 text-base font-semibold text-white transition-colors hover:border-[#F5B301] hover:text-[#F5B301]"
+                className="inline-flex min-h-12 items-center justify-center whitespace-nowrap rounded-lg border border-white/40 px-6 py-2.5 text-base font-semibold text-white transition-colors hover:border-[#F5B301] hover:text-[#F5B301]"
               >
                 Contact Us
               </Link>
               <Link
                 href="/request"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#F5B301] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
+                className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#F5B301] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
               >
-                Request a Plumber
-                <ArrowRight className="h-4 w-4" />
+                <span>Request a Plumber</span>
+                <ArrowRight className="h-4 w-4 shrink-0" />
               </Link>
             </div>
           </div>

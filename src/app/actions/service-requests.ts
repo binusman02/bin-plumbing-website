@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isValidCoordinate } from "@/lib/live-location";
 import { createUniversalServiceRequest } from "@/lib/marketplace";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { checkRateLimit, isHoneypotTriggered, verifyTurnstileToken } from "@/lib/security";
+import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export interface ServiceRequestInput {
   fullName: string;
@@ -22,6 +24,9 @@ export interface ServiceRequestInput {
   photos?: string[];
   website?: string;
   turnstileToken?: string;
+  customerLat?: number;
+  customerLng?: number;
+  customerLocationSource?: "gps" | "map_pin" | "address_only";
 }
 
 export async function submitServiceRequest(data: ServiceRequestInput) {
@@ -82,6 +87,41 @@ export async function submitServiceRequest(data: ServiceRequestInput) {
       customerEmail: data.email?.trim() || undefined,
       photos: Array.isArray(data.photos) ? data.photos.slice(0, 5) : undefined,
     });
+
+    if (
+      typeof data.customerLat === "number" &&
+      typeof data.customerLng === "number" &&
+      isValidCoordinate(data.customerLat, data.customerLng)
+    ) {
+      const source =
+        data.customerLocationSource === "gps" || data.customerLocationSource === "map_pin"
+          ? data.customerLocationSource
+          : "map_pin";
+      const nowIso = new Date().toISOString();
+      try {
+        const supabase = getServiceSupabase();
+        const { error } = await supabase
+          .from("service_requests")
+          .update({
+            customer_lat: data.customerLat,
+            customer_lng: data.customerLng,
+            customer_location_source: source,
+            customer_location_updated_at: nowIso,
+          })
+          .eq("id", created.id);
+        if (error) {
+          await supabase
+            .from("service_requests")
+            .update({
+              customer_lat: data.customerLat,
+              customer_lng: data.customerLng,
+            })
+            .eq("id", created.id);
+        }
+      } catch {
+        // Ignore if live-location columns are not migrated yet
+      }
+    }
 
     revalidatePath("/admin/requests");
     revalidatePath("/admin");

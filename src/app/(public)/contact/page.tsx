@@ -1,17 +1,29 @@
 import type { Metadata } from "next";
+import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { Phone, Mail, MapPin, Clock, MessageSquare, ArrowRight } from "lucide-react";
 import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
 import { ContactFormClient } from "./ContactFormClient";
 
 export const metadata: Metadata = {
-  title: "Contact Us",
+  title: "Contact Bin Plumbing Services Ltd in Kano",
   description:
-    "Contact Bin Plumbing Services Ltd for plumbing enquiries, service requests, and customer support.",
+    "Contact Bin Plumbing Services Ltd in Kano State for plumbing enquiries, service requests, quotations, and customer support.",
   alternates: { canonical: "/contact" },
+  openGraph: {
+    title: "Contact Bin Plumbing Services Ltd in Kano",
+    description:
+      "Speak with our coordination team in Kano for plumbing enquiries, quotations, and support.",
+    url: "/contact",
+    type: "website",
+  },
 };
 
 export default async function ContactPage() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("settings", "service-categories");
+
   const [settings, categories] = await Promise.all([
     getMarketplaceSettings(),
     getServiceCategories(true),
@@ -144,6 +156,31 @@ export default async function ContactPage() {
                   </p>
                 </div>
               )}
+
+              <div className="overflow-hidden rounded-xl border border-[#E3E8EF] bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-[#E3E8EF] px-4 py-3">
+                  <p className="text-sm font-semibold text-[#0B1F3A]">Service Location Map</p>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      address || "Kano, Nigeria"
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-[#0B1F3A] underline decoration-[#F5B301] underline-offset-4 hover:text-[#E0A200]"
+                  >
+                    Open in Google Maps
+                  </a>
+                </div>
+                <iframe
+                  title="Bin Plumbing Services Ltd Location Map"
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(
+                    address || "Kano, Nigeria"
+                  )}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
+                  className="h-64 w-full border-0"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
 
               <div className="rounded-xl bg-[#0B1F3A] p-6 text-white">
                 <p className="font-heading text-lg font-bold text-white">

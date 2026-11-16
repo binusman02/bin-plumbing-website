@@ -7,7 +7,9 @@ import {
   getAllQuotations,
   getAllServiceRequests,
   getChatPresenceStatus,
+  getGuides,
 } from "@/lib/marketplace";
+import { getBlogEngagementMap } from "@/lib/blog-engagement";
 import { DashboardClient } from "@/components/admin/DashboardClient";
 
 export const instant = false;
@@ -20,13 +22,15 @@ export default async function AdminDashboardPage() {
   await connection();
   const supabase = await createClient();
 
-  const [requests, plumbers, quotations, payments, complaints, enquiriesRes] = await Promise.all([
+  const [requests, plumbers, quotations, payments, complaints, enquiriesRes, guides, blogEngagementMap] = await Promise.all([
     getAllServiceRequests(),
     getAllPlumbers(),
     getAllQuotations(),
     getAllPayments(),
     getAllComplaints(),
     supabase.from("enquiries").select("*").order("created_at", { ascending: false }),
+    getGuides(false),
+    getBlogEngagementMap(),
   ]);
 
   const enquiries = enquiriesRes.data || [];
@@ -130,6 +134,8 @@ export default async function AdminDashboardPage() {
       categoryBreakdown={categoryBreakdown}
       approvedPlumbers={approvedPlumbers}
       initialOnlinePlumberIds={onlinePlumberIds}
+      recentGuides={guides.slice(0, 5)}
+      blogEngagementMap={blogEngagementMap}
     />
   );
 }

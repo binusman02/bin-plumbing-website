@@ -82,14 +82,16 @@ export function AuthLayout({
           {/* Shared Brand Header */}
           <div className="text-center">
             <Link href="/" className="inline-flex items-center justify-center gap-2.5">
-              <Image
-                src="/images/logo/bin-plumbing-logo.jpg"
-                alt="Bin Plumbing Services Ltd logo"
-                width={36}
-                height={36}
-                className="h-9 w-9 shrink-0 rounded-full border border-white/20 object-cover"
-                priority
-              />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301]/80 bg-white">
+                <Image
+                  src="/images/logo/bin-plumbing-logo.jpg"
+                  alt="Bin Plumbing Services Ltd logo"
+                  width={36}
+                  height={36}
+                  className="h-full w-full scale-[1.08] object-cover"
+                  priority
+                />
+              </div>
               <span className="text-xs font-bold tracking-wide text-white sm:text-sm">
                 BIN PLUMBING SERVICES LTD
               </span>

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ArrowLeft, Search, Trash2, Users, X } from "lucide-react";
-import { deleteCustomerAction } from "@/app/actions/marketplace-actions";
+import { ArrowLeft, Eye, Loader2, MapPin, MessageCircle, Pencil, Phone, Save, Search, Trash2, Users, X } from "lucide-react";
+import { adminUpdateCustomerRecordAction, deleteCustomerAction } from "@/app/actions/marketplace-actions";
+import { Avatar } from "@/components/ui";
 import { formatDateTime, formatNGN } from "@/lib/currency";
 import { getStatusMeta } from "@/lib/status-styles";
 import type {
@@ -35,6 +36,47 @@ export function CustomersManagerClient({ initialCustomers }: CustomersManagerCli
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editArea, setEditArea] = useState("");
+
+  const openCustomerDetail = (c: CustomerDirectoryEntry) => {
+    setSelected(c);
+    setEditName(c.name || "");
+    setEditPhone(c.phone || "");
+    setEditArea(c.area || "");
+    setConfirmDelete(false);
+    setFeedback(null);
+  };
+
+  const handleSaveCustomer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    startTransition(async () => {
+      const res = await adminUpdateCustomerRecordAction({
+        customerId: selected.id,
+        oldPhone: selected.phone,
+        name: editName,
+        phone: editPhone,
+        area: editArea,
+      });
+      if (res.success) {
+        const updated: CustomerDirectoryEntry = {
+          ...selected,
+          name: editName.trim(),
+          phone: editPhone.trim(),
+          area: editArea.trim() || "Kano",
+        };
+        setCustomers((prev) =>
+          prev.map((x) => (x.id === selected.id && x.phone === selected.phone ? updated : x))
+        );
+        setSelected(updated);
+        setFeedback(`Saved changes for ${updated.name}.`);
+      } else {
+        setFeedback(res.error || "Could not update customer contact.");
+      }
+    });
+  };
 
   const filtered = customers.filter((c) => {
     const q = search.trim().toLowerCase();
@@ -61,34 +103,39 @@ export function CustomersManagerClient({ initialCustomers }: CustomersManagerCli
   };
 
   return (
-    <div className="space-y-6 pb-20 lg:pb-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-[#0B1F3A]">Customers Directory</h2>
-          <p className="text-sm text-slate-500">
-            View customer profiles, area, request history, assigned plumbers, payments, and complaints.
-          </p>
+    <div className="space-y-3 pb-20 lg:pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <span className="inline-flex h-8 items-center gap-2 rounded-full border border-slate-300 bg-white px-3.5 text-xs font-bold text-[#0B1F3A]">
+            <span>All Contacts</span>
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+              {filtered.length}
+            </span>
+          </span>
+          <span className="hidden text-xs text-slate-500 sm:inline">
+            Customer profiles, service history, assigned plumbers, and lifetime value.
+          </span>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <div className="relative w-56 sm:w-64">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, phone, area..."
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm"
+            placeholder="Search contact name, phone, area..."
+            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2.5 text-xs text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
           />
         </div>
       </div>
 
       {feedback && (
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-[#0B1F3A]">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-[#0B1F3A]">
           {feedback}
         </div>
       )}
 
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-xs">
           <Users className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <p className="text-base font-semibold text-slate-700">No customers found</p>
           <p className="mt-1 text-sm text-slate-500">
@@ -97,43 +144,122 @@ export function CustomersManagerClient({ initialCustomers }: CustomersManagerCli
         </div>
       ) : (
         <>
-          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs md:block">
+            <table className="w-full border-collapse text-left text-[13px]">
+              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50/90 text-[11px] font-semibold text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Customer</th>
-                  <th className="px-4 py-3">Area</th>
-                  <th className="px-4 py-3">Requests</th>
-                  <th className="px-4 py-3">Source</th>
-                  <th className="px-4 py-3">Added</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Contact Name</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Phone</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Location / Area</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Deals / Requests</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Total Paid</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Source</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5">Added Date</th>
+                  <th className="whitespace-nowrap px-3.5 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((c) => (
-                  <tr
-                    key={`${c.id}-${c.phone}`}
-                    onClick={() => {
-                      setSelected(c);
-                      setConfirmDelete(false);
-                    }}
-                    className="cursor-pointer hover:bg-slate-50"
-                  >
-                    <td className="px-4 py-3.5">
-                      <p className="font-bold text-[#0B1F3A]">{c.name}</p>
-                      <p className="text-xs text-slate-500">{c.phone}</p>
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-700">{c.area}</td>
-                    <td className="px-4 py-3.5 font-semibold text-[#0B1F3A]">
-                      {c.requests.length}
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-600">{c.source}</td>
-                    <td className="whitespace-nowrap px-4 py-3.5 text-xs text-slate-500">
-                      {formatDateTime(c.createdAt)}
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((c) => {
+                  const totalPaid = c.payments.reduce((acc, p) => acc + (p.total_payment || 0), 0);
+                  return (
+                    <tr
+                      key={`${c.id}-${c.phone}`}
+                      onClick={() => openCustomerDetail(c)}
+                      className="group cursor-pointer transition-colors hover:bg-slate-50/90"
+                    >
+                      <td className="whitespace-nowrap px-3.5 py-2.5">
+                        <div className="inline-flex items-center gap-2">
+                          <Avatar name={c.name} size="xs" />
+                          <span className="font-semibold text-[#0B1F3A] group-hover:underline">
+                            {c.name}
+                          </span>
+                          <Eye className="h-3.5 w-3.5 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100" />
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-600">
+                        {c.phone || "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-700">
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin className="h-3 w-3 text-slate-400" />
+                          {c.area}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-[#0B1F3A]">
+                          {c.requests.length}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs font-semibold text-slate-800">
+                        {totalPaid > 0 ? formatNGN(totalPaid) : "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-600">
+                        {c.source}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-2.5 text-xs text-slate-500">
+                        {new Date(c.createdAt).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </td>
+                      <td
+                        className="whitespace-nowrap px-3.5 py-2.5 text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {c.phone && (
+                            <>
+                              <a
+                                href={`tel:${c.phone.replace(/[^0-9+]/g, "")}`}
+                                title="Call Customer"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#0B1F3A]"
+                              >
+                                <Phone className="h-3.5 w-3.5" />
+                              </a>
+                              <a
+                                href={`https://wa.me/${c.phone.replace(/[^0-9]/g, "").replace(/^0/, "234")}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="WhatsApp Customer"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" />
+                              </a>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openCustomerDetail(c)}
+                            title="Edit customer contact"
+                            aria-label="Edit customer contact"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-[#0B1F3A] transition-colors hover:border-[#0B1F3A]/40 hover:bg-slate-50"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-[#0B1F3A]" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/90 px-4 py-2.5 text-xs text-slate-600">
+              <div className="flex items-center gap-4">
+                <span>
+                  Total Contacts <strong className="ml-1 font-bold text-slate-900">{customers.length}</strong>
+                </span>
+                <span>
+                  Active With Requests{" "}
+                  <strong className="ml-1 font-bold text-slate-900">
+                    {customers.filter((c) => c.requests.length > 0).length}
+                  </strong>
+                </span>
+              </div>
+              <span className="font-semibold text-slate-700">
+                1 to {filtered.length}
+              </span>
+            </div>
           </div>
 
           <div className="space-y-3 md:hidden">
@@ -141,10 +267,7 @@ export function CustomersManagerClient({ initialCustomers }: CustomersManagerCli
               <button
                 key={`${c.id}-${c.phone}`}
                 type="button"
-                onClick={() => {
-                  setSelected(c);
-                  setConfirmDelete(false);
-                }}
+                onClick={() => openCustomerDetail(c)}
                 className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm"
               >
                 <div className="flex items-start justify-between gap-2">
@@ -192,6 +315,67 @@ export function CustomersManagerClient({ initialCustomers }: CustomersManagerCli
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-5">
+              {/* Editable Contact Profile Card */}
+              <form
+                onSubmit={handleSaveCustomer}
+                className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+                    Edit Contact Details
+                  </h4>
+                  <button
+                    type="submit"
+                    disabled={isPending}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3 text-xs font-bold text-white hover:bg-[#132c52] disabled:opacity-60"
+                  >
+                    {isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[#F5B301]" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5 text-[#F5B301]" />
+                    )}
+                    <span>{isPending ? "Saving..." : "Save Contact"}</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Contact Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Phone Number *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Area / Location
+                    </label>
+                    <input
+                      type="text"
+                      value={editArea}
+                      onChange={(e) => setEditArea(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </form>
+
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p className="text-xs text-slate-500">Requests</p>

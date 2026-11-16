@@ -238,15 +238,26 @@ export async function registerCustomerWithPasswordAction(input: {
     const existingCustomers = await getAllCustomers();
     const existingAccount = existingCustomers.find(
       (c) =>
-        c.password_hash &&
-        ((c.email && c.email.toLowerCase() === email.toLowerCase()) ||
-          normalizeNigerianPhoneDigits(c.phone) === normalizedDigits)
+        (c.email && c.email.toLowerCase() === email.toLowerCase()) ||
+        normalizeNigerianPhoneDigits(c.phone) === normalizedDigits
     );
     if (existingAccount) {
-      return {
-        success: false,
-        error: "An account with this email or phone number already exists. Please sign in instead.",
-      };
+      const existingRaw = existingAccount as typeof existingAccount & { auth_user_id?: string | null };
+      if (existingAccount.password_hash || existingRaw.auth_user_id) {
+        return {
+          success: false,
+          error: "An account with this email or phone number already exists. Please sign in instead.",
+        };
+      }
+      if (
+        existingAccount.email &&
+        existingAccount.email.trim().toLowerCase() !== email.toLowerCase()
+      ) {
+        return {
+          success: false,
+          error: "This phone number is already associated with a different email address. Please sign in or contact support.",
+        };
+      }
     }
 
     const authEmail =

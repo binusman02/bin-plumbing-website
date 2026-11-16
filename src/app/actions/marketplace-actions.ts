@@ -35,6 +35,7 @@ import {
   type RequestStatus,
   type PlumberDocument,
   type ComplaintRecord,
+  type PaymentRecord,
 } from "@/lib/marketplace";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import {
@@ -48,6 +49,20 @@ import {
   resolveChatActor,
   verifyTicketAccess,
 } from "@/lib/chat-auth";
+import { requireApprovedPlumberActor, resolvePortalActor } from "@/lib/portal-auth";
+import {
+  isValidCoordinate,
+  plumberMayShareLocation,
+  validateLocationInput,
+  type LocationInput,
+} from "@/lib/live-location";
+import {
+  plumberHasActiveJob,
+  reconcilePlumberSharing,
+  recordHeartbeat,
+  saveLiveLocation,
+  setSharing,
+} from "@/lib/live-location-server";
 
 const ALLOWED_DOC_TYPES = new Set([
   "image/jpeg",
@@ -218,6 +233,7 @@ export async function submitPlumberApplicationAction(formData: FormData) {
     await createNotification({
       recipientId: "admin",
       recipientRole: "admin",
+      actorRole: "plumber",
       type: "plumber_application",
       title: `New Plumber Application: ${fullName}`,
       body: `${residentialLocation} • ${applicant.application_ref}`,
@@ -267,13 +283,18 @@ export async function togglePlumberAvailabilityAction(
 ) {
   try {
     const admin = await requireAdminUser();
-    const plumberActor = admin ? null : await resolveChatActor("plumber");
+    const plumberActor = admin ? null : await requireApprovedPlumberActor();
     if (!admin && (!plumberActor || plumberActor.id !== plumberId)) {
-      return { success: false, error: "Unauthorized." };
+      return { success: false, error: "Unauthorized. Approved technician account required." };
     }
 
     const ok = await updatePlumberAvailability(plumberId, isAvailable);
     if (!ok) return { success: false, error: "Plumber not found." };
+
+    // Going Off Duty ends tracking unless the plumber still has an active job.
+    if (!isAvailable) {
+      await reconcilePlumberSharing(plumberId);
+    }
 
     revalidatePath("/admin");
     revalidatePath("/admin/plumbers");
@@ -307,19 +328,12 @@ export async function assignPlumberToRequestAction(params: {
       }
     );
 
-    // 3. Post system audit message
-    await postJobMessage({
-      requestId: params.ticketNumber,
-      ticketNumber: params.ticketNumber,
-      senderRole: "admin",
-      senderName: "Operations Coordinator",
-      recipientRole: "customer",
-      message: `Plumber Assigned: ${params.plumberName} has been assigned to coordinate your inspection and quotation.`,
-    });
+    // Notification is created below; do not post automatic system messages into chat conversations
 
     await createNotification({
       recipientId: params.plumberId,
       recipientRole: "plumber",
+      actorRole: "admin",
       type: "job_assigned",
       title: `Job Assigned: ${params.ticketNumber}`,
       body: `Assigned by ${admin.fullName}. Open Jobs & Assignments to coordinate inspection.`,
@@ -338,6 +352,7 @@ export async function assignPlumberToRequestAction(params: {
       await createNotification({
         recipientId: String(reqRow.customer_id),
         recipientRole: "customer",
+        actorRole: "admin",
         type: "plumber_assigned",
         title: `Plumber Assigned: ${params.ticketNumber}`,
         body: `${params.plumberName} has been assigned to your service request.`,
@@ -366,9 +381,9 @@ export async function claimServiceRequestAction(params: {
 }) {
   try {
     const admin = await requireAdminUser();
-    const plumberActor = admin ? null : await resolveChatActor("plumber");
+    const plumberActor = admin ? null : await requireApprovedPlumberActor();
     if (!admin && !plumberActor) {
-      return { success: false, error: "Unauthorized. Sign in as a verified plumber." };
+      return { success: false, error: "Unauthorized. Sign in as an approved technician." };
     }
 
     const effectivePlumberId = admin ? params.plumberId : plumberActor!.id;
@@ -405,20 +420,13 @@ export async function claimServiceRequestAction(params: {
       }
     );
 
-    // 3. Post audit communication message
-    await postJobMessage({
-      requestId: String(existingReq.id),
-      ticketNumber: params.ticketNumber,
-      senderRole: "plumber",
-      senderId: effectivePlumberId,
-      senderName: effectivePlumberName,
-      recipientRole: "customer",
-      message: `Technician Accepted: ${effectivePlumberName} has claimed this dispatch and will coordinate inspection directly.`,
-    });
+    // Notification is created below; do not post automatic system messages into chat conversations
 
     await createNotification({
       recipientId: "admin",
       recipientRole: "admin",
+      actorRole: "plumber",
+      actorId: effectivePlumberId,
       type: "job_claimed",
       title: `Job Claimed: ${params.ticketNumber}`,
       body: `${effectivePlumberName} claimed dispatch ${params.ticketNumber}.`,
@@ -431,6 +439,8 @@ export async function claimServiceRequestAction(params: {
       await createNotification({
         recipientId: String(existingReq.customer_id),
         recipientRole: "customer",
+        actorRole: "plumber",
+        actorId: effectivePlumberId,
         type: "plumber_assigned",
         title: `Plumber Assigned: ${params.ticketNumber}`,
         body: `${effectivePlumberName} has been assigned to your service request.`,
@@ -464,6 +474,7 @@ export async function submitQuotationAction(data: {
   isSmallJob?: boolean;
   smallJobReason?: string;
   notes?: string;
+  items?: import("@/lib/quotation-items").QuotationLineItem[];
 }) {
   try {
     if (data.labourCharge <= 0) {
@@ -471,9 +482,9 @@ export async function submitQuotationAction(data: {
     }
 
     const admin = await requireAdminUser();
-    const plumberActor = admin ? null : await resolveChatActor("plumber");
+    const plumberActor = admin ? null : await requireApprovedPlumberActor();
     if (!admin && !plumberActor) {
-      return { success: false, error: "Unauthorized. Sign in as the assigned plumber." };
+      return { success: false, error: "Unauthorized. Sign in as an approved assigned technician." };
     }
 
     if (plumberActor) {
@@ -490,18 +501,7 @@ export async function submitQuotationAction(data: {
       ...data,
       plumberId: verifiedPlumberId,
       plumberName: verifiedPlumberName,
-    });
-
-    // Record customer-facing audit message
-    await postJobMessage({
-      requestId: data.requestId,
-      ticketNumber: data.ticketNumber,
-      senderRole: admin ? "admin" : "plumber",
-      senderId: admin ? admin.userId : verifiedPlumberId,
-      senderName: verifiedPlumberName,
-      recipientRole: "customer",
-      message: `📋 Quotation Sent to Customer: ${verifiedPlumberName} has prepared a quotation for customer review. Please review and approve on your customer portal.`,
-      isInternal: false,
+      actorRole: admin ? "admin" : "plumber",
     });
 
     revalidatePath("/admin/requests");
@@ -548,22 +548,14 @@ export async function customerQuotationDecisionAction(
       return { success: false, error: "This quotation has already been decided." };
     }
 
-    const ok = await setCustomerQuotationApproval(quotationId, decision);
+    const ok = await setCustomerQuotationApproval(
+      quotationId,
+      decision,
+      customerActor?.name || (admin ? admin.fullName : "Customer"),
+      undefined,
+      admin ? "admin" : "customer"
+    );
     if (!ok) return { success: false, error: "Quotation record not found." };
-
-    await postJobMessage({
-      requestId: ticketNumber,
-      ticketNumber: ticketNumber,
-      senderRole: "customer",
-      senderId: customerActor?.id,
-      senderName: customerActor?.name || "Client",
-      recipientRole: "plumber",
-      message:
-        decision === "approved"
-          ? `✅ Quotation Approved: Client has formally approved the itemised quotation. Technician is authorised to commence work.`
-          : `⚠️ Quotation Revision Requested: Client declined the current quotation. Please contact client or update the estimate.`,
-      isInternal: false,
-    });
 
     revalidatePath("/tracking");
     revalidatePath("/customer");
@@ -585,9 +577,9 @@ export async function updateRequestStatusByTicketAction(
 ) {
   try {
     const admin = await requireAdminUser();
-    const plumberActor = admin ? null : await resolveChatActor("plumber");
+    const plumberActor = admin ? null : await requireApprovedPlumberActor();
     if (!admin && !plumberActor) {
-      return { success: false, error: "Unauthorized." };
+      return { success: false, error: "Unauthorized. Approved technician account required." };
     }
 
     if (plumberActor) {
@@ -619,16 +611,6 @@ export async function updateRequestStatusByTicketAction(
       return { success: false, error: "Service request not found or could not be updated." };
     }
 
-    await postJobMessage({
-      requestId: ticketNumber,
-      ticketNumber: ticketNumber,
-      senderRole: admin ? "admin" : "plumber",
-      senderId: admin ? admin.userId : plumberActor!.id,
-      senderName: actorName,
-      recipientRole: "customer",
-      message: `Job status transitioned to: ${status.replace(/_/g, " ").toUpperCase()}${notes ? ` - ${notes}` : ""}`,
-    });
-
     const supabase = getServiceSupabase();
     const { data: reqRow } = await supabase
       .from("service_requests")
@@ -636,22 +618,50 @@ export async function updateRequestStatusByTicketAction(
       .eq("ticket_number", ticketNumber)
       .maybeSingle();
 
+    const statusActorRole: "admin" | "plumber" = admin ? "admin" : "plumber";
+    const statusActorId = admin ? admin.userId : plumberActor!.id;
+
+    const isCompletionStatus =
+      status === "work_completed" || status === "awaiting_final_payment";
+
     if (reqRow?.customer_id) {
       await createNotification({
         recipientId: String(reqRow.customer_id),
         recipientRole: "customer",
-        type: "status_updated",
-        title: `Status Updated: ${ticketNumber}`,
-        body: `Your request is now ${status.replace(/_/g, " ")}.`,
+        actorRole: statusActorRole,
+        actorId: statusActorId,
+        type: isCompletionStatus ? "payment_receipt_requested" : "status_updated",
+        title: isCompletionStatus
+          ? `Work Completed — Upload Payment Receipt: ${ticketNumber}`
+          : `Status Updated: ${ticketNumber}`,
+        body: isCompletionStatus
+          ? "Your plumbing work is marked complete. Please complete your transfer and upload your payment receipt."
+          : `Your request is now ${status.replace(/_/g, " ")}.`,
         entityType: "service_request",
         entityId: ticketNumber,
         destination: `/customer?tab=requests&ticket=${ticketNumber}`,
+      });
+    }
+    if (isCompletionStatus && statusActorRole === "plumber") {
+      await createNotification({
+        recipientId: "admin",
+        recipientRole: "admin",
+        actorRole: "plumber",
+        actorId: statusActorId,
+        type: "status_updated",
+        title: `Work Marked Complete: ${ticketNumber}`,
+        body: `${actorName} marked ${ticketNumber} as ${status.replace(/_/g, " ")}. Customer has been prompted to upload payment receipt.`,
+        entityType: "service_request",
+        entityId: ticketNumber,
+        destination: `/admin/requests?ticket=${ticketNumber}`,
       });
     }
     if (reqRow?.assigned_plumber_id) {
       await createNotification({
         recipientId: String(reqRow.assigned_plumber_id),
         recipientRole: "plumber",
+        actorRole: statusActorRole,
+        actorId: statusActorId,
         type: "status_updated",
         title: `Job Status Updated: ${ticketNumber}`,
         body: `Status changed to ${status.replace(/_/g, " ")}.`,
@@ -694,14 +704,27 @@ export async function postCommunicationMessageAction(params: {
       return { success: false, error: "Authentication required to send messages." };
     }
 
-    const isInternal = Boolean(params.isInternal);
-    if (isInternal && actor.role !== "admin") {
-      return { success: false, error: "Only administrators can send internal notes." };
+    let isInternal = Boolean(params.isInternal);
+    if (isInternal && actor.role === "customer") {
+      return { success: false, error: "Customers cannot send internal notes." };
     }
 
     const ticketCtx = await verifyTicketAccess(actor, params.ticketNumber || params.requestId);
     if (!ticketCtx) {
       return { success: false, error: "You are not authorised to message on this service request." };
+    }
+
+    // If replying to a locked/internal message, force the reply to stay internal so customers never see it
+    if (params.replyToId && (actor.role === "admin" || actor.role === "plumber")) {
+      const supabase = getServiceSupabase();
+      const { data: parentMsg } = await supabase
+        .from("messages")
+        .select("is_internal")
+        .eq("id", params.replyToId)
+        .maybeSingle();
+      if (parentMsg?.is_internal) {
+        isInternal = true;
+      }
     }
 
     const recipients = getAuthorizedRecipients(ticketCtx, actor.role, isInternal);
@@ -755,6 +778,73 @@ export async function editCommunicationMessageAction(params: {
     return { success: true, message: updated };
   } catch (err: any) {
     return { success: false, error: err.message || "Could not edit message." };
+  }
+}
+
+export async function submitPaymentReceiptAction(params: {
+  requestId?: string;
+  ticketNumber: string;
+  fileName: string;
+  url: string;
+  mimeType?: string;
+  size?: number;
+}) {
+  try {
+    const actor = await resolveChatActor("customer");
+    if (!actor || actor.role !== "customer") {
+      return { success: false, error: "Please sign in as a customer to upload a payment receipt." };
+    }
+
+    const ticketCtx = await verifyTicketAccess(actor, params.ticketNumber || params.requestId || "");
+    if (!ticketCtx) {
+      return { success: false, error: "You are not authorised to upload a receipt for this request." };
+    }
+
+    const recipients = getAuthorizedRecipients(ticketCtx, "customer", false);
+    const primaryRecipient = recipients[0];
+
+    const msg = await postJobMessage({
+      requestId: ticketCtx.requestId,
+      ticketNumber: ticketCtx.ticketNumber,
+      senderRole: "customer",
+      senderName: actor.name,
+      senderId: actor.id,
+      recipientRole: primaryRecipient?.recipientRole || "admin",
+      recipientId: primaryRecipient?.recipientId || null,
+      recipients,
+      message: `Payment receipt uploaded: ${params.fileName}`,
+      attachment: {
+        url: params.url,
+        name: params.fileName,
+        mimeType: params.mimeType || "application/octet-stream",
+        size: params.size || 0,
+      },
+      isInternal: false,
+      replyToId: null,
+    });
+
+    await createNotification({
+      recipientId: "admin",
+      recipientRole: "admin",
+      actorRole: "customer",
+      actorId: actor.id,
+      type: "payment_receipt_uploaded",
+      title: `Payment Receipt Uploaded: ${ticketCtx.ticketNumber}`,
+      body: `${actor.name} uploaded a payment receipt (${params.fileName}) for ${ticketCtx.ticketNumber}. Please verify and reconcile.`,
+      entityType: "service_request",
+      entityId: ticketCtx.ticketNumber,
+      destination: `/admin/requests?ticket=${ticketCtx.ticketNumber}`,
+    });
+
+    revalidatePath("/admin/requests");
+    revalidatePath("/admin/communications");
+    revalidatePath("/admin");
+    revalidatePath("/customer");
+    revalidatePath("/tracking");
+
+    return { success: true, message: msg };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Could not upload payment receipt." };
   }
 }
 
@@ -812,16 +902,6 @@ export async function recordPaymentReconciliationAction(params: {
       plumberPayable: serverPlumberPayable,
     });
 
-    await postJobMessage({
-      requestId: params.requestId || params.ticketNumber,
-      ticketNumber: params.ticketNumber,
-      senderRole: "admin",
-      senderId: admin.userId,
-      senderName: "Finance & Accounts",
-      recipientRole: "plumber",
-      message: `Payment Recorded (Pending Verification): ₦${totalPayment.toLocaleString()} via ${params.paymentMethod}. Estimated plumber payable: ₦${serverPlumberPayable.toLocaleString()}.`,
-    });
-
     const { data: reqRow } = await supabase
       .from("service_requests")
       .select("customer_id, assigned_plumber_id")
@@ -832,6 +912,7 @@ export async function recordPaymentReconciliationAction(params: {
       await createNotification({
         recipientId: String(reqRow.customer_id),
         recipientRole: "customer",
+        actorRole: "admin",
         type: "payment_recorded",
         title: `Payment Recorded: ${params.ticketNumber}`,
         body: `Your manual payment of ₦${totalPayment.toLocaleString()} has been logged for verification.`,
@@ -864,6 +945,19 @@ export async function getTrackingDataAction(ticketNumber: string, phone: string)
       };
     }
 
+    const rate = await checkRateLimit(
+      "tracking_lookup",
+      12,
+      10 * 60 * 1000,
+      ticketNumber.trim().toUpperCase()
+    );
+    if (!rate.allowed) {
+      return {
+        success: false,
+        error: "Too many tracking attempts. Please wait a few minutes and try again.",
+      };
+    }
+
     const { getServiceRequestByTicket, getQuotationsForRequest, getMessagesForRequest } = await import("@/lib/marketplace");
     const request = await getServiceRequestByTicket(ticketNumber.trim(), phone.trim());
     if (!request) {
@@ -872,6 +966,15 @@ export async function getTrackingDataAction(ticketNumber: string, phone: string)
         error: "No matching service request found for this reference number and phone number. Please verify both details and try again.",
       };
     }
+
+    const sanitizedRequest: import("@/lib/marketplace").ServiceRequestRecord = {
+      ...request,
+      internal_notes: undefined,
+      customer_lat: undefined,
+      customer_lng: undefined,
+      customer_id: undefined,
+      assigned_plumber_id: undefined,
+    };
 
     const quotations = await getQuotationsForRequest(request.ticket_number);
     // STRICT PRIVACY: Customer must NEVER see internal communication between admin and plumber
@@ -886,7 +989,7 @@ export async function getTrackingDataAction(ticketNumber: string, phone: string)
 
     return {
       success: true,
-      request,
+      request: sanitizedRequest,
       quotations,
       messages: safeCustomerMessages,
     };
@@ -996,6 +1099,9 @@ export async function submitCustomerRequestAction(data: {
   preferredTiming?: string;
   preferredDate?: string;
   priority?: "standard" | "urgent";
+  customerLat?: number;
+  customerLng?: number;
+  customerLocationSource?: "gps" | "map_pin" | "address_only";
 }) {
   try {
     const { createUniversalServiceRequest } = await import("@/lib/marketplace");
@@ -1014,12 +1120,458 @@ export async function submitCustomerRequestAction(data: {
       priority: data.priority || "standard",
     });
 
+    if (
+      typeof data.customerLat === "number" &&
+      typeof data.customerLng === "number" &&
+      isValidCoordinate(data.customerLat, data.customerLng)
+    ) {
+      const supabase = getServiceSupabase();
+      const nowIso = new Date().toISOString();
+      const source = data.customerLocationSource === "gps" ? "gps" : "map_pin";
+      let { error: locErr } = await supabase
+        .from("service_requests")
+        .update({
+          customer_lat: data.customerLat,
+          customer_lng: data.customerLng,
+          customer_location_source: source,
+          customer_location_updated_at: nowIso,
+        })
+        .eq("id", result.id);
+      if (locErr && /customer_location_/.test(locErr.message)) {
+        ({ error: locErr } = await supabase
+          .from("service_requests")
+          .update({ customer_lat: data.customerLat, customer_lng: data.customerLng })
+          .eq("id", result.id));
+      }
+      if (locErr) {
+        // The request itself was created; the customer can pin the property later.
+        console.error("[submitServiceRequestAction] property location not saved:", locErr.message);
+      } else {
+        result.customer_lat = data.customerLat;
+        result.customer_lng = data.customerLng;
+      }
+    }
+
     revalidatePath("/customer");
     revalidatePath("/tracking");
     revalidatePath("/admin/requests");
     return { success: true, request: result, ticketNumber: result.ticket_number };
   } catch (err: any) {
     return { success: false, error: err.message || "Failed to submit plumbing request." };
+  }
+}
+
+export type LocationActionResult =
+  | {
+      success: true;
+      /** ISO time at which the SERVER confirmed this update. Only set after persistence. */
+      confirmedAt: string;
+      /** True when a newer fix was already stored and this (older) one was discarded. */
+      ignored?: boolean;
+    }
+  | {
+      success: false;
+      code:
+        | "unauthorized"
+        | "not_allowed"
+        | "invalid"
+        | "poor_accuracy"
+        | "rate_limited"
+        | "implausible"
+        | "no_location"
+        | "storage";
+      error: string;
+    };
+
+async function authorisePlumberLocationWrite(): Promise<
+  | { ok: true; plumberId: string }
+  | { ok: false; result: Extract<LocationActionResult, { success: false }> }
+> {
+  // Identity comes ONLY from the verified session – never from client input.
+  const actor = await requireApprovedPlumberActor();
+  if (!actor) {
+    return {
+      ok: false,
+      result: {
+        success: false,
+        code: "unauthorized",
+        error: "Please sign in with an approved technician account to share location.",
+      },
+    };
+  }
+
+  const supabase = getServiceSupabase();
+  const { data: plumber } = await supabase
+    .from("plumbers")
+    .select("is_available")
+    .eq("id", actor.id)
+    .maybeSingle();
+  const hasActiveJob = await plumberHasActiveJob(actor.id);
+  if (
+    !plumberMayShareLocation({
+      isApproved: true,
+      isOnDuty: plumber?.is_available === true,
+      hasActiveJob,
+    })
+  ) {
+    await setSharing(actor.id, false);
+    return {
+      ok: false,
+      result: {
+        success: false,
+        code: "not_allowed",
+        error: "Go On Duty (or accept a job) to share your location.",
+      },
+    };
+  }
+
+  const limit = await checkRateLimit("plumber_location", 20, 60_000, actor.id);
+  if (!limit.allowed) {
+    return {
+      ok: false,
+      result: {
+        success: false,
+        code: "rate_limited",
+        error: "Too many location updates. Retrying shortly.",
+      },
+    };
+  }
+  return { ok: true, plumberId: actor.id };
+}
+
+export async function updatePlumberLocationAction(
+  input: LocationInput
+): Promise<LocationActionResult> {
+  try {
+    const validated = validateLocationInput(input);
+    if (!validated.ok) {
+      return {
+        success: false,
+        code: validated.code === "poor_accuracy" ? "poor_accuracy" : "invalid",
+        error:
+          validated.code === "poor_accuracy"
+            ? "GPS accuracy is currently low. Move to an open area and try again."
+            : "Your device reported an invalid location. Please try again.",
+      };
+    }
+
+    const auth = await authorisePlumberLocationWrite();
+    if (!auth.ok) return auth.result;
+
+    const saved = await saveLiveLocation(auth.plumberId, validated.value);
+    if (!saved.ok) {
+      return saved.reason === "implausible"
+        ? {
+            success: false,
+            code: "implausible",
+            error: "That location change looks unreliable and was not saved.",
+          }
+        : {
+            success: false,
+            code: "storage",
+            error: "Location update failed. Your last confirmed location is still available.",
+          };
+    }
+    return { success: true, confirmedAt: saved.confirmedAtIso, ignored: saved.ignored ? true : undefined };
+  } catch (err) {
+    console.error("[updatePlumberLocationAction]", err instanceof Error ? err.message : err);
+    return {
+      success: false,
+      code: "storage",
+      error: "Location update failed. Your last confirmed location is still available.",
+    };
+  }
+}
+
+/** Keeps a stationary-but-connected plumber from appearing offline. */
+export async function sendLocationHeartbeatAction(): Promise<LocationActionResult> {
+  try {
+    const auth = await authorisePlumberLocationWrite();
+    if (!auth.ok) return auth.result;
+    const beat = await recordHeartbeat(auth.plumberId);
+    if (!beat.ok) {
+      return beat.reason === "no_location"
+        ? {
+            success: false,
+            code: "no_location",
+            error: "No location has been saved yet.",
+          }
+        : {
+            success: false,
+            code: "storage",
+            error: "Location update failed. Your last confirmed location is still available.",
+          };
+    }
+    return { success: true, confirmedAt: beat.confirmedAtIso };
+  } catch (err) {
+    console.error("[sendLocationHeartbeatAction]", err instanceof Error ? err.message : err);
+    return {
+      success: false,
+      code: "storage",
+      error: "Location update failed. Your last confirmed location is still available.",
+    };
+  }
+}
+
+/** Explicit stop (e.g. user taps "Stop sharing"); also erases stored coordinates. */
+export async function stopLocationSharingAction(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const actor = await requireApprovedPlumberActor();
+    if (!actor) return { success: false, error: "Unauthorized." };
+    // Sharing may not be stopped while a job is active: the customer is relying on it.
+    if (await plumberHasActiveJob(actor.id)) {
+      return {
+        success: false,
+        error: "Location sharing stays on while you have an active job.",
+      };
+    }
+    const ok = await setSharing(actor.id, false);
+    return ok ? { success: true } : { success: false, error: "Could not stop sharing." };
+  } catch (err) {
+    console.error("[stopLocationSharingAction]", err instanceof Error ? err.message : err);
+    return { success: false, error: "Could not stop sharing." };
+  }
+}
+
+export async function startPlumberTripAction(
+  ticketNumber: string,
+  coords?: { lat: number; lng: number; accuracyM?: number | null } | null
+): Promise<{ success: boolean; startedAt?: string; error?: string }> {
+  try {
+    const actor = await requireApprovedPlumberActor();
+    if (!actor) return { success: false, error: "Unauthorized." };
+    const ctx = await verifyTicketAccess(actor, ticketNumber);
+    if (!ctx) return { success: false, error: "You are not assigned to this service request." };
+
+    const supabase = getServiceSupabase();
+    const { data: reqRow } = await supabase
+      .from("service_requests")
+      .select("status, customer_id")
+      .eq("ticket_number", ticketNumber)
+      .maybeSingle();
+
+    if (!reqRow) return { success: false, error: "Service request not found." };
+    if (reqRow.status === "completed" || reqRow.status === "cancelled") {
+      return { success: false, error: "Cannot start a trip for a completed or cancelled job." };
+    }
+
+    const startedAt = new Date().toISOString();
+    const hasCoords =
+      coords != null &&
+      Number.isFinite(coords.lat) &&
+      Number.isFinite(coords.lng) &&
+      !(coords.lat === 0 && coords.lng === 0);
+
+    await updateServiceRequest(
+      ticketNumber,
+      {},
+      {
+        actor: actor.name,
+        action: "trip_started",
+        details: hasCoords
+          ? `Trip started at ${startedAt} (${coords!.lat.toFixed(5)}, ${coords!.lng.toFixed(5)})`
+          : `Trip started at ${startedAt}`,
+      }
+    );
+
+    await setSharing(actor.id, true);
+    if (hasCoords) {
+      await saveLiveLocation(actor.id, {
+        lat: coords!.lat,
+        lng: coords!.lng,
+        accuracyM: coords!.accuracyM ?? null,
+        heading: null,
+        speed: null,
+        fixTimeMs: Date.now(),
+      });
+    }
+
+    if (reqRow.customer_id) {
+      await createNotification({
+        recipientId: String(reqRow.customer_id),
+        recipientRole: "customer",
+        actorRole: "plumber",
+        actorId: actor.id,
+        type: "status_updated",
+        title: `Plumber on the way: ${ticketNumber}`,
+        body: `${actor.name} has started the trip to your property. Live tracking is now active.`,
+        entityType: "service_request",
+        entityId: ticketNumber,
+        destination: `/customer?tab=requests&ticket=${ticketNumber}`,
+      });
+    }
+
+    return { success: true, startedAt };
+  } catch (err) {
+    console.error("[startPlumberTripAction]", err instanceof Error ? err.message : err);
+    return { success: false, error: "Could not start trip." };
+  }
+}
+
+export async function markPlumberArrivedAction(
+  ticketNumber: string,
+  coords?: { lat: number; lng: number; accuracyM?: number | null } | null
+): Promise<{ success: boolean; arrivedAt?: string; error?: string }> {
+  try {
+    const actor = await requireApprovedPlumberActor();
+    if (!actor) return { success: false, error: "Unauthorized." };
+    const ctx = await verifyTicketAccess(actor, ticketNumber);
+    if (!ctx) return { success: false, error: "You are not assigned to this service request." };
+
+    const supabase = getServiceSupabase();
+    const { data: reqRow } = await supabase
+      .from("service_requests")
+      .select("status, customer_id")
+      .eq("ticket_number", ticketNumber)
+      .maybeSingle();
+
+    if (!reqRow) return { success: false, error: "Service request not found." };
+
+    const arrivedAt = new Date().toISOString();
+    const hasCoords =
+      coords != null &&
+      Number.isFinite(coords.lat) &&
+      Number.isFinite(coords.lng) &&
+      !(coords.lat === 0 && coords.lng === 0);
+
+    // Save arrived event in job history WITHOUT changing the main job status.
+    await updateServiceRequest(
+      ticketNumber,
+      {},
+      {
+        actor: actor.name,
+        action: "arrived",
+        details: hasCoords
+          ? `Arrived at ${arrivedAt} (${coords!.lat.toFixed(5)}, ${coords!.lng.toFixed(5)})`
+          : `Arrived at ${arrivedAt}`,
+      }
+    );
+
+    // Stop live location sharing for this trip (unless another assigned job is still on the way).
+    const { data: otherJobs } = await supabase
+      .from("service_requests")
+      .select("ticket_number, status, history")
+      .eq("assigned_plumber_id", actor.id)
+      .not("status", "in", "(completed,cancelled)");
+
+    const hasAnotherActiveTrip = (otherJobs || []).some((row) => {
+      if (row.ticket_number === ticketNumber) return false;
+      const hist = Array.isArray(row.history) ? (row.history as { action?: string }[]) : [];
+      for (let i = hist.length - 1; i >= 0; i--) {
+        if (hist[i]?.action === "arrived") return false;
+        if (hist[i]?.action === "trip_started") return true;
+        if (hist[i]?.action === "trip_cancelled") return false;
+      }
+      return false;
+    });
+
+    if (!hasAnotherActiveTrip) {
+      await setSharing(actor.id, false);
+    }
+
+    if (reqRow.customer_id) {
+      await createNotification({
+        recipientId: String(reqRow.customer_id),
+        recipientRole: "customer",
+        actorRole: "plumber",
+        actorId: actor.id,
+        type: "status_updated",
+        title: `Your plumber has arrived: ${ticketNumber}`,
+        body: `${actor.name} has arrived at your property.`,
+        entityType: "service_request",
+        entityId: ticketNumber,
+        destination: `/customer?tab=requests&ticket=${ticketNumber}`,
+      });
+    }
+
+    await createNotification({
+      recipientId: "admin",
+      recipientRole: "admin",
+      actorRole: "plumber",
+      actorId: actor.id,
+      type: "status_updated",
+      title: `Your plumber has arrived: ${ticketNumber}`,
+      body: `${actor.name} arrived at ${ticketNumber}.`,
+      entityType: "service_request",
+      entityId: ticketNumber,
+      destination: `/admin/requests?ticket=${ticketNumber}`,
+    });
+
+    return { success: true, arrivedAt };
+  } catch (err) {
+    console.error("[markPlumberArrivedAction]", err instanceof Error ? err.message : err);
+    return { success: false, error: "Could not record arrival." };
+  }
+}
+
+export async function updateCustomerRequestLocationAction(
+  requestId: string,
+  lat: number,
+  lng: number,
+  source: "gps" | "map_pin" = "map_pin"
+) {
+  try {
+    if (!requestId || !isValidCoordinate(lat, lng)) {
+      return { success: false, error: "Invalid location coordinates." };
+    }
+    const actor = await resolvePortalActor("customer");
+    if (!actor || actor.role !== "customer") {
+      return { success: false, error: "Customer authentication required." };
+    }
+    const supabase = getServiceSupabase();
+    const { data: reqRow, error: fetchErr } = await supabase
+      .from("service_requests")
+      .select("id, customer_id, customer_phone, status")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (fetchErr || !reqRow) {
+      return { success: false, error: "Service request not found." };
+    }
+
+    const reqPhone = String(reqRow.customer_phone || "").replace(/\D/g, "").slice(-10);
+    const actorPhone = String(actor.phone || "").replace(/\D/g, "").slice(-10);
+    const isOwner =
+      (reqRow.customer_id && String(reqRow.customer_id) === actor.id) ||
+      (reqPhone && actorPhone && reqPhone === actorPhone);
+
+    if (!isOwner) {
+      return { success: false, error: "You are not authorized to update this request." };
+    }
+    if (["completed", "cancelled"].includes(String(reqRow.status || ""))) {
+      return { success: false, error: "Completed or cancelled requests cannot be updated." };
+    }
+
+    const nowIso = new Date().toISOString();
+    let { error } = await supabase
+      .from("service_requests")
+      .update({
+        customer_lat: lat,
+        customer_lng: lng,
+        customer_location_source: source === "gps" ? "gps" : "map_pin",
+        customer_location_updated_at: nowIso,
+      })
+      .eq("id", requestId);
+
+    if (error && /customer_location_/.test(error.message)) {
+      // Migration 20261115 not applied yet: store the coordinates only.
+      ({ error } = await supabase
+        .from("service_requests")
+        .update({ customer_lat: lat, customer_lng: lng })
+        .eq("id", requestId));
+    }
+
+    if (error) {
+      console.error("[updateCustomerRequestLocationAction]", error.message);
+      return { success: false, error: "Could not save your location. Please try again." };
+    }
+    revalidatePath("/customer");
+    revalidatePath("/admin/requests");
+    revalidatePath("/plumber");
+    return { success: true };
+  } catch (err) {
+    console.error("[updateCustomerRequestLocationAction]", err instanceof Error ? err.message : err);
+    return { success: false, error: "Could not save your location. Please try again." };
   }
 }
 
@@ -1053,6 +1605,7 @@ export async function verifyPaymentAction(
         await createNotification({
           recipientId: String(reqRow.customer_id),
           recipientRole: "customer",
+          actorRole: "admin",
           type: decision === "verified" ? "payment_verified" : "payment_rejected",
           title:
             decision === "verified"
@@ -1072,6 +1625,7 @@ export async function verifyPaymentAction(
         await createNotification({
           recipientId: String(reqRow.assigned_plumber_id),
           recipientRole: "plumber",
+          actorRole: "admin",
           type: "payment_verified",
           title: `Payment Verified: ${payRow.ticket_number}`,
           body: `Customer payment for ${payRow.ticket_number} has been verified.`,
@@ -1141,6 +1695,7 @@ export async function submitComplaintAction(data: {
     await createNotification({
       recipientId: "admin",
       recipientRole: "admin",
+      actorRole: "customer",
       type: "complaint_submitted",
       title: data.category === "complaint" ? "New Customer Complaint" : "New Customer Feedback",
       body: `${data.customerName}: ${data.message.trim().slice(0, 90)}`,
@@ -1186,6 +1741,7 @@ export async function updateComplaintStatusAction(
         await createNotification({
           recipientId: String(reqRow.customer_id),
           recipientRole: "customer",
+          actorRole: "admin",
           type: "complaint_updated",
           title: `Complaint Update: ${cmp.ticket_number}`,
           body: `Your ${cmp.category || "complaint"} status is now ${status.replace(/_/g, " ")}.`,
@@ -1296,6 +1852,8 @@ export async function addGalleryItemAction(formData: FormData) {
     updateTag("gallery");
     revalidatePath("/admin/gallery");
     revalidatePath("/gallery");
+    revalidatePath("/services");
+    revalidatePath("/");
     revalidatePath("/projects");
     return { success: true, item };
   } catch (err: any) {
@@ -1317,6 +1875,8 @@ export async function toggleGalleryPublishAction(id: string, published: boolean)
     updateTag("gallery");
     revalidatePath("/admin/gallery");
     revalidatePath("/gallery");
+    revalidatePath("/services");
+    revalidatePath("/");
     revalidatePath("/projects");
     return { success: true };
   } catch (err: any) {
@@ -1353,6 +1913,8 @@ export async function deleteGalleryItemAction(id: string) {
     updateTag("gallery");
     revalidatePath("/admin/gallery");
     revalidatePath("/gallery");
+    revalidatePath("/services");
+    revalidatePath("/");
     revalidatePath("/projects");
     return { success: true };
   } catch (err: any) {
@@ -1442,13 +2004,36 @@ export async function moderateReviewAction(
 
 export async function upsertGuideAction(input: {
   id?: string;
-  slug: string;
-  title: string;
-  summary: string;
-  content: string;
+  slug?: string;
+  title?: string;
+  summary?: string;
+  content?: string;
   category: string;
-  status: "draft" | "published";
+  status?: "draft" | "review" | "published";
   needs_owner_review: boolean;
+  en_title?: string;
+  en_slug?: string;
+  en_summary?: string;
+  en_content?: string;
+  en_seo_title?: string;
+  en_meta_description?: string;
+  en_image_alt?: string;
+  en_status?: "draft" | "review" | "published";
+  ha_title?: string;
+  ha_slug?: string;
+  ha_summary?: string;
+  ha_content?: string;
+  ha_seo_title?: string;
+  ha_meta_description?: string;
+  ha_image_alt?: string;
+  ha_status?: "draft" | "review" | "published";
+  featured_image?: string;
+  image_attribution?: string;
+  target_service_slug?: string;
+  main_keyword?: string;
+  supporting_keywords?: string[];
+  author_name?: string;
+  published_at?: string | null;
 }) {
   try {
     const admin = await requireAdminUser();
@@ -1460,10 +2045,12 @@ export async function upsertGuideAction(input: {
       return { success: false, error: "Could not save guide." };
     }
     updateTag("guides");
-    updateTag("guides");
     revalidatePath("/admin/guides");
     revalidatePath("/guides");
-    revalidatePath(`/guides/${saved.slug}`);
+    revalidatePath("/en/blog");
+    revalidatePath("/ha/blog");
+    if (saved.en_slug) revalidatePath(`/en/blog/${saved.en_slug}`);
+    if (saved.ha_slug) revalidatePath(`/ha/blog/${saved.ha_slug}`);
     revalidatePath("/sitemap.xml");
     return { success: true, guide: saved };
   } catch (err: any) {
@@ -1471,70 +2058,24 @@ export async function upsertGuideAction(input: {
   }
 }
 
-const DRAFT_GUIDE_OUTLINES = [
-  {
-    slug: "overhead-water-tank-and-pump-care",
-    title: "Overhead Water Tank & Pump Care Checklist",
-    category: "Water Tanks & Pumps",
-    summary: "Needs owner review: Routine checks for float valves, tank sediment, and pump pressure.",
-    content:
-      "## Why Regular Tank Checks Matter\n\n[Needs owner review] Outline covering float valve wear, tank lid sealing, and sediment flushing intervals.\n\n## Signs Your Pump Needs Inspection\n\n[Needs owner review] Short-cycling, pressure drops, and dry-run protection checks.",
-  },
-  {
-    slug: "detecting-hidden-pipe-leaks-early",
-    title: "How to Spot Hidden Pipe Leaks Early",
-    category: "Pipework & Leaks",
-    summary: "Needs owner review: Early warning signs of damp walls, meter drift, and pressure loss.",
-    content:
-      "## Common Warning Signs\n\n[Needs owner review] Damp patches, bubbling paint, and unexpected water usage.\n\n## What to Do Before the Plumber Arrives\n\n[Needs owner review] Shutting off the isolation valve and taking photos for inspection.",
-  },
-  {
-    slug: "preventing-kitchen-and-bathroom-drain-blockages",
-    title: "Preventing Kitchen & Bathroom Drain Blockages",
-    category: "Drainage & Blockages",
-    summary: "Needs owner review: Practical habits to keep floor traps and sink lines clear.",
-    content:
-      "## Kitchen Sink Best Practices\n\n[Needs owner review] Grease traps, strainers, and hot water flushing.\n\n## Bathroom Trap Care\n\n[Needs owner review] Hair catchers and avoiding harsh chemical drain openers.",
-  },
-  {
-    slug: "borehole-and-booster-pump-pressure-issues",
-    title: "Troubleshooting Low Water Pressure from Booster Pumps",
-    category: "Water Tanks & Pumps",
-    summary: "Needs owner review: Checking airlocks, non-return valves, and pressure switches.",
-    content:
-      "## Typical Causes of Low Pressure\n\n[Needs owner review] Faulty check valves, clogged filters, or worn impellers.\n\n## When to Request an On-Site Inspection\n\n[Needs owner review] Electrical and mechanical checks by a qualified technician.",
-  },
-  {
-    slug: "bathroom-fixture-replacement-checklist",
-    title: "Checklist Before Replacing Bathroom Taps, Mixers & WCs",
-    category: "Bathroom & Kitchen",
-    summary: "Needs owner review: Measurements, shut-off valves, and spare part compatibility.",
-    content:
-      "## Pre-Purchase Measurements\n\n[Needs owner review] Rough-in distances, thread sizes, and water pressure compatibility.\n\n## Inspection & Itemised Quote\n\n[Needs owner review] Confirming labour and fitting parts before installation begins.",
-  },
-  {
-    slug: "preparing-your-property-for-plumbing-inspection",
-    title: "How to Prepare for an On-Site Plumbing Inspection",
-    category: "General Plumbing",
-    summary: "Needs owner review: Simple steps to help your assigned technician diagnose faster.",
-    content:
-      "## Access & Photos\n\n[Needs owner review] Clearing under-sink cabinets and sharing photos in your request.\n\n## Reviewing Your Itemised Quotation\n\n[Needs owner review] Understanding labour, materials, and approval before work starts.",
-  },
-];
-
 export async function seedDraftGuidesAction() {
   try {
     const admin = await requireAdminUser();
     if (!admin) {
       return { success: false, error: "Admin authorisation required." };
     }
+    const { BILINGUAL_BLOG_STARTER_ARTICLES } = await import(
+      "@/data/bilingual-blog-starter"
+    );
     const seeded = [];
-    for (const outline of DRAFT_GUIDE_OUTLINES) {
+    for (const outline of BILINGUAL_BLOG_STARTER_ARTICLES) {
       const saved = await upsertGuide(
         {
           ...outline,
-          status: "draft",
-          needs_owner_review: true,
+          status: outline.status || "published",
+          en_status: outline.en_status || "published",
+          ha_status: outline.ha_status || "published",
+          needs_owner_review: outline.needs_owner_review ?? false,
         },
         admin.email || "admin"
       );
@@ -1542,6 +2083,9 @@ export async function seedDraftGuidesAction() {
     }
     updateTag("guides");
     revalidatePath("/admin/guides");
+    revalidatePath("/en/blog");
+    revalidatePath("/ha/blog");
+    revalidatePath("/sitemap.xml");
     return { success: true, guides: seeded };
   } catch (err: any) {
     return { success: false, error: err.message || "Failed to seed draft guides." };
@@ -1791,6 +2335,182 @@ export async function deleteCrmViewAction(viewId: string) {
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || "Could not delete view." };
+  }
+}
+
+export async function updatePaymentRecordAction(input: {
+  paymentId: string;
+  customerName: string;
+  labourPortion: number;
+  materialsPortion: number;
+  companyCommission: number;
+  plumberPayable: number;
+  totalPayment: number;
+  paymentMethod: "bank_transfer" | "cash" | "pos";
+  transactionRef?: string;
+  verificationStatus: "pending" | "verified" | "rejected";
+  notes?: string;
+}) {
+  try {
+    const admin = await requireAdminUser();
+    if (!admin) return { success: false, error: "Admin authorisation required." };
+    const supabase = getServiceSupabase();
+    const nowIso = new Date().toISOString();
+
+    const paymentStatus =
+      input.verificationStatus === "verified"
+        ? "confirmed"
+        : input.verificationStatus === "rejected"
+          ? "failed"
+          : "pending";
+
+    const updatePayload: Record<string, unknown> = {
+      customer_name: input.customerName.trim() || "Customer",
+      labour_portion: Math.max(0, Number(input.labourPortion) || 0),
+      materials_portion: Math.max(0, Number(input.materialsPortion) || 0),
+      company_commission: Math.max(0, Number(input.companyCommission) || 0),
+      plumber_payable: Math.max(0, Number(input.plumberPayable) || 0),
+      total_payment: Math.max(0, Number(input.totalPayment) || 0),
+      payment_method: input.paymentMethod,
+      transaction_ref: input.transactionRef?.trim() || null,
+      verification_status: input.verificationStatus,
+      payment_status: paymentStatus,
+      notes: input.notes?.trim() || null,
+    };
+
+    if (input.verificationStatus === "verified") {
+      updatePayload.verified_by = admin.fullName;
+      updatePayload.verified_at = nowIso;
+    }
+
+    const { data, error } = await supabase
+      .from("payments")
+      .update(updatePayload)
+      .eq("id", input.paymentId)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      return { success: false, error: error?.message || "Could not update payment record." };
+    }
+
+    await appendAuditLog({
+      actor: admin.fullName,
+      action: "Updated Payment Record",
+      entity_type: "payment",
+      entity_id: String(data.ticket_number || input.paymentId),
+      new_value: `${input.totalPayment} (${input.verificationStatus})`,
+    });
+
+    revalidatePath("/admin/financials");
+    revalidatePath("/admin/requests");
+    revalidatePath("/admin");
+    revalidatePath("/plumber");
+    revalidatePath("/customer");
+
+    return {
+      success: true,
+      payment: {
+        id: String(data.id),
+        request_id: String(data.request_id || ""),
+        ticket_number: String(data.ticket_number || ""),
+        customer_name: String(data.customer_name || "Customer"),
+        total_payment: Number(data.total_payment || 0),
+        labour_portion: Number(data.labour_portion || 0),
+        materials_portion: Number(data.materials_portion || 0),
+        company_commission: Number(data.company_commission || 0),
+        plumber_payable: Number(data.plumber_payable || 0),
+        payment_method: (data.payment_method as "bank_transfer" | "cash" | "pos") || "bank_transfer",
+        transaction_ref: data.transaction_ref ? String(data.transaction_ref) : undefined,
+        payment_status:
+          (data.payment_status as "pending" | "confirmed" | "failed") || "pending",
+        verification_status:
+          (data.verification_status as "pending" | "verified" | "rejected") || "pending",
+        verified_by: data.verified_by ? String(data.verified_by) : undefined,
+        verified_at: data.verified_at ? String(data.verified_at) : undefined,
+        payment_date: String(data.payment_date || data.created_at || nowIso),
+        notes: data.notes ? String(data.notes) : undefined,
+        created_at: String(data.created_at || nowIso),
+      } as PaymentRecord,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Could not update payment." };
+  }
+}
+
+export async function adminUpdateCustomerRecordAction(input: {
+  customerId: string;
+  oldPhone?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  area: string;
+}) {
+  try {
+    const admin = await requireAdminUser();
+    if (!admin) return { success: false, error: "Admin authorisation required." };
+    const cleanName = input.name.trim();
+    const cleanPhone = input.phone.trim();
+    const cleanEmail = input.email?.trim() || null;
+    const cleanArea = input.area.trim() || "Kano";
+    if (!cleanName || !cleanPhone) {
+      return { success: false, error: "Customer name and phone number are required." };
+    }
+
+    const supabase = getServiceSupabase();
+
+    // Update customer account row if it exists in customers table
+    if (input.customerId && !input.customerId.startsWith("req-") && !input.customerId.startsWith("enq-")) {
+      await supabase
+        .from("customers")
+        .update({
+          full_name: cleanName,
+          phone: cleanPhone,
+          email: cleanEmail,
+          address: cleanArea,
+        })
+        .eq("id", input.customerId);
+    }
+
+    // Also update linked service_requests by customer_id or old phone
+    if (input.customerId && !input.customerId.startsWith("req-") && !input.customerId.startsWith("enq-")) {
+      await supabase
+        .from("service_requests")
+        .update({
+          customer_name: cleanName,
+          customer_phone: cleanPhone,
+          customer_email: cleanEmail,
+          city_lga: cleanArea,
+        })
+        .eq("customer_id", input.customerId);
+    }
+    if (input.oldPhone) {
+      await supabase
+        .from("service_requests")
+        .update({
+          customer_name: cleanName,
+          customer_phone: cleanPhone,
+          customer_email: cleanEmail,
+          city_lga: cleanArea,
+        })
+        .eq("customer_phone", input.oldPhone);
+    }
+
+    await appendAuditLog({
+      actor: admin.fullName,
+      action: "Updated Customer Contact",
+      entity_type: "customer",
+      entity_id: input.customerId || cleanPhone,
+      new_value: `${cleanName} (${cleanPhone})`,
+    });
+
+    revalidatePath("/admin/customers");
+    revalidatePath("/admin/requests");
+    revalidatePath("/admin");
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Could not update customer." };
   }
 }
 
