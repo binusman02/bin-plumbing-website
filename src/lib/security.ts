@@ -36,13 +36,23 @@ export async function requireAdminUser(): Promise<{
 }
 
 // ---------------------------------------------------------------------------
-// 1. SLIDING-WINDOW RATE LIMITER (Server Actions & API Routes)
+// 1. DATABASE-BACKED SLIDING-WINDOW RATE LIMITER (Server Actions & API Routes)
 // ---------------------------------------------------------------------------
-interface RateLimitBucket {
-  timestamps: number[];
+export function evaluateSlidingWindow(
+  timestampsMs: number[],
+  maxRequests: number,
+  windowMs: number,
+  nowMs: number
+): { allowed: boolean; retryAfterSeconds: number } {
+  const cutoff = nowMs - windowMs;
+  const recent = timestampsMs.filter((ts) => ts > cutoff).sort((a, b) => a - b);
+  if (recent.length >= maxRequests) {
+    const oldest = recent[0] ?? nowMs;
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - nowMs) / 1000));
+    return { allowed: false, retryAfterSeconds };
+  }
+  return { allowed: true, retryAfterSeconds: 0 };
 }
-
-const rateLimitStore = new Map<string, RateLimitBucket>();
 
 export async function getClientIp(): Promise<string> {
   try {
@@ -66,21 +76,54 @@ export async function checkRateLimit(
   const ip = await getClientIp();
   const key = `${scope}:${ip}${extraKey ? `:${extraKey.toLowerCase().trim()}` : ""}`;
   const now = Date.now();
-  const cutoff = now - windowMs;
+  const cutoffIso = new Date(now - windowMs).toISOString();
 
-  const existing = rateLimitStore.get(key) || { timestamps: [] };
-  const recent = existing.timestamps.filter((ts) => ts > cutoff);
+  try {
+    const supabase = getServiceSupabase();
 
-  if (recent.length >= maxRequests) {
-    const oldest = recent[0] || now;
-    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
-    rateLimitStore.set(key, { timestamps: recent });
-    return { allowed: false, retryAfterSeconds };
+    // Automatic cleanup of expired entries for this bucket (and occasional global sweep)
+    await supabase
+      .from("rate_limits")
+      .delete()
+      .eq("bucket_key", key)
+      .lt("created_at", cutoffIso);
+
+    if (Math.random() < 0.05) {
+      const globalCutoffIso = new Date(now - 60 * 60 * 1000).toISOString();
+      void supabase.from("rate_limits").delete().lt("created_at", globalCutoffIso);
+    }
+
+    const { data: rows, error } = await supabase
+      .from("rate_limits")
+      .select("created_at")
+      .eq("bucket_key", key)
+      .gte("created_at", cutoffIso)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("[checkRateLimit] DB error:", error.message);
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+
+    const timestamps = (rows || [])
+      .map((r) => Date.parse(String(r.created_at)))
+      .filter((ts) => Number.isFinite(ts));
+
+    const verdict = evaluateSlidingWindow(timestamps, maxRequests, windowMs, now);
+    if (!verdict.allowed) {
+      return verdict;
+    }
+
+    await supabase.from("rate_limits").insert({
+      bucket_key: key,
+      created_at: new Date(now).toISOString(),
+    });
+
+    return { allowed: true, retryAfterSeconds: 0 };
+  } catch (err) {
+    console.error("[checkRateLimit]", err instanceof Error ? err.message : err);
+    return { allowed: true, retryAfterSeconds: 0 };
   }
-
-  recent.push(now);
-  rateLimitStore.set(key, { timestamps: recent });
-  return { allowed: true, retryAfterSeconds: 0 };
 }
 
 // ---------------------------------------------------------------------------

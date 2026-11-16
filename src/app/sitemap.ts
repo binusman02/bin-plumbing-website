@@ -7,8 +7,37 @@ import {
 } from "@/lib/marketplace";
 import { SITE_URL, slugifySeo } from "@/lib/seo";
 
+const STATIC_BASELINE_DATE = new Date("2026-11-15T00:00:00.000Z");
+
+function toSafeDate(value: string | undefined | null, fallback: Date): Date {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const now = new Date();
+  const [categories, settings, guides, galleryItems] = await Promise.all([
+    getServiceCategories(true),
+    getMarketplaceSettings(),
+    getGuides(true),
+    getAllGalleryItems(true),
+  ]);
+
+  const settingsRecord = settings as unknown as { updated_at?: string };
+  const settingsDate = toSafeDate(settingsRecord?.updated_at, STATIC_BASELINE_DATE);
+
+  const latestGuideDate = guides.reduce<Date>((latest, g) => {
+    const d = toSafeDate(g.updated_at || g.created_at, STATIC_BASELINE_DATE);
+    return d.getTime() > latest.getTime() ? d : latest;
+  }, STATIC_BASELINE_DATE);
+
+  const latestGalleryDate = galleryItems.reduce<Date>((latest, item) => {
+    const d = toSafeDate(
+      (item as unknown as { updated_at?: string; created_at?: string }).updated_at || item.created_at,
+      STATIC_BASELINE_DATE
+    );
+    return d.getTime() > latest.getTime() ? d : latest;
+  }, STATIC_BASELINE_DATE);
 
   const staticRoutes: MetadataRoute.Sitemap = [
     "",
@@ -25,7 +54,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     "/terms",
   ].map((route) => ({
     url: `${SITE_URL}${route}`,
-    lastModified: now,
+    lastModified:
+      route === "/gallery"
+        ? latestGalleryDate
+        : route === "" || route === "/services" || route === "/areas"
+          ? settingsDate
+          : STATIC_BASELINE_DATE,
     changeFrequency: route === "" ? ("daily" as const) : ("weekly" as const),
     priority:
       route === ""
@@ -40,7 +74,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const blogIndexRoutes: MetadataRoute.Sitemap = [
     {
       url: `${SITE_URL}/en/blog`,
-      lastModified: now,
+      lastModified: latestGuideDate,
       changeFrequency: "weekly",
       priority: 0.8,
       alternates: {
@@ -52,7 +86,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
     {
       url: `${SITE_URL}/ha/blog`,
-      lastModified: now,
+      lastModified: latestGuideDate,
       changeFrequency: "weekly",
       priority: 0.8,
       alternates: {
@@ -63,13 +97,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       },
     },
   ];
-
-  const [categories, settings, guides, galleryItems] = await Promise.all([
-    getServiceCategories(true),
-    getMarketplaceSettings(),
-    getGuides(true),
-    getAllGalleryItems(true),
-  ]);
 
   const galleryImages = galleryItems
     .map((g) => g.image_url)
@@ -86,18 +113,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const serviceEntries: MetadataRoute.Sitemap = categories
     .filter((c) => c.slug || c.title)
-    .map((c) => ({
-      url: `${SITE_URL}/services/${c.slug || slugifySeo(c.title || "")}`,
-      lastModified: now,
-      changeFrequency: "weekly" as const,
-      priority: 0.85,
-    }));
+    .map((c) => {
+      const catRec = c as unknown as { updated_at?: string; created_at?: string };
+      return {
+        url: `${SITE_URL}/services/${c.slug || slugifySeo(c.title || "")}`,
+        lastModified: toSafeDate(catRec.updated_at || catRec.created_at, settingsDate),
+        changeFrequency: "weekly" as const,
+        priority: 0.85,
+      };
+    });
 
   const areaEntries: MetadataRoute.Sitemap = (
     settings.active_coverage_locations || []
   ).map((area) => ({
     url: `${SITE_URL}/areas/${slugifySeo(area)}`,
-    lastModified: now,
+    lastModified: settingsDate,
     changeFrequency: "weekly" as const,
     priority: 0.75,
   }));

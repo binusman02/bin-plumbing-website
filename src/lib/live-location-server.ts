@@ -291,21 +291,42 @@ export async function plumberHasActiveJob(plumberId: string): Promise<boolean> {
 }
 
 /**
+ * Returns true ONLY if the plumber has an active (non-completed/non-cancelled) job
+ * whose latest trip event is `trip_started` with no later `arrived` or `trip_cancelled`.
+ */
+export async function plumberHasOpenTrip(plumberId: string): Promise<boolean> {
+  const supabase = getServiceSupabase();
+  const { data, error } = await supabase
+    .from("service_requests")
+    .select("status, history, deleted_at")
+    .eq("assigned_plumber_id", plumberId);
+  if (error) {
+    const retry = await supabase
+      .from("service_requests")
+      .select("status, history")
+      .eq("assigned_plumber_id", plumberId);
+    return (retry.data || []).some(
+      (r) =>
+        isActiveJobStatus(String(r.status)) &&
+        deriveJobTripState(Array.isArray(r.history) ? r.history : []) === "on_the_way"
+    );
+  }
+  return (data || []).some(
+    (r) =>
+      !r.deleted_at &&
+      isActiveJobStatus(String(r.status)) &&
+      deriveJobTripState(Array.isArray(r.history) ? r.history : []) === "on_the_way"
+  );
+}
+
+/**
  * Called whenever a job ends/changes assignment or a plumber changes availability:
- * if the plumber is Off Duty and has no active job, tracking is terminated.
+ * if the plumber has no open trip, tracking is terminated.
  */
 export async function reconcilePlumberSharing(plumberId: string | null | undefined): Promise<void> {
   if (!plumberId) return;
   try {
-    const supabase = getServiceSupabase();
-    const { data: plumber } = await supabase
-      .from("plumbers")
-      .select("is_available")
-      .eq("id", plumberId)
-      .maybeSingle();
-    if (!plumber) return;
-    if (plumber.is_available) return;
-    if (await plumberHasActiveJob(plumberId)) return;
+    if (await plumberHasOpenTrip(plumberId)) return;
     await setSharing(plumberId, false);
   } catch (err) {
     console.error("[live-location] reconcile failed:", err instanceof Error ? err.message : err);

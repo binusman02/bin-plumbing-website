@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  getVerifiedAppRole,
+} from "../src/lib/auth-role.ts";
+import {
+  evaluateSlidingWindow,
+} from "../src/lib/security.ts";
+import {
   LOCATION_CONFIG,
   validateLocationInput,
   isImplausibleJump,
@@ -232,21 +238,17 @@ describe("authorisation & lifecycle", () => {
     assert.equal(customerMayTrackJob({ ...job, assignedPlumberId: null }, { id: "c-1" }), false);
   });
 
-  it("plumberMayShareLocation requires approval and (On Duty OR active job)", () => {
+  it("plumberMayShareLocation requires approval and an open trip (On Duty or active job alone is rejected)", () => {
     assert.equal(
-      plumberMayShareLocation({ isApproved: false, isOnDuty: true, hasActiveJob: true }),
+      plumberMayShareLocation({ isApproved: false, hasOpenTrip: true, isOnDuty: true, hasActiveJob: true }),
       false
     );
     assert.equal(
-      plumberMayShareLocation({ isApproved: true, isOnDuty: false, hasActiveJob: false }),
+      plumberMayShareLocation({ isApproved: true, hasOpenTrip: false, isOnDuty: true, hasActiveJob: true }),
       false
     );
     assert.equal(
-      plumberMayShareLocation({ isApproved: true, isOnDuty: false, hasActiveJob: true }),
-      true
-    );
-    assert.equal(
-      plumberMayShareLocation({ isApproved: true, isOnDuty: true, hasActiveJob: false }),
+      plumberMayShareLocation({ isApproved: true, hasOpenTrip: true }),
       true
     );
   });
@@ -832,5 +834,67 @@ describe("live-movement & camera-follow lifecycle", () => {
     );
     assert.equal(backNoise.accepted, false);
     assert.equal(backNoise.rejectionReason, "stationary_noise");
+  });
+});
+
+describe("security must-fix checks (roles, rate limits, trip lock)", () => {
+  it("1. reads role strictly from app_metadata and ignores user_metadata", () => {
+    assert.equal(getVerifiedAppRole({ app_metadata: { role: "plumber" } }), "plumber");
+    assert.equal(getVerifiedAppRole({ app_metadata: {} }), undefined);
+    assert.equal(
+      getVerifiedAppRole({
+        app_metadata: {},
+        // Forged client-writable user_metadata must be ignored
+        ...({ user_metadata: { role: "admin" } } as Record<string, unknown>),
+      }),
+      undefined
+    );
+
+    // Ensure no source file reads user_metadata?.role
+    const authFiles = [
+      "src/lib/portal-auth.ts",
+      "src/app/actions/portal-auth.ts",
+      "src/lib/supabase/middleware.ts",
+      "src/app/customer/page.tsx",
+      "src/app/plumber/page.tsx",
+      "src/app/(public)/join-as-plumber/page.tsx",
+      "src/app/admin/(portal)/layout.tsx",
+    ];
+    for (const rel of authFiles) {
+      const text = fs.readFileSync(path.resolve(process.cwd(), rel), "utf8");
+      assert.equal(/user_metadata\??\.role/.test(text), false, `${rel} still reads user_metadata.role`);
+    }
+  });
+
+  it("2. evaluates database-backed sliding-window rate limits accurately", () => {
+    const now = 1_000_000;
+    const fifteenMin = 15 * 60 * 1000;
+    // Admin limit: 5 per 15 min
+    const fourHits = [now - 10_000, now - 8_000, now - 5_000, now - 1_000];
+    assert.equal(evaluateSlidingWindow(fourHits, 5, fifteenMin, now).allowed, true);
+
+    const fiveHits = [...fourHits, now - 500];
+    const blocked = evaluateSlidingWindow(fiveHits, 5, fifteenMin, now);
+    assert.equal(blocked.allowed, false);
+    assert.ok(blocked.retryAfterSeconds > 0);
+
+    // Expired oldest hit slides out of window
+    const withExpired = [now - fifteenMin - 1_000, ...fourHits];
+    assert.equal(evaluateSlidingWindow(withExpired, 5, fifteenMin, now).allowed, true);
+  });
+
+  it("3. enforces server-side trip lock (trip_started required, arrived/cancelled locks off)", () => {
+    assert.equal(deriveJobTripState([{ action: "trip_started" }]), "on_the_way");
+    assert.equal(
+      deriveJobTripState([{ action: "trip_started" }, { action: "arrived" }]),
+      "arrived"
+    );
+    assert.equal(
+      plumberMayShareLocation({
+        isApproved: true,
+        hasOpenTrip: deriveJobTripState([{ action: "trip_started" }, { action: "arrived" }]) === "on_the_way",
+      }),
+      false
+    );
   });
 });

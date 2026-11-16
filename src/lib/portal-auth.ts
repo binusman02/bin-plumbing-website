@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 import {
   CUSTOMER_SESSION_COOKIE,
   PLUMBER_SESSION_COOKIE,
@@ -78,36 +79,18 @@ export async function resolvePortalActor(
         if (preferredRole === "admin") return null;
       }
 
-      const metaRole =
-        (user.app_metadata?.role as string | undefined) ||
-        (user.user_metadata?.role as string | undefined);
+      const metaRole = getVerifiedAppRole(user);
 
-      // 2. Plumber via Supabase Auth
+      // 2. Plumber via Supabase Auth (linked strictly by auth_user_id)
       if ((!preferredRole || preferredRole === "plumber") && metaRole === "plumber") {
         const userEmail = (user.email || "").toLowerCase().trim();
-        const userPhone = normalizeDigits(String(user.user_metadata?.phone || ""));
-        let match: Record<string, unknown> | null = null;
         const { data: byAuth } = await adminSupabase
           .from("plumbers")
           .select("*")
           .eq("auth_user_id", user.id)
           .maybeSingle();
 
-        if (byAuth && !byAuth.deleted_at) {
-          match = byAuth;
-        } else {
-          const { data: plumbers } = await adminSupabase
-            .from("plumbers")
-            .select("*");
-          match =
-            (plumbers || []).find(
-              (p) =>
-                !p.deleted_at &&
-                ((userEmail && String(p.email || "").toLowerCase().trim() === userEmail) ||
-                  (userPhone && normalizeDigits(String(p.phone || "")) === userPhone))
-            ) || null;
-        }
-
+        const match = byAuth && !byAuth.deleted_at ? byAuth : null;
         if (match) {
           const plumberStatus = String(match.verification_status || match.status || "pending_review");
           return {
@@ -123,32 +106,16 @@ export async function resolvePortalActor(
         }
       }
 
-      // 3. Customer via Supabase Auth
+      // 3. Customer via Supabase Auth (linked strictly by auth_user_id)
       if ((!preferredRole || preferredRole === "customer") && metaRole === "customer") {
         const userEmail = (user.email || "").toLowerCase().trim();
-        const userPhone = normalizeDigits(String(user.user_metadata?.phone || ""));
-        let match: Record<string, unknown> | null = null;
         const { data: byAuth } = await adminSupabase
           .from("customers")
           .select("*")
           .eq("auth_user_id", user.id)
           .maybeSingle();
 
-        if (byAuth && !byAuth.deleted_at) {
-          match = byAuth;
-        } else {
-          const { data: customers } = await adminSupabase
-            .from("customers")
-            .select("*");
-          match =
-            (customers || []).find(
-              (c) =>
-                !c.deleted_at &&
-                ((userPhone && normalizeDigits(String(c.phone || "")) === userPhone) ||
-                  (userEmail && String(c.email || "").toLowerCase().trim() === userEmail))
-            ) || null;
-        }
-
+        const match = byAuth && !byAuth.deleted_at ? byAuth : null;
         if (match) {
           return {
             role: "customer",
@@ -200,17 +167,31 @@ export async function resolvePortalActor(
         .eq("id", plumberSession.accountId)
         .maybeSingle();
 
-      const { data: allPlumbers } = await adminSupabase.from("plumbers").select("*");
-      const accEmail = String(accountRow?.email || "").toLowerCase().trim();
-      const accPhone = normalizeDigits(String(accountRow?.phone || ""));
+      let plumber: Record<string, unknown> | null = null;
+      if (accountRow?.plumber_id) {
+        const { data: byPlumberId } = await adminSupabase
+          .from("plumbers")
+          .select("*")
+          .eq("id", String(accountRow.plumber_id))
+          .maybeSingle();
+        if (byPlumberId && !byPlumberId.deleted_at) plumber = byPlumberId;
+      } else if (accountRow?.auth_user_id) {
+        const { data: byAuthId } = await adminSupabase
+          .from("plumbers")
+          .select("*")
+          .eq("auth_user_id", String(accountRow.auth_user_id))
+          .maybeSingle();
+        if (byAuthId && !byAuthId.deleted_at) plumber = byAuthId;
+      } else {
+        const { data: byDirectId } = await adminSupabase
+          .from("plumbers")
+          .select("*")
+          .eq("id", plumberSession.accountId)
+          .maybeSingle();
+        if (byDirectId && !byDirectId.deleted_at) plumber = byDirectId;
+      }
 
-      const plumber = (allPlumbers || []).find(
-        (p) =>
-          !p.deleted_at &&
-          (String(p.id) === plumberSession.accountId ||
-            (accEmail && String(p.email || "").toLowerCase().trim() === accEmail) ||
-            (accPhone && normalizeDigits(String(p.phone || "")) === accPhone))
-      );
+      const accEmail = String(accountRow?.email || "").toLowerCase().trim();
 
       if (plumber) {
         const plumberStatus = String(plumber.verification_status || plumber.status || "pending_review");

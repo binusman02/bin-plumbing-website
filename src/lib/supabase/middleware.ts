@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -47,10 +48,7 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const role = user
-    ? ((user.app_metadata?.role as string | undefined) ||
-        (user.user_metadata?.role as string | undefined))
-    : undefined;
+  const role = getVerifiedAppRole(user);
 
   const isAdminLogin = pathname === "/admin/login";
 

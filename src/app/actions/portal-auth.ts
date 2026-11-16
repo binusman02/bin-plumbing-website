@@ -4,6 +4,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getServiceSupabase } from "@/lib/supabase/admin";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 import { checkRateLimit } from "@/lib/security";
 import {
   getAllCustomers,
@@ -75,10 +77,18 @@ function getUserRole(user: {
   app_metadata?: Record<string, unknown>;
   user_metadata?: Record<string, unknown>;
 }): string | undefined {
-  return (
-    (user.app_metadata?.role as string | undefined) ||
-    (user.user_metadata?.role as string | undefined)
-  );
+  return getVerifiedAppRole(user);
+}
+
+async function setServerAppRole(authUserId: string | undefined, role: "customer" | "plumber") {
+  if (!authUserId) return;
+  try {
+    await getServiceSupabase().auth.admin.updateUserById(authUserId, {
+      app_metadata: { role },
+    });
+  } catch (err) {
+    console.error("[setServerAppRole]", err instanceof Error ? err.message : err);
+  }
 }
 
 export async function loginCustomerWithPasswordAction(
@@ -271,7 +281,6 @@ export async function registerCustomerWithPasswordAction(input: {
       options: {
         emailRedirectTo: `${siteUrl}/customer`,
         data: {
-          role: "customer",
           full_name: fullName,
           phone,
           address,
@@ -301,6 +310,10 @@ export async function registerCustomerWithPasswordAction(input: {
           error.message ||
           "Unable to create account with those details. Please check your entries or try signing in.",
       };
+    }
+
+    if (data?.user?.id) {
+      await setServerAppRole(data.user.id, "customer");
     }
 
     const passwordHash = hashCustomerPassword(input.password);
@@ -425,7 +438,6 @@ export async function registerPlumberAccountAction(input: {
       options: {
         emailRedirectTo: `${siteUrl}/join-as-plumber`,
         data: {
-          role: "plumber",
           full_name: fullName,
           phone,
         },
@@ -448,6 +460,10 @@ export async function registerPlumberAccountAction(input: {
         success: false,
         error: error.message || "Unable to create plumber account.",
       };
+    }
+
+    if (data?.user?.id) {
+      await setServerAppRole(data.user.id, "plumber");
     }
 
     const passwordHash = hashCustomerPassword(input.password);
@@ -564,27 +580,6 @@ export async function loginPlumberWithPasswordAction(
     }
 
     await clearCustomerSessionCookie();
-
-    // Ensure local plumber record is linked to auth_user_id
-    const plumberMeta = data.user.user_metadata || {};
-    const plumberPhone = (plumberMeta.phone as string) || (!rawId.includes("@") ? rawId : "");
-    if (plumberPhone) {
-      const existingPlumbers = await getAllPlumbers();
-      const normalizedPlumberPhone = normalizeNigerianPhoneDigits(plumberPhone);
-      const matchedPlumber = existingPlumbers.find(
-        (p) =>
-          (data.user.email && p.email?.toLowerCase() === data.user.email.toLowerCase()) ||
-          normalizeNigerianPhoneDigits(p.phone) === normalizedPlumberPhone
-      );
-      if (matchedPlumber) {
-        const { getServiceSupabase } = await import("@/lib/supabase/admin");
-        await getServiceSupabase()
-          .from("plumbers")
-          .update({ auth_user_id: data.user.id, updated_at: new Date().toISOString() })
-          .eq("id", matchedPlumber.id)
-          .is("auth_user_id", null);
-      }
-    }
 
     revalidatePath("/plumber");
     return { success: true };

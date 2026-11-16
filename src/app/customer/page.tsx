@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import {
   getMarketplaceSettings,
@@ -35,10 +36,7 @@ export default async function CustomerPortalPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const role = user
-    ? ((user.app_metadata?.role as string | undefined) ||
-        (user.user_metadata?.role as string | undefined))
-    : undefined;
+  const role = getVerifiedAppRole(user);
 
   if (user && role === "plumber") {
     redirect("/plumber");

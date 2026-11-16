@@ -344,10 +344,11 @@ export function customerMayTrackJob(
 
 export function plumberMayShareLocation(params: {
   isApproved: boolean;
-  isOnDuty: boolean;
-  hasActiveJob: boolean;
+  hasOpenTrip: boolean;
+  isOnDuty?: boolean;
+  hasActiveJob?: boolean;
 }): boolean {
-  return params.isApproved && (params.isOnDuty || params.hasActiveJob);
+  return params.isApproved && params.hasOpenTrip === true;
 }
 
 // ---------------------------------------------------------------------------

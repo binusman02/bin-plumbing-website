@@ -7,6 +7,7 @@ import {
   PLUMBER_SESSION_COOKIE,
   verifyPlumberSessionToken,
 } from "@/lib/customer-session";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import {
   getAllPlumberAccounts,
@@ -39,10 +40,7 @@ export default async function PlumberPortalPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const role = user
-    ? ((user.app_metadata?.role as string | undefined) ||
-        (user.user_metadata?.role as string | undefined))
-    : undefined;
+  const role = getVerifiedAppRole(user);
 
   if (user && role === "customer") {
     redirect("/customer");

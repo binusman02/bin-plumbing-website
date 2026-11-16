@@ -58,6 +58,7 @@ import {
 } from "@/lib/live-location";
 import {
   plumberHasActiveJob,
+  plumberHasOpenTrip,
   reconcilePlumberSharing,
   recordHeartbeat,
   saveLiveLocation,
@@ -268,6 +269,22 @@ export async function updatePlumberStatusAction(
 
     const ok = await updatePlumberVerification(plumberId, status, notes);
     if (!ok) return { success: false, error: "Plumber not found." };
+
+    if (status === "approved") {
+      const supabase = getServiceSupabase();
+      const { data: plumberRow } = await supabase
+        .from("plumbers")
+        .select("auth_user_id")
+        .eq("id", plumberId)
+        .maybeSingle();
+      if (plumberRow?.auth_user_id) {
+        await supabase.auth.admin
+          .updateUserById(String(plumberRow.auth_user_id), {
+            app_metadata: { role: "plumber" },
+          })
+          .catch(() => {});
+      }
+    }
 
     revalidatePath("/admin/plumbers");
     revalidatePath("/admin");
@@ -1200,18 +1217,11 @@ async function authorisePlumberLocationWrite(): Promise<
     };
   }
 
-  const supabase = getServiceSupabase();
-  const { data: plumber } = await supabase
-    .from("plumbers")
-    .select("is_available")
-    .eq("id", actor.id)
-    .maybeSingle();
-  const hasActiveJob = await plumberHasActiveJob(actor.id);
+  const hasOpenTrip = await plumberHasOpenTrip(actor.id);
   if (
     !plumberMayShareLocation({
       isApproved: true,
-      isOnDuty: plumber?.is_available === true,
-      hasActiveJob,
+      hasOpenTrip,
     })
   ) {
     await setSharing(actor.id, false);
@@ -1220,7 +1230,7 @@ async function authorisePlumberLocationWrite(): Promise<
       result: {
         success: false,
         code: "not_allowed",
-        error: "Go On Duty (or accept a job) to share your location.",
+        error: "Start a trip on an active job to share your location.",
       },
     };
   }

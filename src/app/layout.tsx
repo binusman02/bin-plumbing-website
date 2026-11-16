@@ -1,23 +1,23 @@
 import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { cacheLife, cacheTag } from "next/cache";
-import { Plus_Jakarta_Sans, Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { COMPANY } from "@/data/company";
 import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
 import { SITE_NAME, SITE_URL } from "@/lib/seo";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
+const plusJakarta = localFont({
+  src: "./fonts/plus-jakarta-sans-latin-wght-normal.woff2",
+  weight: "600 800",
   variable: "--font-plus-jakarta",
   display: "swap",
 });
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const inter = localFont({
+  src: "./fonts/inter-latin-wght-normal.woff2",
+  weight: "400 700",
   variable: "--font-inter",
   display: "swap",
 });

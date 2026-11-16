@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { AdminLayoutShell } from "@/components/admin/AdminLayoutShell";
 import { getAdminNotifications } from "@/lib/admin-notifications";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 import { requireAdminUser } from "@/lib/security";
 
 export const instant = false;
@@ -29,9 +30,7 @@ export default async function AdminPortalLayout({
     redirect("/admin/login");
   }
 
-  const role =
-    (user.app_metadata?.role as string | undefined) ||
-    (user.user_metadata?.role as string | undefined);
+  const role = getVerifiedAppRole(user);
 
   if (role === "customer" || role === "plumber") {
     redirect(role === "customer" ? "/customer" : "/plumber");

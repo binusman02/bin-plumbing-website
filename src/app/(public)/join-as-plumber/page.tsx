@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { cookies } from "next/headers";
 import { ShieldCheck, CheckCircle2, Award } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getVerifiedAppRole } from "@/lib/auth-role";
 import {
   PLUMBER_SESSION_COOKIE,
   verifyPlumberSessionToken,
@@ -37,10 +38,7 @@ export default async function JoinAsPlumberPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const role = user
-    ? ((user.app_metadata?.role as string | undefined) ||
-        (user.user_metadata?.role as string | undefined))
-    : undefined;
+  const role = getVerifiedAppRole(user);
 
   let plumberAccount: { fullName: string; phone: string; email: string } | null = null;
 
