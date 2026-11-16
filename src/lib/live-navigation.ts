@@ -458,15 +458,19 @@ export function pushFixToBuffer(
     const movedFromPrevRawM = distMeters(prevRaw.lat, prevRaw.lng, fix.lat, fix.lng);
     const movedFromAnchorM = distMeters(prev.lat, prev.lng, fix.lat, fix.lng);
     const dtSec = Math.max(0.25, (fix.timestampMs - prevRaw.timestampMs) / 1000);
-    const effectiveSpeed =
-      fix.speed != null && Number.isFinite(fix.speed) ? fix.speed : movedFromPrevRawM / dtSec;
     const accM =
       typeof fix.accuracy === "number" && Number.isFinite(fix.accuracy) ? fix.accuracy : 10;
-    const deadbandM = Math.min(10, Math.max(3, accM * 0.35));
+    // Ignore unreliable speed readings when accuracy is poor (> 100 m)
+    const trustedSpeed =
+      fix.speed != null && Number.isFinite(fix.speed) && accM <= NAV_CONFIG.MAX_DISPLAY_ACCURACY_M
+        ? fix.speed
+        : null;
+    const effectiveSpeed = trustedSpeed != null ? trustedSpeed : movedFromPrevRawM / dtSec;
+    // Responsive deadband: suppresses sub-2m standing jitter without freezing slow walking
+    const deadbandM = Math.min(3, Math.max(1.2, accM * 0.12));
 
     if (options?.enableStationaryStabilizer !== false) {
-      const lowReportedSpeed =
-        fix.speed == null || !Number.isFinite(fix.speed) || fix.speed < 0.8;
+      const lowReportedSpeed = trustedSpeed == null || trustedSpeed < 0.8;
       if (
         movedFromAnchorM < deadbandM &&
         lowReportedSpeed &&
@@ -478,18 +482,20 @@ export function pushFixToBuffer(
           nextState: { ...state, movementState: "STATIONARY" },
         };
       }
-      if (effectiveSpeed < 0.5) {
+      if (effectiveSpeed < 0.4) {
         nextMovementState = "STATIONARY";
       } else if (effectiveSpeed < 2.0) {
         nextMovementState = "LOW_SPEED";
-        const alpha = 0.65;
+        const alpha = 0.72;
         stabilizedFix = {
           ...fix,
+          speed: trustedSpeed,
           lat: prev.lat + (fix.lat - prev.lat) * alpha,
           lng: prev.lng + (fix.lng - prev.lng) * alpha,
         };
       } else {
         nextMovementState = "MOVING";
+        stabilizedFix = { ...fix, speed: trustedSpeed };
       }
     }
   } else if (fix.speed != null && Number.isFinite(fix.speed)) {
@@ -619,4 +625,65 @@ export function stepCameraFollow(
     lng: current.lng + (target.lng - current.lng) * posAlpha,
     bearing: normalizeHeading(current.bearing + dBearing * bearingAlpha),
   };
+}
+
+/**
+ * Complementary filter fusing W3C Gyroscope z-axis angular velocity (`rad/s`,
+ * right-hand rule: clockwise rotation is negative Z, so compass heading delta
+ * is `-gyroZ * 180 / PI * dtSec`) with absolute reference (GPS course > 1 m/s
+ * or magnetometer compass).
+ */
+export function fuseGyroCompassHeading(params: {
+  currentDeg: number | null;
+  gyroZRadPerSec?: number | null;
+  dtSec?: number;
+  compassDeg?: number | null;
+  gpsHeadingDeg?: number | null;
+  speedMps?: number | null;
+  correctionAlpha?: number;
+}): number | null {
+  const {
+    currentDeg,
+    gyroZRadPerSec,
+    dtSec = 0,
+    compassDeg,
+    gpsHeadingDeg,
+    speedMps,
+    correctionAlpha = 0.04,
+  } = params;
+
+  const useGps =
+    speedMps != null &&
+    Number.isFinite(speedMps) &&
+    speedMps > NAV_CONFIG.MIN_MOVING_SPEED_MPS &&
+    gpsHeadingDeg != null &&
+    Number.isFinite(gpsHeadingDeg);
+
+  const referenceDeg = useGps
+    ? normalizeHeading(gpsHeadingDeg!)
+    : compassDeg != null && Number.isFinite(compassDeg)
+    ? normalizeHeading(compassDeg)
+    : null;
+
+  if (currentDeg == null || !Number.isFinite(currentDeg)) {
+    return referenceDeg;
+  }
+
+  let predicted = currentDeg;
+  if (
+    gyroZRadPerSec != null &&
+    Number.isFinite(gyroZRadPerSec) &&
+    dtSec > 0 &&
+    dtSec < 0.5
+  ) {
+    const deltaDeg = -(gyroZRadPerSec * 180 * dtSec) / Math.PI;
+    predicted = normalizeHeading(currentDeg + deltaDeg);
+  }
+
+  if (referenceDeg == null) {
+    return predicted;
+  }
+
+  const err = shortestAngleDelta(predicted, referenceDeg);
+  return normalizeHeading(predicted + err * Math.min(1, Math.max(0.01, correctionAlpha)));
 }

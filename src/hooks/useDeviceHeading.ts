@@ -1,23 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NAV_CONFIG, normalizeHeading, smoothHeading } from "@/lib/live-navigation";
+import {
+  fuseGyroCompassHeading,
+  NAV_CONFIG,
+  normalizeHeading,
+  smoothHeading,
+} from "@/lib/live-navigation";
 
 export interface DeviceHeadingState {
   /** Smoothed heading in degrees [0, 360), or null if never known. */
   heading: number | null;
-  /** True when live heading source (GPS > 1 m/s or active compass) is feeding updates. */
+  /** True when live heading source (GPS > 1 m/s, gyro, or active compass) is feeding updates. */
   hasLiveHeading: boolean;
   /** Whether iOS-style DeviceOrientationEvent.requestPermission() is required. */
   needsPermission: boolean;
   requestPermission: () => Promise<boolean>;
 }
 
+interface GyroscopeLike {
+  z?: number | null;
+  timestamp?: number | null;
+  start: () => void;
+  stop: () => void;
+  addEventListener: (type: string, listener: () => void) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
+}
+
 /**
- * Combines GPS course-over-ground (when moving > 1 m/s) with device compass
- * (`deviceorientationabsolute` -> `deviceorientation` fallback) when stationary
- * or walking slowly, smoothed with a shortest-angle low-pass filter and capped
- * at 10 Hz for UI/map updates.
+ * Combines W3C Gyroscope (`z` rad/s complementary filter when available on Android Chrome),
+ * device compass (`deviceorientationabsolute` -> `deviceorientation`), and GPS course (> 1 m/s),
+ * smoothed with shortest-angle filtering and capped at 10 Hz for UI/map updates.
  */
 export function useDeviceHeading(params: {
   enabled: boolean;
@@ -30,16 +43,20 @@ export function useDeviceHeading(params: {
   const [needsPermission, setNeedsPermission] = useState(false);
 
   const smoothedRef = useRef<number | null>(null);
+  const lastCompassDegRef = useRef<number | null>(null);
   const lastEmitMsRef = useRef(0);
   const compassActiveRef = useRef(false);
-  const lastCompassMsRef = useRef(0);
+  const gpsRef = useRef({ heading: gpsHeadingDeg, speed: gpsSpeedMps });
 
-  const pushSample = useCallback((rawDeg: number, live: boolean) => {
-    const next = smoothHeading(smoothedRef.current, rawDeg, 0.28);
+  useEffect(() => {
+    gpsRef.current = { heading: gpsHeadingDeg, speed: gpsSpeedMps };
+  }, [gpsHeadingDeg, gpsSpeedMps]);
+
+  const emitIfDue = useCallback((next: number | null, live: boolean) => {
+    if (next == null) return;
     smoothedRef.current = next;
     const now = performance.now();
-    const minIntervalMs = 100; // max 10 Hz
-    if (now - lastEmitMsRef.current >= minIntervalMs) {
+    if (now - lastEmitMsRef.current >= 100) {
       lastEmitMsRef.current = now;
       setHeading(next);
       setHasLiveHeading(live);
@@ -56,28 +73,26 @@ export function useDeviceHeading(params: {
       gpsHeadingDeg != null &&
       Number.isFinite(gpsHeadingDeg)
     ) {
-      pushSample(gpsHeadingDeg, true);
+      const next = smoothHeading(smoothedRef.current, gpsHeadingDeg, 0.28);
+      emitIfDue(next, true);
     } else if (!compassActiveRef.current) {
-      // Stationary/slow without compass: hold last known heading and hide cone
       setHasLiveHeading(false);
     }
-  }, [enabled, gpsHeadingDeg, gpsSpeedMps, pushSample]);
+  }, [enabled, gpsHeadingDeg, gpsSpeedMps, emitIfDue]);
 
   const attachListeners = useCallback(() => {
     if (typeof window === "undefined") return () => {};
 
     let hasAbsoluteEvent = false;
+    let gyroSensor: GyroscopeLike | null = null;
+    let lastGyroSec: number | null = null;
 
     const handleOrientation = (ev: DeviceOrientationEvent, isAbsolute: boolean) => {
       if (isAbsolute) hasAbsoluteEvent = true;
-      else if (hasAbsoluteEvent) return; // prefer absolute if available
+      else if (hasAbsoluteEvent) return;
 
-      // If moving fast, GPS heading takes precedence
-      if (
-        gpsSpeedMps != null &&
-        Number.isFinite(gpsSpeedMps) &&
-        gpsSpeedMps > NAV_CONFIG.MIN_MOVING_SPEED_MPS
-      ) {
+      const { speed, heading: gpsHd } = gpsRef.current;
+      if (speed != null && Number.isFinite(speed) && speed > NAV_CONFIG.MIN_MOVING_SPEED_MPS) {
         return;
       }
 
@@ -87,14 +102,27 @@ export function useDeviceHeading(params: {
       if (typeof webkitHeading === "number" && Number.isFinite(webkitHeading)) {
         rawDeg = webkitHeading;
       } else if (typeof ev.alpha === "number" && Number.isFinite(ev.alpha)) {
-        // Standard DeviceOrientation alpha is counter-clockwise from North (when absolute)
         rawDeg = normalizeHeading(360 - ev.alpha);
       }
-
       if (rawDeg == null) return;
+
       compassActiveRef.current = true;
-      lastCompassMsRef.current = Date.now();
-      pushSample(rawDeg, true);
+      lastCompassDegRef.current = rawDeg;
+
+      // If gyro is active, gyro reading loop already fuses compass at 30 Hz;
+      // otherwise smooth directly from compass.
+      if (!gyroSensor) {
+        const next = smoothHeading(smoothedRef.current, rawDeg, 0.28);
+        emitIfDue(next, true);
+      } else if (smoothedRef.current == null) {
+        const next = fuseGyroCompassHeading({
+          currentDeg: null,
+          compassDeg: rawDeg,
+          gpsHeadingDeg: gpsHd,
+          speedMps: speed,
+        });
+        emitIfDue(next, true);
+      }
     };
 
     const onAbs = (e: Event) => handleOrientation(e as DeviceOrientationEvent, true);
@@ -103,11 +131,63 @@ export function useDeviceHeading(params: {
     window.addEventListener("deviceorientationabsolute", onAbs, true);
     window.addEventListener("deviceorientation", onRel, true);
 
+    // Optional W3C Gyroscope complementary fusion (Chromium / Android Chrome)
+    const GyroCtor = (
+      window as unknown as {
+        Gyroscope?: new (opts?: { frequency?: number; referenceFrame?: string }) => GyroscopeLike;
+      }
+    ).Gyroscope;
+
+    const onGyroReading = () => {
+      if (!gyroSensor) return;
+      const nowSec = performance.now() / 1000;
+      const dtSec = lastGyroSec != null ? nowSec - lastGyroSec : 0;
+      lastGyroSec = nowSec;
+      const { speed, heading: gpsHd } = gpsRef.current;
+      const fused = fuseGyroCompassHeading({
+        currentDeg: smoothedRef.current,
+        gyroZRadPerSec: gyroSensor.z ?? null,
+        dtSec,
+        compassDeg: lastCompassDegRef.current,
+        gpsHeadingDeg: gpsHd,
+        speedMps: speed,
+        correctionAlpha: 0.04,
+      });
+      if (fused != null) {
+        emitIfDue(fused, true);
+      }
+    };
+
+    const onGyroError = () => {
+      if (gyroSensor) {
+        try {
+          gyroSensor.removeEventListener("reading", onGyroReading);
+          gyroSensor.removeEventListener("error", onGyroError);
+          gyroSensor.stop();
+        } catch {
+          // ignore
+        }
+        gyroSensor = null;
+      }
+    };
+
+    if (typeof GyroCtor === "function") {
+      try {
+        gyroSensor = new GyroCtor({ frequency: 30, referenceFrame: "screen" });
+        gyroSensor.addEventListener("reading", onGyroReading);
+        gyroSensor.addEventListener("error", onGyroError);
+        gyroSensor.start();
+      } catch {
+        gyroSensor = null;
+      }
+    }
+
     return () => {
       window.removeEventListener("deviceorientationabsolute", onAbs, true);
       window.removeEventListener("deviceorientation", onRel, true);
+      onGyroError();
     };
-  }, [gpsSpeedMps, pushSample]);
+  }, [emitIfDue]);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
@@ -148,7 +228,7 @@ export function useDeviceHeading(params: {
         return true;
       }
     } catch {
-      // Ignore permission rejection; cone stays hidden gracefully
+      // Ignore permission rejection
     }
     return false;
   }, [attachListeners]);

@@ -479,11 +479,20 @@ export function usePlumberLocationSharing(params: {
       const silentMs = Date.now() - lastWatchEventRef.current;
       const thresholdMs = shareToServerRef.current ? 4_000 : 8_000;
       if (silentMs < thresholdMs) return;
-      navigator.geolocation.getCurrentPosition(onFix, onGeoError, {
-        enableHighAccuracy: true,
-        timeout: 8_000,
-        maximumAge: 0,
-      });
+      navigator.geolocation.getCurrentPosition(
+        onFix,
+        (err) => {
+          // Do not clobber active watchPosition session on transient keepAlive timeout
+          if (err.code === err.PERMISSION_DENIED) {
+            onGeoError(err);
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 8_000,
+          maximumAge: 0,
+        }
+      );
     }, 4_000);
 
     const flushPending = () => {

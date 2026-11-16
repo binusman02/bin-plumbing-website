@@ -40,6 +40,7 @@ import {
   sampleBufferedPosition,
   stepCameraFollow,
   computeFrameAlpha,
+  fuseGyroCompassHeading,
 } from "../src/lib/live-navigation.ts";
 
 describe("validateLocationInput", () => {
@@ -727,10 +728,10 @@ describe("live-movement & camera-follow lifecycle", () => {
       1_000
     ).nextState;
 
-    // 2 m GPS jitter while standing still (accuracy 7 m -> deadband 3 m, speed 0.2 m/s): suppressed
+    // ~1 m GPS jitter while standing still (accuracy 7 m -> deadband 1.2 m, speed 0.2 m/s): suppressed
     const jitter = pushFixToBuffer(
       buf,
-      { lat: 12.000018, lng: 8.50001, accuracy: 7, speed: 0.2, heading: 45, timestampMs: 2_000 },
+      { lat: 12.000008, lng: 8.500003, accuracy: 7, speed: 0.2, heading: 45, timestampMs: 2_000 },
       2_000
     );
     assert.equal(jitter.accepted, false);
@@ -760,14 +761,14 @@ describe("live-movement & camera-follow lifecycle", () => {
     let cam = null as ReturnType<typeof stepCameraFollow> | null;
     let prevSeg: number | null = null;
 
-    // 1. Stationary at A for 60s with +/- 2m GPS noise (accuracy 7m)
+    // 1. Stationary at A for 60s with +/- 0.9m GPS noise (accuracy 7m, deadband 1.2m)
     buf = pushFixToBuffer(
       buf,
       { lat: 12.0, lng: 8.5, accuracy: 7, speed: 0.1, heading: 0, timestampMs: 1_000 },
       1_000
     ).nextState;
     for (let t = 2_000; t <= 60_000; t += 2_000) {
-      const jitterLat = 12.0 + ((t % 4_000 === 0 ? 1 : -1) * 0.000015);
+      const jitterLat = 12.0 + ((t % 4_000 === 0 ? 1 : -1) * 0.000008);
       const res = pushFixToBuffer(
         buf,
         { lat: jitterLat, lng: 8.5, accuracy: 7, speed: 0.2, heading: 0, timestampMs: t },
@@ -829,7 +830,7 @@ describe("live-movement & camera-follow lifecycle", () => {
     // 4. Stationary at A again: noise suppressed, no jump/reversal
     const backNoise = pushFixToBuffer(
       buf,
-      { lat: 12.000015, lng: 8.5, accuracy: 7, speed: 0.1, heading: 180, timestampMs: 114_000 },
+      { lat: 12.000008, lng: 8.5, accuracy: 7, speed: 0.1, heading: 180, timestampMs: 114_000 },
       114_000
     );
     assert.equal(backNoise.accepted, false);
@@ -896,5 +897,33 @@ describe("security must-fix checks (roles, rate limits, trip lock)", () => {
       }),
       false
     );
+  });
+
+  it("4. fuses W3C Gyroscope z-axis angular velocity with compass/GPS reference", () => {
+    // Rotating clockwise (~ -1 rad/s around screen Z for 0.1 s -> +5.73 deg)
+    const next = fuseGyroCompassHeading({
+      currentDeg: 358,
+      gyroZRadPerSec: -1.0,
+      dtSec: 0.1,
+      compassDeg: 4,
+      gpsHeadingDeg: null,
+      speedMps: 0.2,
+      correctionAlpha: 0.04,
+    });
+    assert.ok(next != null && next > 0 && next < 10);
+
+    // Small 2.2m walking step with 10m accuracy is NOT stuck in deadband
+    let buf = createFixBufferState();
+    buf = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 10, speed: null, heading: null, timestampMs: 1_000 },
+      1_000
+    ).nextState;
+    const step2m = pushFixToBuffer(
+      buf,
+      { lat: 12.000022, lng: 8.5, accuracy: 10, speed: null, heading: null, timestampMs: 3_000 },
+      3_000
+    );
+    assert.equal(step2m.accepted, true);
   });
 });
