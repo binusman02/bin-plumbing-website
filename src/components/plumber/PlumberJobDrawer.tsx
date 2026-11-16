@@ -122,7 +122,7 @@ export function PlumberJobDrawer({
       : null;
 
   const isJobActive = Boolean(
-    selectedJob && !["completed", "cancelled"].includes(selectedJob.status)
+    selectedJob && !["work_completed", "completed", "cancelled"].includes(selectedJob.status)
   );
 
   const { route: roadRoute, status: roadRouteStatus, retry: retryRoadRoute } = useRoadRoute({
@@ -445,7 +445,7 @@ export function PlumberJobDrawer({
                       ]
                     : undefined
                 }
-                heightClassName={tripState === "on_the_way" ? "h-72 sm:h-80" : "h-48"}
+                heightClassName={tripState === "on_the_way" ? "h-[46vh] min-h-[320px] sm:h-80" : "h-64"}
               />
               {plumberCoords ? (
                 roadRoute?.ok && roadRoute.steps && roadRoute.steps.length > 0 ? (

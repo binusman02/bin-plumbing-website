@@ -971,8 +971,16 @@ export function WhatsAppChatWorkspace({
     }
   };
 
+  const mobileThreadOpen = Boolean(selectedTicket || targetStatusBanner);
+
   return (
-    <div className="flex h-[calc(100vh-11rem)] min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div
+      className={
+        mobileThreadOpen
+          ? "fixed inset-0 z-50 flex h-[100dvh] overflow-hidden bg-[#ECE5DD] md:static md:z-auto md:h-[calc(100vh-11rem)] md:min-h-[520px] md:rounded-2xl md:border md:border-slate-200 md:bg-white md:shadow-sm"
+          : "flex h-[calc(100dvh-9.5rem)] min-h-[440px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-11rem)] md:min-h-[520px]"
+      }
+    >
       {/* LEFT PANEL: CONVERSATION LIST */}
       <aside
         className={`flex w-full flex-col border-r border-slate-200 bg-white md:w-80 lg:w-96 ${
@@ -1118,8 +1126,8 @@ export function WhatsAppChatWorkspace({
         ) : (
           <>
             {/* Thread Header */}
-            <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
-              <div className="flex min-w-0 items-center gap-3">
+            <header className="flex items-center justify-between gap-2.5 border-b border-white/10 bg-[#0B1F3A] px-3 py-2.5 pt-[calc(0.625rem+env(safe-area-inset-top))] text-white md:border-slate-200 md:bg-white md:px-4 md:py-3 md:pt-3 md:text-[#0B1F3A]">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -1127,15 +1135,17 @@ export function WhatsAppChatWorkspace({
                     setTargetStatusBanner(null);
                     onTargetChange?.(null, null);
                   }}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-700 md:hidden"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition hover:bg-white/10 md:hidden"
                   aria-label="Back to conversations"
                 >
-                  <ArrowLeft className="h-4 w-4" />
+                  <ArrowLeft className="h-5 w-5" />
                 </button>
                 <Avatar name={activeThread.title} src={activeThread.avatarUrl} size="sm" />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-bold text-[#0B1F3A]">{activeThread.title}</p>
+                    <p className="truncate text-sm font-bold text-white md:text-[#0B1F3A]">
+                      {activeThread.title}
+                    </p>
                     {activeThread.req && (
                       <span
                         className={`hidden sm:inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -1146,11 +1156,15 @@ export function WhatsAppChatWorkspace({
                       </span>
                     )}
                   </div>
-                  <p className="truncate text-[11px] text-slate-500">
+                  <p className="truncate text-[11px] text-slate-300 md:text-slate-500">
                     {typingInfo?.ticket === activeThread.ticket ? (
-                      <span className="font-semibold text-emerald-600">{typingInfo.name} is typing...</span>
+                      <span className="font-semibold text-[#F5B301] md:text-emerald-600">
+                        {typingInfo.name} is typing...
+                      </span>
                     ) : activeThread.isOnline ? (
-                      <span className="text-emerald-600">Online • {activeThread.ticket}</span>
+                      <span className="text-emerald-300 md:text-emerald-600">
+                        Online • {activeThread.ticket}
+                      </span>
                     ) : (
                       (() => {
                         const targetUserId =
@@ -1172,7 +1186,7 @@ export function WhatsAppChatWorkspace({
                   setThreadSearchOpen((v) => !v);
                   setThreadSearch("");
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white hover:bg-white/20 md:border-slate-200 md:bg-transparent md:text-slate-600 md:hover:bg-slate-50"
                 aria-label="Search in conversation"
               >
                 <Search className="h-4 w-4" />

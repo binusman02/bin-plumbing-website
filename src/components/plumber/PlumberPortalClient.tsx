@@ -204,6 +204,7 @@ export default function PlumberPortalClient({
   const [quoteItems, setQuoteItems] = useState<QuotationLineItem[]>([
     { id: "item-1", name: "", quantity: 1, unitPrice: 0 },
   ]);
+  const [jobFilter, setJobFilter] = useState<"all" | "active" | "completed">("all");
   const [nextJobStatus, setNextJobStatus] = useState<RequestStatus>("in_progress");
   const [busyAction, setBusyAction] = useState<
     "status" | "quote" | "trip" | "arrived" | "quick_status" | "availability" | null
@@ -275,7 +276,10 @@ export default function PlumberPortalClient({
   }, [requests, currentPlumber]);
 
   const activeFieldJobs = useMemo(
-    () => myJobs.filter((j) => !["completed", "cancelled"].includes(j.status)),
+    () =>
+      myJobs.filter(
+        (j) => !["work_completed", "completed", "cancelled"].includes(j.status)
+      ),
     [myJobs]
   );
 
@@ -1069,7 +1073,7 @@ export default function PlumberPortalClient({
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-start">
               <div className="lg:col-span-6">
                 <LiveMap
-                  heightClassName="h-72 md:h-auto md:aspect-square"
+                  heightClassName="h-[52vh] min-h-[340px] md:h-auto md:aspect-square"
                   focusMarkerId={focusMarkerId}
                   focusSeq={focusSeq}
                   ownPosition={locationSharing.deviceFix}
@@ -1374,58 +1378,107 @@ export default function PlumberPortalClient({
 
       {activeTab === "jobs" && (
         <div className="space-y-3">
-          {filteredJobs.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-              <Wrench className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-              <p className="text-base font-semibold text-slate-700">No assigned jobs yet</p>
-            </div>
-          ) : (
-            filteredJobs.map((job) => {
-              const badge = getStatusMeta(job.status);
-              const hasSignal = hasJobSignal(job);
-              return (
-                <button
-                  key={job.id}
-                  type="button"
-                  onClick={() => openJobDetail(job)}
-                  className={`w-full rounded-xl border p-4 text-left shadow-sm transition hover:border-[#F5B301] ${
-                    hasSignal
-                      ? "border-[#F5B301]/70 bg-amber-50/30"
-                      : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        {hasSignal && (
-                          <span
-                            className="inline-block h-2 w-2 rounded-full bg-[#F5B301]"
-                            title="Unviewed job or status update"
-                          />
-                        )}
-                        <span className="font-mono text-xs font-bold text-[#0B1F3A]">
-                          {job.ticket_number}
-                        </span>
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {(
+              [
+                { id: "all", label: `All (${filteredJobs.length})` },
+                {
+                  id: "active",
+                  label: `Active (${
+                    filteredJobs.filter(
+                      (j) => !["work_completed", "completed", "cancelled"].includes(j.status)
+                    ).length
+                  })`,
+                },
+                {
+                  id: "completed",
+                  label: `Completed (${
+                    filteredJobs.filter((j) =>
+                      ["work_completed", "completed"].includes(j.status)
+                    ).length
+                  })`,
+                },
+              ] as const
+            ).map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setJobFilter(chip.id)}
+                className={`h-9 shrink-0 rounded-full px-3.5 text-xs font-bold transition ${
+                  jobFilter === chip.id
+                    ? "bg-[#0B1F3A] text-white shadow-xs"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const visibleJobs = filteredJobs.filter((j) => {
+              if (jobFilter === "active") {
+                return !["work_completed", "completed", "cancelled"].includes(j.status);
+              }
+              if (jobFilter === "completed") {
+                return ["work_completed", "completed"].includes(j.status);
+              }
+              return true;
+            });
+            return visibleJobs.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+                <Wrench className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+                <p className="text-base font-semibold text-slate-700">
+                  {jobFilter === "all" ? "No assigned jobs yet" : `No ${jobFilter} jobs`}
+                </p>
+              </div>
+            ) : (
+              visibleJobs.map((job) => {
+                const badge = getStatusMeta(job.status);
+                const hasSignal = hasJobSignal(job);
+                return (
+                  <button
+                    key={job.id}
+                    type="button"
+                    onClick={() => openJobDetail(job)}
+                    className={`w-full rounded-xl border p-4 text-left shadow-sm transition hover:border-[#F5B301] ${
+                      hasSignal
+                        ? "border-[#F5B301]/70 bg-amber-50/30"
+                        : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          {hasSignal && (
+                            <span
+                              className="inline-block h-2 w-2 rounded-full bg-[#F5B301]"
+                              title="Unviewed job or status update"
+                            />
+                          )}
+                          <span className="font-mono text-xs font-bold text-[#0B1F3A]">
+                            {job.ticket_number}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-sm font-bold text-[#0B1F3A]">
+                          {job.problem_category || job.property_type}
+                        </p>
                       </div>
-                      <p className="mt-0.5 text-sm font-bold text-[#0B1F3A]">
-                        {job.problem_category || job.property_type}
-                      </p>
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}
+                      >
+                        {badge.label}
+                      </span>
                     </div>
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}
-                    >
-                      {badge.label}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 flex items-center gap-1 text-sm text-slate-600">
-                    <MapPin className="h-3.5 w-3.5 shrink-0" />
-                    {job.address_in_kano}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">{formatDateTime(job.created_at)}</p>
-                </button>
-              );
-            })
-          )}
+                    <p className="mt-1.5 flex items-center gap-1 text-sm text-slate-600">
+                      <MapPin className="h-3.5 w-3.5 shrink-0" />
+                      {job.address_in_kano}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">{formatDateTime(job.created_at)}</p>
+                  </button>
+                );
+              })
+            );
+          })()}
         </div>
       )}
 

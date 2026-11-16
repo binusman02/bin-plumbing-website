@@ -15,12 +15,14 @@ import {
   MessageSquareWarning,
   Navigation,
   Plus,
+  Printer,
   Star,
   ThumbsDown,
   ThumbsUp,
   Upload,
   User,
   Wrench,
+  X,
 } from "lucide-react";
 import { LiveMap, type LiveMapMarker } from "@/components/map/LiveMap";
 import { WhatsAppChatWorkspace } from "@/components/chat/WhatsAppChatWorkspace";
@@ -239,6 +241,7 @@ export default function CustomerPortalClient({
   const [feedbackCategory, setFeedbackCategory] = useState<"feedback" | "complaint">("feedback");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [reviewTarget, setReviewTarget] = useState<(typeof requests)[number] | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
@@ -847,6 +850,29 @@ export default function CustomerPortalClient({
             </button>
           </div>
 
+          {(pendingQuotations.length > 0 ||
+            myRequests.some((r) => r.status === "awaiting_final_payment")) && (
+            <div className="flex flex-col gap-2.5 rounded-2xl border border-[#F5B301]/70 bg-amber-50/70 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+                  Action Needed
+                </p>
+                <p className="text-xs text-slate-700">
+                  {pendingQuotations.length > 0
+                    ? `You have ${pendingQuotations.length} quotation${pendingQuotations.length > 1 ? "s" : ""} waiting for approval.`
+                    : "Your work is complete and awaiting final payment confirmation."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab("requests")}
+                className="h-9 shrink-0 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white transition hover:bg-[#132f57]"
+              >
+                Review in My Requests
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -1083,7 +1109,7 @@ export default function CustomerPortalClient({
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-start">
               <div className="lg:col-span-6">
                 <LiveMap
-                  heightClassName="h-72 md:h-auto md:aspect-square"
+                  heightClassName="h-[50vh] min-h-[340px] md:h-auto md:aspect-square"
                   interactivePicker={Boolean(activeMapRequest && pickingPropertyOnMap)}
                   onPickLocation={(lat, lng) => {
                     if (!activeMapRequest || !pickingPropertyOnMap) return;
@@ -1591,11 +1617,13 @@ export default function CustomerPortalClient({
             myPayments.map((p) => {
               const badge = getStatusMeta(p.verification_status);
               return (
-                <div
+                <button
                   key={p.id}
-                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                  type="button"
+                  onClick={() => setSelectedPayment(p)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-[#F5B301] active:scale-[0.99]"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-xs font-bold text-[#0B1F3A]">
                       {p.ticket_number}
                     </span>
@@ -1605,17 +1633,22 @@ export default function CustomerPortalClient({
                       {badge.label}
                     </span>
                   </div>
-                  <p className="mt-1 text-base font-bold text-[#0B1F3A]">
-                    {formatNGN(p.total_payment)}
-                  </p>
-                  <p className="text-xs text-slate-600">
+                  <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                    <p className="text-base font-bold text-[#0B1F3A]">
+                      {formatNGN(p.total_payment)}
+                    </p>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B1F3A]">
+                      <Eye className="h-3.5 w-3.5 text-[#F5B301]" /> View Receipt
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">
                     Labour: {formatNGN(p.labour_portion)} • Materials:{" "}
                     {formatNGN(p.materials_portion)}
                   </p>
                   <p className="mt-1 text-xs text-slate-400">
                     {formatDateTime(p.payment_date || p.created_at)}
                   </p>
-                </div>
+                </button>
               );
             })
           )}
@@ -1866,6 +1899,120 @@ export default function CustomerPortalClient({
         quote={previewQuote}
         onClose={() => setPreviewQuote(null)}
       />
+
+      {selectedPayment && (() => {
+        const badge = getStatusMeta(selectedPayment.verification_status);
+        const linkedReq = myRequests.find(
+          (r) => r.ticket_number === selectedPayment.ticket_number
+        );
+        return (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
+            <div className="w-full max-w-md rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:p-6">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div>
+                  <p className="font-mono text-xs font-bold text-[#0B1F3A]">
+                    {selectedPayment.ticket_number}
+                  </p>
+                  <h3 className="text-base font-bold text-[#0B1F3A]">Payment Receipt</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPayment(null)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                  aria-label="Close payment receipt"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3.5">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Total Paid
+                    </p>
+                    <p className="mt-0.5 text-xl font-extrabold text-[#0B1F3A]">
+                      {formatNGN(selectedPayment.total_payment)}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-bold ${badge.className}`}
+                  >
+                    {badge.label}
+                  </span>
+                </div>
+
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-3.5 text-xs">
+                  <div className="flex items-center justify-between py-2.5">
+                    <span className="text-slate-500">Labour Portion</span>
+                    <span className="font-semibold text-[#0B1F3A]">
+                      {formatNGN(selectedPayment.labour_portion)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5">
+                    <span className="text-slate-500">Materials Portion</span>
+                    <span className="font-semibold text-[#0B1F3A]">
+                      {formatNGN(selectedPayment.materials_portion)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5">
+                    <span className="text-slate-500">Date</span>
+                    <span className="font-medium text-slate-700">
+                      {formatDateTime(selectedPayment.payment_date || selectedPayment.created_at)}
+                    </span>
+                  </div>
+                  {selectedPayment.payment_method && (
+                    <div className="flex items-center justify-between py-2.5">
+                      <span className="text-slate-500">Method</span>
+                      <span className="font-medium capitalize text-slate-700">
+                        {selectedPayment.payment_method.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  )}
+                  {linkedReq && (
+                    <div className="flex items-center justify-between gap-3 py-2.5">
+                      <span className="text-slate-500">Service</span>
+                      <span className="truncate font-medium text-slate-700">
+                        {linkedReq.problem_category || linkedReq.property_type}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {selectedPayment.notes && (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                    {selectedPayment.notes}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-5 flex gap-2">
+                {linkedReq && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPayment(null);
+                      setSelectedRequest(linkedReq);
+                      setActiveTab("requests");
+                    }}
+                    className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50"
+                  >
+                    Open Request
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3 text-xs font-bold text-white hover:bg-[#132f57]"
+                >
+                  <Printer className="h-4 w-4 text-[#F5B301]" />
+                  Print Receipt
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </PortalShell>
   );
 }

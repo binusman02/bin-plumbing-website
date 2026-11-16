@@ -214,22 +214,68 @@ export function DashboardClient({
             Live figures from service requests, plumber applications, quotations, and verified payments.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <Link
             href="/admin/requests"
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0B1F3A] px-4 text-sm font-semibold text-white transition hover:bg-[#132f57]"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-semibold text-white transition hover:bg-[#132f57] sm:px-4 sm:text-sm"
           >
             Manage Requests
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 shrink-0" />
           </Link>
           <Link
             href="/admin/plumbers"
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0B1F3A] transition hover:bg-slate-50"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-[#0B1F3A] transition hover:bg-slate-50 sm:px-4 sm:text-sm"
           >
             Review Plumbers
           </Link>
         </div>
       </div>
+
+      {/* Action-Needed Queue & Live Fleet Summary */}
+      {(metrics.newRequestsCount > 0 ||
+        pendingPlumbers.length > 0 ||
+        unverifiedPaymentsCount > 0 ||
+        metrics.openComplaintsCount > 0 ||
+        approvedPlumbers.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            {onlineCount} Online • {offlineCount} Offline
+          </span>
+          {metrics.newRequestsCount > 0 && (
+            <Link
+              href="/admin/requests"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#F5B301] bg-amber-50 px-3 py-1 text-xs font-bold text-[#0B1F3A] hover:bg-amber-100"
+            >
+              {metrics.newRequestsCount} New Request{metrics.newRequestsCount > 1 ? "s" : ""}
+            </Link>
+          )}
+          {pendingPlumbers.length > 0 && (
+            <Link
+              href="/admin/plumbers"
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
+            >
+              {pendingPlumbers.length} Pending Plumber{pendingPlumbers.length > 1 ? "s" : ""}
+            </Link>
+          )}
+          {unverifiedPaymentsCount > 0 && (
+            <Link
+              href="/admin/financials"
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800 hover:bg-amber-100"
+            >
+              {unverifiedPaymentsCount} Unverified Payment{unverifiedPaymentsCount > 1 ? "s" : ""}
+            </Link>
+          )}
+          {metrics.openComplaintsCount > 0 && (
+            <Link
+              href="/admin/complaints"
+              className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100"
+            >
+              {metrics.openComplaintsCount} Open Complaint{metrics.openComplaintsCount > 1 ? "s" : ""}
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Primary Stat Cards (max 6) */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-6">
