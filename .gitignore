@@ -38,7 +38,7 @@ yarn-error.log*
 src/data/marketplace-data.json
 backups/
 *.backup.json
-data/
+/data/
 private_uploads/
 *.zip
 
