@@ -297,7 +297,8 @@ export default function PlumberPortalClient({
   const shouldShareGps = Boolean(authenticatedPlumberId && activeTripTickets.length > 0);
 
   const locationSharing = usePlumberLocationSharing({
-    enabled: shouldShareGps,
+    enabled: Boolean(authenticatedPlumberId),
+    shareToServer: shouldShareGps,
     activeTickets: activeTripTickets,
   });
   const wakeLock = useScreenWakeLock(shouldShareGps);

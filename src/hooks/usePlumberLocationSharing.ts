@@ -60,10 +60,12 @@ const MAX_BACKOFF_MS = 60_000;
  */
 export function usePlumberLocationSharing(params: {
   enabled: boolean;
+  /** When false, watches local GPS for own-screen dot only and sends NOTHING to the server. */
+  shareToServer?: boolean;
   /** Active job ticket numbers; used only to tell viewers a refresh is due. */
   activeTickets: string[];
 }): PlumberSharingState & { retrying: boolean; retry: () => void } {
-  const { enabled, activeTickets } = params;
+  const { enabled, shareToServer = true, activeTickets } = params;
   const [retrying, setRetrying] = useState(false);
   const [state, setState] = useState<PlumberSharingState>({
     phase: "off",
@@ -75,6 +77,7 @@ export function usePlumberLocationSharing(params: {
   });
 
   const ticketsRef = useRef(activeTickets);
+  const shareToServerRef = useRef(shareToServer);
   const lastSentRef = useRef<{ lat: number; lng: number; sentAtMs: number } | null>(null);
   const lastFixRef = useRef<GeolocationPosition | null>(null);
   const lastWatchEventRef = useRef(0);
@@ -220,6 +223,26 @@ export function usePlumberLocationSharing(params: {
     submitRef.current = submit;
   }, [submit]);
 
+  useEffect(() => {
+    shareToServerRef.current = shareToServer;
+    if (!shareToServer) {
+      lastSentRef.current = null;
+      pendingRef.current = null;
+      if (throttleTimerRef.current != null) {
+        window.clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+      setState((s) =>
+        s.phase === "off"
+          ? s
+          : { ...s, phase: "off", lastConfirmedAtMs: null, message: null }
+      );
+    } else if (lastFixRef.current && enabled) {
+      setState((s) => (s.phase === "off" ? { ...s, phase: "starting" } : s));
+      void submitRef.current(lastFixRef.current, "send");
+    }
+  }, [shareToServer, enabled]);
+
   const onFix = useCallback(
     (pos: GeolocationPosition) => {
       lastFixRef.current = pos;
@@ -238,6 +261,11 @@ export function usePlumberLocationSharing(params: {
         },
         accuracyM: Number.isFinite(accuracy) ? accuracy : null,
       });
+
+      // Local-only preview mode (before Start Trip / after Arrived): never upload to server.
+      if (!shareToServerRef.current) {
+        return;
+      }
 
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         pendingRef.current = pos;
@@ -429,7 +457,9 @@ export function usePlumberLocationSharing(params: {
       return;
     }
 
-    patch({ phase: "starting", message: null });
+    if (shareToServerRef.current) {
+      patch({ phase: "starting", message: null });
+    }
     requestOnce();
 
     const watchId = navigator.geolocation.watchPosition(

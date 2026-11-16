@@ -763,6 +763,7 @@ export function LiveMap({
     cone: HTMLDivElement;
   } | null>(null);
   const ownAcceptFixRef = useRef<LocalFix | null>(null);
+  const hasAccurateFixRef = useRef(false);
   const ownAnimRef = useRef<{
     fromLat: number;
     fromLng: number;
@@ -782,6 +783,7 @@ export function LiveMap({
   useEffect(() => {
     if (!ownPosition) {
       ownAcceptFixRef.current = null;
+      hasAccurateFixRef.current = false;
       ownAnimRef.current = null;
       arrivalFittedRef.current = false;
       if (ownMarkerRef.current) {
@@ -800,15 +802,20 @@ export function LiveMap({
       timestampMs: ownPosition.timestampMs || Date.now(),
     };
     const acceptable = isAcceptableNavFix(candidate, ownAcceptFixRef.current);
-    // If we don't have any dot placed yet and coords are valid, place the initial dot
-    // (extrapolation still stays disabled when accuracy > 100 m). Once we have a good
-    // fix, reject any bad fix (> 100 m or impossible jump) so it never moves the dot.
     const hasValidCoords =
       Number.isFinite(candidate.lat) &&
       Number.isFinite(candidate.lng) &&
       !(candidate.lat === 0 && candidate.lng === 0);
-    if (!acceptable && (ownAcceptFixRef.current !== null || !hasValidCoords)) {
-      return;
+
+    // Once we have locked a <=100 m fix, reject any >100 m fix or impossible jump.
+    // While warming up indoors (no <=100 m fix yet), allow tightening fixes so the
+    // dot and accuracy circle still update like Google Maps (extrapolation stays off).
+    if (!acceptable) {
+      if (hasAccurateFixRef.current || !hasValidCoords) {
+        return;
+      }
+    } else {
+      hasAccurateFixRef.current = true;
     }
 
     const prev = ownAcceptFixRef.current;
@@ -1319,6 +1326,24 @@ export function LiveMap({
             className="rounded-lg border border-blue-200 bg-blue-50/95 px-2 py-1.5 text-[10px] font-bold text-blue-800 shadow-sm hover:bg-blue-100 sm:text-[11px]"
           >
             Enable Compass
+          </button>
+        )}
+        {ownPosition && !navigationMode && (
+          <button
+            type="button"
+            onClick={() => {
+              const map = mapRef.current;
+              if (!map) return;
+              map.easeTo({
+                center: [ownPosition.lng, ownPosition.lat],
+                zoom: Math.max(map.getZoom(), 16),
+                duration: reducedMotionRef.current ? 0 : 450,
+              });
+            }}
+            title="Center on my location"
+            className="rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1.5 text-[10px] font-bold text-[#2563EB] shadow-sm backdrop-blur-sm transition hover:bg-blue-50 sm:px-2.5 sm:text-[11px]"
+          >
+            My Location
           </button>
         )}
         {markers.length > 0 && !navigationMode && (
