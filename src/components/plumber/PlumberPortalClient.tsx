@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition as startBackgroundTransition, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { startTransition as startBackgroundTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Crosshair,
@@ -205,8 +205,21 @@ export default function PlumberPortalClient({
     { id: "item-1", name: "", quantity: 1, unitPrice: 0 },
   ]);
   const [nextJobStatus, setNextJobStatus] = useState<RequestStatus>("in_progress");
-  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [busyAction, setBusyAction] = useState<
+    "status" | "quote" | "trip" | "arrived" | "quick_status" | "availability" | null
+  >(null);
+  const [statusFeedback, setStatusFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [quoteFeedback, setQuoteFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [tripFeedback, setTripFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const currentPlumber = useMemo(
     () => plumbers.find((p) => p.id === authenticatedPlumberId) || null,
@@ -501,7 +514,9 @@ export default function PlumberPortalClient({
     });
     setSelectedJob(job);
     setNextJobStatus(job.status);
-    setActionFeedback(null);
+    setStatusFeedback(null);
+    setQuoteFeedback(null);
+    setTripFeedback(null);
     setLabourAmt("");
     setMaterialsAmt("");
     setTransportAmt("");
@@ -511,9 +526,9 @@ export default function PlumberPortalClient({
     setQuoteItems([{ id: `item-${quoteSeqRef.current}`, name: "", quantity: 1, unitPrice: 0 }]);
   };
 
-  const handleSubmitQuote = (e: React.FormEvent) => {
+  const handleSubmitQuote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedJob) return;
+    if (!selectedJob || busyAction === "quote") return;
     const labour = Number(labourAmt) || 0;
     const validItems = quoteItems.filter((it) => it.name.trim().length > 0);
     const itemsTotal = validItems.reduce(
@@ -524,10 +539,12 @@ export default function PlumberPortalClient({
     const transport = Number(transportAmt) || 0;
     const other = Number(otherAmt) || 0;
     if (labour <= 0) {
-      setActionFeedback("Please enter a valid labour amount.");
+      setQuoteFeedback({ type: "error", message: "Please enter a valid labour amount." });
       return;
     }
-    startTransition(async () => {
+    setQuoteFeedback(null);
+    setBusyAction("quote");
+    try {
       const res = await submitQuotationAction({
         requestId: selectedJob.id,
         ticketNumber: selectedJob.ticket_number,
@@ -542,9 +559,11 @@ export default function PlumberPortalClient({
       });
       if (res.success && res.quotation) {
         setQuotations((prev) => [res.quotation!, ...prev]);
-        setActionFeedback(
-          "Quotation sent to the customer for approval. It will appear on your dashboard once approved by the customer."
-        );
+        setQuoteFeedback({
+          type: "success",
+          message:
+            "Quotation sent to the customer for approval. It will appear on your dashboard once approved.",
+        });
         setLabourAmt("");
         setMaterialsAmt("");
         setTransportAmt("");
@@ -558,15 +577,28 @@ export default function PlumberPortalClient({
         broadcastRealtimeEvent("notification_sync", {});
         router.refresh();
       } else {
-        setActionFeedback(res.error || "Could not submit quotation.");
+        setQuoteFeedback({
+          type: "error",
+          message: res.error || "Could not submit quotation.",
+        });
       }
-    });
+    } finally {
+      setBusyAction((cur) => (cur === "quote" ? null : cur));
+    }
   };
 
-  const handleStatusUpdate = (overrideStatus?: RequestStatus) => {
+  const handleStatusUpdate = async (overrideStatus?: RequestStatus) => {
     if (!selectedJob) return;
+    const actionKey = overrideStatus ? "quick_status" : "status";
+    if (busyAction === actionKey) return;
     const statusToApply = overrideStatus || nextJobStatus;
-    startTransition(async () => {
+    if (overrideStatus) {
+      setTripFeedback(null);
+    } else {
+      setStatusFeedback(null);
+    }
+    setBusyAction(actionKey);
+    try {
       const res = await updateRequestStatusByTicketAction(
         selectedJob.ticket_number,
         statusToApply
@@ -579,7 +611,17 @@ export default function PlumberPortalClient({
           prev.map((r) => (r.ticket_number === selectedJob.ticket_number ? updated : r))
         );
         setSelectedJob(updated);
-        setActionFeedback("Job status updated.");
+        if (overrideStatus) {
+          setTripFeedback({
+            type: "success",
+            message: `Job status updated to ${getStatusMeta(statusToApply).label}.`,
+          });
+        } else {
+          setStatusFeedback({
+            type: "success",
+            message: `Job status updated to ${getStatusMeta(statusToApply).label}.`,
+          });
+        }
         broadcastRealtimeEvent("data_sync", {
           entity: "service_requests",
           ticketNumber: selectedJob.ticket_number,
@@ -587,13 +629,23 @@ export default function PlumberPortalClient({
         broadcastRealtimeEvent("notification_sync", {});
         router.refresh();
       } else {
-        setActionFeedback(res.error || "Could not update status.");
+        const errMsg = res.error || "Could not update status.";
+        if (overrideStatus) {
+          setTripFeedback({ type: "error", message: errMsg });
+        } else {
+          setStatusFeedback({ type: "error", message: errMsg });
+        }
       }
-    });
+    } finally {
+      setBusyAction((cur) => (cur === actionKey ? null : cur));
+    }
   };
 
-  const handleStartTrip = (ticketNumber: string) => {
-    startTransition(async () => {
+  const handleStartTrip = async (ticketNumber: string) => {
+    if (busyAction === "trip") return;
+    setTripFeedback(null);
+    setBusyAction("trip");
+    try {
       const res = await startPlumberTripAction(
         ticketNumber,
         locationSharing.deviceFix
@@ -624,18 +676,26 @@ export default function PlumberPortalClient({
             ? { ...prev, history: [...(prev.history || []), entry] }
             : prev
         );
-        setActionFeedback("Trip started. Live location sharing is now active.");
+        setTripFeedback({
+          type: "success",
+          message: "Trip started. Live location sharing is now active.",
+        });
         broadcastRealtimeEvent("data_sync", { entity: "service_requests", ticketNumber });
         broadcastRealtimeEvent("notification_sync", {});
         router.refresh();
       } else {
-        setActionFeedback(res.error || "Could not start trip.");
+        setTripFeedback({ type: "error", message: res.error || "Could not start trip." });
       }
-    });
+    } finally {
+      setBusyAction((cur) => (cur === "trip" ? null : cur));
+    }
   };
 
-  const handleMarkArrived = (ticketNumber: string) => {
-    startTransition(async () => {
+  const handleMarkArrived = async (ticketNumber: string) => {
+    if (busyAction === "arrived") return;
+    setTripFeedback(null);
+    setBusyAction("arrived");
+    try {
       const res = await markPlumberArrivedAction(
         ticketNumber,
         locationSharing.deviceFix
@@ -666,29 +726,38 @@ export default function PlumberPortalClient({
             ? { ...prev, history: [...(prev.history || []), entry] }
             : prev
         );
-        setActionFeedback("Arrival recorded. Customer and admin have been notified.");
+        setTripFeedback({
+          type: "success",
+          message: "Arrival recorded. Customer and admin have been notified.",
+        });
         broadcastRealtimeEvent("data_sync", { entity: "service_requests", ticketNumber });
         broadcastRealtimeEvent("notification_sync", {});
         router.refresh();
       } else {
-        setActionFeedback(res.error || "Could not record arrival.");
+        setTripFeedback({ type: "error", message: res.error || "Could not record arrival." });
       }
-    });
+    } finally {
+      setBusyAction((cur) => (cur === "arrived" ? null : cur));
+    }
   };
 
-  const handleToggleAvailability = () => {
+  const handleToggleAvailability = async () => {
+    if (busyAction === "availability") return;
     const next = !isAvailable;
     setIsAvailable(next);
     broadcastRealtimeEvent("plumber_availability", {
       plumberId: currentPlumber.id,
       isAvailable: next,
     });
-    startTransition(async () => {
+    setBusyAction("availability");
+    try {
       await togglePlumberAvailabilityAction(currentPlumber.id, next);
       if (!next && !hasActiveFieldJob) {
         await stopLocationSharingAction();
       }
-    });
+    } finally {
+      setBusyAction((cur) => (cur === "availability" ? null : cur));
+    }
   };
 
   const pageTitleMap: Record<PlumberTab, string> = {
@@ -838,13 +907,14 @@ export default function PlumberPortalClient({
                 <button
                   type="button"
                   onClick={handleToggleAvailability}
-                  disabled={isPending}
-                  className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-bold transition ${
+                  disabled={busyAction === "availability"}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-bold transition ${
                     isAvailable
                       ? "bg-emerald-600 text-white hover:bg-emerald-700"
                       : "border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
                   }`}
                 >
+                  {busyAction === "availability" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   {isAvailable ? "Go Off Duty (On Duty)" : "Go On Duty"}
                 </button>
               </div>
@@ -1196,11 +1266,11 @@ export default function PlumberPortalClient({
                       </div>
                     )}
 
-                    <div className="flex flex-wrap gap-2 pt-1">
+                    <div className="grid grid-cols-2 gap-2 pt-1 sm:flex sm:flex-wrap">
                       <button
                         type="button"
                         onClick={() => openJobDetail(activeOverviewJob)}
-                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-xs font-bold text-[#0B1F3A] transition hover:bg-slate-100 active:scale-[0.98]"
                       >
                         Open Job Details
                       </button>
@@ -1212,18 +1282,18 @@ export default function PlumberPortalClient({
                           setChatNavKey(`open-${activeOverviewJob.ticket_number}-${Date.now()}`);
                           setActiveTab("messages");
                         }}
-                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132f57]"
+                        className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white transition hover:bg-[#132f57] active:scale-[0.98]"
                       >
                         <MessageSquare className="h-3.5 w-3.5 text-[#F5B301]" />
-                        Message Customer
+                        Message
                       </button>
                       {activeOverviewJob.customer_phone && (
                         <a
                           href={`tel:${activeOverviewJob.customer_phone}`}
-                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
+                          className="col-span-2 inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.98] sm:col-span-1"
                         >
                           <Phone className="h-3.5 w-3.5 text-emerald-600" />
-                          Call
+                          Call Customer
                         </a>
                       )}
                     </div>
@@ -1521,8 +1591,10 @@ export default function PlumberPortalClient({
         quoteItems={quoteItems}
         setQuoteItems={setQuoteItems}
         quotations={quotations}
-        actionFeedback={actionFeedback}
-        isPending={isPending}
+        busyAction={busyAction}
+        statusFeedback={statusFeedback}
+        quoteFeedback={quoteFeedback}
+        tripFeedback={tripFeedback}
         deviceFix={locationSharing.deviceFix}
         wakeLockActive={wakeLock.active}
         onStartTrip={handleStartTrip}

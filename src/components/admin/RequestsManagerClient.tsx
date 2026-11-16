@@ -1435,8 +1435,73 @@ export function RequestsManagerClient({
 
       {/* BIGIN-STYLE LIST VIEW */}
       {viewMode === "list" && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-          <div className="overflow-x-auto">
+        <>
+          {/* Mobile Phone Card View (< 768px) */}
+          <div className="space-y-2.5 md:hidden">
+            {paginatedRequests.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500 shadow-xs">
+                No service requests match the current filters.
+              </div>
+            ) : (
+              paginatedRequests.map((req) => {
+                const contact = extractCustomerContact(req);
+                const statusMeta = getStatusMeta(req.status);
+                const hasUnread = unreadTickets.has(req.ticket_number);
+                return (
+                  <button
+                    key={req.id}
+                    type="button"
+                    onClick={() => openDetail(req)}
+                    className={`w-full rounded-2xl border p-3.5 text-left shadow-xs transition active:scale-[0.99] ${
+                      hasUnread
+                        ? "border-[#F5B301] bg-amber-50/40"
+                        : "border-slate-200 bg-white hover:border-[#0B1F3A]/30"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {hasUnread && (
+                            <span className="h-2 w-2 shrink-0 rounded-full bg-[#F5B301]" />
+                          )}
+                          <span className="font-mono text-xs font-bold text-[#0B1F3A]">
+                            {req.ticket_number}
+                          </span>
+                          {req.priority === "urgent" && (
+                            <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700">
+                              Urgent
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 truncate text-sm font-bold text-[#0B1F3A]">
+                          {contact.name}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
+                      >
+                        {statusMeta.label}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs font-medium text-slate-700">
+                      {req.problem_category} • {req.address_in_kano}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] text-slate-500">
+                      <span className="truncate">
+                        {req.assigned_technician ? `Plumber: ${req.assigned_technician}` : "Unassigned"}
+                      </span>
+                      <span className="shrink-0 font-bold text-[#0B1F3A]">
+                        {req.quoted_amount != null ? formatNGN(req.quoted_amount) : "—"}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs md:block">
+            <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-left text-[13px]">
               <thead className="border-b border-slate-200 bg-slate-50/90 text-[11px] font-semibold text-slate-500">
                 <tr>
@@ -1930,6 +1995,7 @@ export function RequestsManagerClient({
             </div>
           </div>
         </div>
+        </>
       )}
 
       {/* LIVE DISPATCH MAP VIEW (inDrive-style Admin Dispatch) */}

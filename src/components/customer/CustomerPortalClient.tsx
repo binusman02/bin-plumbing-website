@@ -242,6 +242,8 @@ export default function CustomerPortalClient({
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [busyCustomerAction, setBusyCustomerAction] = useState<"feedback" | "review" | null>(null);
+  const [feedbackSubmitMsg, setFeedbackSubmitMsg] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const currentCustomer = useMemo(
@@ -744,10 +746,12 @@ export default function CustomerPortalClient({
     });
   };
 
-  const handleSubmitComplaint = (e: React.FormEvent) => {
+  const handleSubmitComplaint = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!feedbackMessage.trim()) return;
-    startTransition(async () => {
+    if (!feedbackMessage.trim() || busyCustomerAction === "feedback") return;
+    setFeedbackSubmitMsg(null);
+    setBusyCustomerAction("feedback");
+    try {
       const res = await submitComplaintAction({
         ticketNumber: feedbackTicket || undefined,
         customerName: currentCustomer.full_name,
@@ -757,9 +761,11 @@ export default function CustomerPortalClient({
       });
       if (res.success) {
         setFeedbackMessage("");
-        setActionFeedback("Your feedback / complaint has been sent to our coordination team.");
+        setFeedbackSubmitMsg("Your feedback / complaint has been sent to our coordination team.");
       }
-    });
+    } finally {
+      setBusyCustomerAction((cur) => (cur === "feedback" ? null : cur));
+    }
   };
 
   const pageTitleMap: Record<CustomerTab, string> = {
@@ -834,7 +840,7 @@ export default function CustomerPortalClient({
             <button
               type="button"
               onClick={() => setShowNewRequestModal(true)}
-              className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] hover:bg-[#e5a700]"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] active:scale-[0.98] sm:w-auto"
             >
               <Plus className="h-4 w-4" />
               New Plumbing Request
@@ -1676,11 +1682,17 @@ export default function CustomerPortalClient({
             />
             <button
               type="submit"
-              disabled={isPending}
-              className="h-11 rounded-xl bg-[#0B1F3A] px-5 text-sm font-bold text-white hover:bg-[#132f57]"
+              disabled={busyCustomerAction === "feedback"}
+              className="h-11 w-full rounded-xl bg-[#0B1F3A] px-5 text-sm font-bold text-white transition hover:bg-[#132f57] disabled:opacity-60 sm:w-auto"
             >
-              Submit to Support Team
+              {busyCustomerAction === "feedback" ? "Sending..." : "Submit to Support Team"}
             </button>
+            {feedbackSubmitMsg && (
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-semibold text-emerald-800">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{feedbackSubmitMsg}</span>
+              </div>
+            )}
           </form>
         </div>
       )}
@@ -1818,10 +1830,12 @@ export default function CustomerPortalClient({
               </button>
               <button
                 type="button"
-                disabled={isPending || !reviewComment.trim()}
-                onClick={() => {
+                disabled={busyCustomerAction === "review" || !reviewComment.trim()}
+                onClick={async () => {
                   const target = reviewTarget;
-                  startTransition(async () => {
+                  if (!target || busyCustomerAction === "review") return;
+                  setBusyCustomerAction("review");
+                  try {
                     const res = await submitCustomerReviewAction({
                       ticketNumber: target.ticket_number,
                       customerName: currentCustomer.full_name,
@@ -1836,11 +1850,13 @@ export default function CustomerPortalClient({
                     } else {
                       setActionFeedback(res.error || "Could not submit review.");
                     }
-                  });
+                  } finally {
+                    setBusyCustomerAction((cur) => (cur === "review" ? null : cur));
+                  }
                 }}
                 className="h-10 rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] disabled:opacity-50"
               >
-                {isPending ? "Submitting..." : "Submit Review"}
+                {busyCustomerAction === "review" ? "Submitting..." : "Submit Review"}
               </button>
             </div>
           </div>

@@ -534,7 +534,7 @@ export function PortalShell({
         </header>
 
         {/* Main Workspace */}
-        <main className="mx-auto w-full max-w-[1640px] flex-1 px-4 py-4 pb-24 md:p-5 md:pb-8 lg:px-6 lg:py-5">
+        <main className="mx-auto w-full max-w-[1640px] flex-1 px-3.5 py-3.5 pb-24 sm:px-5 md:p-5 md:pb-8 lg:px-6 lg:py-5">
           <PwaInstallPrompt />
           {children}
         </main>
@@ -543,16 +543,20 @@ export function PortalShell({
       {/* 3. PHONE BOTTOM NAVIGATION BAR (< 768px) */}
       <nav
         aria-label="Mobile Navigation"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-[#E3E8EF] bg-white pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-[#E3E8EF] bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_20px_rgba(11,31,58,0.08)] backdrop-blur-md md:hidden"
       >
-        <div className="grid h-16 grid-cols-5 items-center">
+        <div className="grid h-16 grid-cols-5 items-center px-1">
           {bottomNavItems.slice(0, 5).map((item) => {
             const Icon = item.icon;
             const isMore = item.id === "more";
             const isActive = isMore ? moreSheetOpen : activeItemId === item.id;
 
             const inner = (
-              <>
+              <span
+                className={`flex w-full flex-col items-center justify-center rounded-xl py-1 transition active:scale-95 ${
+                  isActive ? "bg-[#0B1F3A]/[0.06]" : ""
+                }`}
+              >
                 <span className="relative">
                   <Icon
                     className={`h-5 w-5 ${
@@ -560,13 +564,13 @@ export function PortalShell({
                     }`}
                   />
                   {typeof item.badge === "number" && item.badge > 0 && (
-                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#F5B301] px-1 text-[10px] font-bold text-[#0B1F3A]">
+                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#F5B301] px-1 text-[10px] font-bold text-[#0B1F3A] shadow-xs">
                       {item.badge}
                     </span>
                   )}
                 </span>
                 <span
-                  className={`mt-1 truncate text-xs font-semibold ${
+                  className={`mt-0.5 max-w-full truncate px-1 text-[11px] font-semibold ${
                     isActive ? "text-[#0B1F3A]" : "text-[#5B6675]"
                   }`}
                 >
@@ -575,7 +579,7 @@ export function PortalShell({
                 {isActive && (
                   <span className="mt-0.5 h-0.5 w-5 rounded-full bg-[#F5B301]" />
                 )}
-              </>
+              </span>
             );
 
             if (isMore) {

@@ -46,7 +46,7 @@ interface PlumberJobDrawerProps {
   labourAmt: string;
   setLabourAmt: (v: string) => void;
   materialsAmt: string;
-  setMaterialsAmt: (v: string) => void;
+  setMaterialsAmt?: (v: string) => void;
   transportAmt: string;
   setTransportAmt: (v: string) => void;
   otherAmt: string;
@@ -56,8 +56,12 @@ interface PlumberJobDrawerProps {
   quoteItems: QuotationLineItem[];
   setQuoteItems: (items: QuotationLineItem[]) => void;
   quotations: StructuredQuotation[];
-  actionFeedback: string | null;
-  isPending: boolean;
+  actionFeedback?: string | null;
+  isPending?: boolean;
+  busyAction?: "status" | "quote" | "trip" | "arrived" | "quick_status" | "availability" | null;
+  statusFeedback?: { type: "success" | "error"; message: string } | null;
+  quoteFeedback?: { type: "success" | "error"; message: string } | null;
+  tripFeedback?: { type: "success" | "error"; message: string } | null;
   deviceFix?: OwnPositionFix | null;
   wakeLockActive?: boolean;
   onStartTrip?: (ticketNumber: string) => void;
@@ -80,7 +84,6 @@ export function PlumberJobDrawer({
   labourAmt,
   setLabourAmt,
   materialsAmt,
-  setMaterialsAmt,
   transportAmt,
   setTransportAmt,
   otherAmt,
@@ -91,7 +94,10 @@ export function PlumberJobDrawer({
   setQuoteItems,
   quotations,
   actionFeedback,
-  isPending,
+  busyAction = null,
+  statusFeedback = null,
+  quoteFeedback = null,
+  tripFeedback = null,
   deviceFix,
   wakeLockActive,
   onStartTrip,
@@ -227,14 +233,30 @@ export function PlumberJobDrawer({
                 </div>
                 <button
                   type="button"
-                  disabled={isPending}
+                  disabled={busyAction === "trip"}
                   onClick={() => onStartTrip(selectedJob.ticket_number)}
                   className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#F5B301] px-5 text-sm font-bold text-[#07152B] shadow-sm transition hover:bg-[#E0A200] disabled:opacity-60"
                 >
-                  <Navigation className="h-4 w-4" />
-                  Start Trip
+                  {busyAction === "trip" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Navigation className="h-4 w-4" />
+                  )}
+                  {busyAction === "trip" ? "Starting..." : "Start Trip"}
                 </button>
               </div>
+              {tripFeedback && (
+                <div
+                  className={`mt-2.5 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${
+                    tripFeedback.type === "error"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  }`}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <span>{tripFeedback.message}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -250,10 +272,11 @@ export function PlumberJobDrawer({
                   ) && (
                     <button
                       type="button"
-                      disabled={isPending}
+                      disabled={busyAction === "quick_status"}
                       onClick={() => onQuickStatusChange("inspection_required")}
                       className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132E54] disabled:opacity-60"
                     >
+                      {busyAction === "quick_status" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       Start Inspection
                     </button>
                   )}
@@ -267,14 +290,27 @@ export function PlumberJobDrawer({
                 {onQuickStatusChange && selectedJob.status !== "in_progress" && (
                   <button
                     type="button"
-                    disabled={isPending}
+                    disabled={busyAction === "quick_status"}
                     onClick={() => onQuickStatusChange("in_progress")}
                     className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
                   >
+                    {busyAction === "quick_status" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     Start Work
                   </button>
                 )}
               </div>
+              {tripFeedback && (
+                <div
+                  className={`mt-2.5 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${
+                    tripFeedback.type === "error"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-emerald-200 bg-white text-emerald-800"
+                  }`}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <span>{tripFeedback.message}</span>
+                </div>
+              )}
             </div>
           )}
           <div className="rounded-xl border border-slate-200 bg-white p-3.5">
@@ -523,13 +559,26 @@ export function PlumberJobDrawer({
               />
               <button
                 type="button"
-                disabled={isPending}
+                disabled={busyAction === "status"}
                 onClick={onStatusUpdate}
-                className="h-11 rounded-xl bg-[#0B1F3A] px-4 text-sm font-semibold text-white"
+                className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-4 text-sm font-semibold text-white transition hover:bg-[#132E54] disabled:opacity-60"
               >
-                Update
+                {busyAction === "status" && <Loader2 className="h-4 w-4 animate-spin" />}
+                {busyAction === "status" ? "Updating..." : "Update"}
               </button>
             </div>
+            {statusFeedback && (
+              <div
+                className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-semibold ${
+                  statusFeedback.type === "error"
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                }`}
+              >
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{statusFeedback.message}</span>
+              </div>
+            )}
           </div>
 
           <form ref={quoteFormRef} onSubmit={onSubmitQuote} className="space-y-3 rounded-xl border border-slate-200 p-4">
@@ -713,12 +762,25 @@ export function PlumberJobDrawer({
               </button>
               <button
                 type="submit"
-                disabled={isPending}
-                className="h-11 flex-1 rounded-xl bg-[#F5B301] text-sm font-bold text-[#07152B] hover:bg-[#e5a700]"
+                disabled={busyAction === "quote"}
+                className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#F5B301] text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] disabled:opacity-60"
               >
-                {isPending ? "Submitting..." : "Submit Quotation"}
+                {busyAction === "quote" && <Loader2 className="h-4 w-4 animate-spin" />}
+                {busyAction === "quote" ? "Submitting..." : "Submit Quotation"}
               </button>
             </div>
+            {quoteFeedback && (
+              <div
+                className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-semibold ${
+                  quoteFeedback.type === "error"
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                }`}
+              >
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{quoteFeedback.message}</span>
+              </div>
+            )}
           </form>
 
           {jobQuotes.length > 0 && (
@@ -781,28 +843,31 @@ export function PlumberJobDrawer({
             </div>
           )}
 
-          {actionFeedback && (
+          {actionFeedback && !statusFeedback && !quoteFeedback && !tripFeedback && (
             <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               <span>{actionFeedback}</span>
             </div>
           )}
-          {tripState === "on_the_way" && onMarkArrived && (
-            <div className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 p-3 backdrop-blur-sm md:static md:border-0 md:bg-transparent md:p-0">
-              <button
-                type="button"
-                disabled={isPending}
-                onClick={() => onMarkArrived(selectedJob.ticket_number)}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 text-base font-extrabold text-white shadow-lg transition hover:bg-emerald-700 disabled:opacity-60"
-              >
-                <CheckCircle2 className="h-5 w-5" />
-                Arrived at Property
-              </button>
-            </div>
-          )}
         </div>
 
-        <div className="flex gap-2 border-t border-slate-200 bg-white p-4">
+        <div className="space-y-2 border-t border-slate-200 bg-white p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom))] sm:p-4">
+          {isJobActive && tripState === "on_the_way" && onMarkArrived && (
+            <button
+              type="button"
+              disabled={busyAction === "arrived"}
+              onClick={() => onMarkArrived(selectedJob.ticket_number)}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {busyAction === "arrived" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              {busyAction === "arrived" ? "Recording Arrival..." : "Arrived at Property"}
+            </button>
+          )}
+          <div className="flex gap-2">
           <button
             type="button"
             onClick={() => onOpenChat(selectedJob.ticket_number)}
@@ -818,6 +883,7 @@ export function PlumberJobDrawer({
               <Phone className="h-4 w-4" /> Call Customer
             </a>
           )}
+          </div>
         </div>
       </div>
 
