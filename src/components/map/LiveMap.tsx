@@ -598,15 +598,22 @@ export function LiveMap({
     const map = mapRef.current;
     const ml = maplibreRef.current;
     if (!map || !ml) return;
-    if (markers.length === 1) {
+    const pts: [number, number][] = markers.map((m) => [m.lng, m.lat]);
+    if (remotePlumber) {
+      pts.push([remotePlumber.lng, remotePlumber.lat]);
+    }
+    if (ownPosition) {
+      pts.push([ownPosition.lng, ownPosition.lat]);
+    }
+    if (pts.length === 1) {
       map.easeTo({
-        center: [markers[0].lng, markers[0].lat],
+        center: pts[0],
         zoom: Math.max(zoom, 14),
         duration: 500,
       });
-    } else if (markers.length > 1) {
+    } else if (pts.length > 1) {
       const bounds = new ml.LngLatBounds();
-      for (const m of markers) bounds.extend([m.lng, m.lat]);
+      for (const p of pts) bounds.extend(p);
       map.fitBounds(bounds, { padding: 48, maxZoom: 15, duration: 500 });
     } else {
       const target = center || userLocation || SERVICE_AREA_CENTER;
@@ -616,7 +623,7 @@ export function LiveMap({
         duration: 500,
       });
     }
-  }, [markers, center, userLocation, zoom]);
+  }, [markers, remotePlumber, ownPosition, center, userLocation, zoom]);
 
   useEffect(() => {
     let cancelled = false;
@@ -699,6 +706,7 @@ export function LiveMap({
         }, 10_000);
       };
       map.on("dragstart", pauseFollowForUser);
+      map.on("zoomstart", pauseFollowForUser);
       map.on("rotatestart", pauseFollowForUser);
       map.on("pitchstart", pauseFollowForUser);
 
@@ -941,6 +949,7 @@ export function LiveMap({
           if (dest && distToDest <= 75) {
             if (!arrivalFittedRef.current) {
               arrivalFittedRef.current = true;
+              map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
               const bounds = new ml.LngLatBounds([lng, lat], [lng, lat]);
               bounds.extend([dest.lng, dest.lat]);
               map.fitBounds(bounds, {
@@ -952,6 +961,11 @@ export function LiveMap({
           } else {
             arrivalFittedRef.current = false;
             const h = containerRef.current?.clientHeight || 360;
+            const targetTopPad = Math.round(h * 0.4);
+            const curPad = map.getPadding();
+            if (Math.abs((curPad.top || 0) - targetTopPad) > 4) {
+              map.setPadding({ top: targetTopPad, bottom: 0, left: 0, right: 0 });
+            }
             const speed = anim.speedMps ?? 0;
             const targetZoom = speed >= 10 ? 16 : 17;
             const isPhone = typeof window !== "undefined" && window.innerWidth < 768;
@@ -965,9 +979,10 @@ export function LiveMap({
               zoom: targetZoom,
               bearing: targetBearing,
               pitch: targetPitch,
-              padding: { top: Math.round(h * 0.4), bottom: 0, left: 0, right: 0 },
             });
           }
+        } else if ((!navModeRef.current || followPausedRef.current) && (map.getPadding().top || 0) > 0) {
+          map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
         }
       }
 
@@ -1057,6 +1072,24 @@ export function LiveMap({
         .setLngLat([remotePlumber.lng, remotePlumber.lat])
         .addTo(map);
       remoteMarkerRef.current = { marker, iconWrap, badge, signature: sig };
+    }
+
+    if (!followPausedRef.current) {
+      if (markers.length > 0) {
+        const bounds = new ml.LngLatBounds();
+        bounds.extend([remotePlumber.lng, remotePlumber.lat]);
+        for (const m of markers) bounds.extend([m.lng, m.lat]);
+        map.fitBounds(bounds, {
+          padding: 56,
+          maxZoom: 16,
+          duration: reducedMotionRef.current ? 0 : 600,
+        });
+      } else {
+        map.easeTo({
+          center: [remotePlumber.lng, remotePlumber.lat],
+          duration: reducedMotionRef.current ? 0 : 600,
+        });
+      }
     }
 
     let rafId = 0;

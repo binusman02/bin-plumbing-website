@@ -368,7 +368,7 @@ export function PlumberJobDrawer({
                   lng: selectedJob.customer_lng,
                 }}
                 navigationMode={tripState === "on_the_way"}
-                onNeedReroute={onNeedReroute}
+                onNeedReroute={retryRoadRoute || onNeedReroute}
                 markers={(() => {
                   const list: LiveMapMarker[] = [
                     {
