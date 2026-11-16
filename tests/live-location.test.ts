@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import {
   LOCATION_CONFIG,
   validateLocationInput,
@@ -27,6 +29,11 @@ import {
   projectPointOntoRoute,
   splitRouteAtProjection,
   updateOffRouteState,
+  createFixBufferState,
+  pushFixToBuffer,
+  sampleBufferedPosition,
+  stepCameraFollow,
+  computeFrameAlpha,
 } from "../src/lib/live-navigation.ts";
 
 describe("validateLocationInput", () => {
@@ -536,5 +543,177 @@ describe("live-navigation pure helpers", () => {
       ]),
       "idle"
     );
+  });
+});
+
+describe("live-movement & camera-follow lifecycle", () => {
+  it("1 & 2. interpolates straight-line and continuous movement across consecutive GPS updates", () => {
+    let buf = createFixBufferState();
+    const r1 = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 1_000 },
+      1_000
+    );
+    assert.equal(r1.accepted, true);
+    buf = r1.nextState;
+
+    const r2 = pushFixToBuffer(
+      buf,
+      { lat: 12.001, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 2_000 },
+      2_000
+    );
+    assert.equal(r2.accepted, true);
+    buf = r2.nextState;
+
+    const mid = sampleBufferedPosition(buf, 2_500, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS);
+    assert.ok(mid && mid.lat > 12.0004 && mid.lat < 12.0006);
+
+    // Consecutive update preserves continuity from currentDisplayed
+    const r3 = pushFixToBuffer(
+      buf,
+      { lat: 12.002, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 3_000 },
+      2_500,
+      { currentDisplayed: { lat: mid!.lat, lng: mid!.lng } }
+    );
+    assert.equal(r3.accepted, true);
+    const startOfSeg3 = sampleBufferedPosition(r3.nextState, 2_500, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS);
+    assert.ok(Math.abs(startOfSeg3!.lat - mid!.lat) < 1e-9);
+  });
+
+  it("3 & 4. handles 90-degree turns and 359 -> 1 degree shortest-angle camera bearing", () => {
+    const pose90 = stepCameraFollow(
+      { lat: 12.0, lng: 8.5, bearing: 0 },
+      { lat: 12.001, lng: 8.5, bearing: 90 },
+      16.67
+    );
+    assert.ok(pose90.bearing > 0 && pose90.bearing < 90);
+
+    const wrap = stepCameraFollow(
+      { lat: 12.0, lng: 8.5, bearing: 359 },
+      { lat: 12.0, lng: 8.5, bearing: 1 },
+      50
+    );
+    // Must cross 360 -> 0 -> 1 (not backwards through 180)
+    assert.ok(wrap.bearing >= 359 || wrap.bearing <= 1.1);
+    assert.ok(computeFrameAlpha(16, 120) > 0 && computeFrameAlpha(16, 120) < 1);
+  });
+
+  it("5. stops movement prediction when stationary", () => {
+    let buf = createFixBufferState();
+    buf = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 8, speed: 0.1, heading: 90, timestampMs: 1_000 },
+      1_000
+    ).nextState;
+    const after5s = sampleBufferedPosition(buf, 6_000, NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS);
+    assert.equal(after5s?.extrapolating, false);
+    assert.equal(after5s?.lat, 12.0);
+    assert.equal(after5s?.lng, 8.5);
+  });
+
+  it("6, 7 & 8. rejects duplicate timestamps, out-of-order updates, and poor accuracy spikes", () => {
+    let buf = createFixBufferState();
+    buf = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 12, speed: 5, heading: 0, timestampMs: 5_000 },
+      5_000
+    ).nextState;
+
+    // Duplicate timestamp
+    const dup = pushFixToBuffer(
+      buf,
+      { lat: 12.001, lng: 8.5, accuracy: 12, speed: 5, heading: 0, timestampMs: 5_000 },
+      5_100
+    );
+    assert.equal(dup.accepted, false);
+
+    // Out-of-order timestamp
+    const older = pushFixToBuffer(
+      buf,
+      { lat: 11.999, lng: 8.5, accuracy: 12, speed: 5, heading: 0, timestampMs: 4_000 },
+      5_200
+    );
+    assert.equal(older.accepted, false);
+
+    // Poor accuracy spike right after an accurate fix
+    const poor = pushFixToBuffer(
+      buf,
+      { lat: 12.005, lng: 8.505, accuracy: 220, speed: 5, heading: 0, timestampMs: 6_000 },
+      6_000
+    );
+    assert.equal(poor.accepted, false);
+  });
+
+  it("9, 10 & 11. bounds dead reckoning on network loss/long gap and resumes smoothly", () => {
+    let buf = createFixBufferState();
+    buf = pushFixToBuffer(
+      buf,
+      { lat: 12.0, lng: 8.5, accuracy: 10, speed: 10, heading: 0, timestampMs: 1_000 },
+      1_000
+    ).nextState;
+
+    // During 5s remote extrapolation window (after 400ms interp): extrapolating = true
+    const during = sampleBufferedPosition(buf, 3_000, NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS);
+    assert.equal(during?.extrapolating, true);
+    assert.ok(during!.lat > 12.0);
+
+    // After 10s connection loss: extrapolation stops & marks stale
+    const after10s = sampleBufferedPosition(buf, 11_400, NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS);
+    const at5s = sampleBufferedPosition(buf, 6_400, NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS);
+    assert.equal(after10s?.stale, true);
+    assert.equal(after10s?.lat, at5s?.lat);
+
+    // Resuming after interruption interpolates smoothly from held position
+    const resumed = pushFixToBuffer(
+      buf,
+      { lat: 12.002, lng: 8.5, accuracy: 12, speed: 8, heading: 0, timestampMs: 12_000 },
+      12_000,
+      { currentDisplayed: { lat: after10s!.lat, lng: after10s!.lng } }
+    );
+    assert.equal(resumed.accepted, true);
+    const s = sampleBufferedPosition(resumed.nextState, 12_000, NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS);
+    assert.equal(s?.lat, after10s?.lat);
+  });
+
+  it("12 & 13. preserves route-snapping continuity across parallel roads and detects off-route", () => {
+    // Route goes along lng 8.5000 (segments 0..2), while a parallel road sits at lng 8.50025
+    const route: [number, number][] = [
+      [12.0, 8.5],
+      [12.001, 8.5],
+      [12.002, 8.5],
+      [12.002, 8.50025],
+      [12.001, 8.50025],
+      [12.0, 8.50025],
+    ];
+    // Near segment 0 with prevSegmentIndex=0: stays on segment 0 (doesn't jump to parallel seg 4)
+    const proj = projectPointOntoRoute([12.0005, 8.5002], route, {
+      prevSegmentIndex: 0,
+      forwardLookaheadSegments: 2,
+      backwardToleranceSegments: 0,
+    });
+    assert.ok(proj && proj.segmentIndex <= 2);
+
+    // Moving >50m beyond the route for 10s triggers reroute
+    let off = { offRouteSinceMs: null as number | null, lastRerouteAtMs: 0 };
+    off = updateOffRouteState(off, 70, 1_000).nextState;
+    const reroute = updateOffRouteState(off, 70, 11_500);
+    assert.equal(reroute.shouldReroute, true);
+  });
+
+  it("14 & 15. LiveMap decouples remotePlumber animation from React object identity and supports camera modes", () => {
+    const src = fs.readFileSync(
+      path.resolve(process.cwd(), "src/components/map/LiveMap.tsx"),
+      "utf8"
+    );
+    // Remote ingestion must depend on primitive coordinates/timestamps, NOT [remotePlumber]
+    assert.equal(src.includes("}, [remotePlumber]);"), false);
+    assert.ok(src.includes("[remLat, remLng, remCoordMs, remSpeed, remHeading, remAcc]"));
+    assert.ok(src.includes("[remLabel, remStatus]"));
+    // Explicit camera modes & continuous rAF camera controller
+    assert.ok(src.includes('"following-own"'));
+    assert.ok(src.includes('"following-remote"'));
+    assert.ok(src.includes('"overview"'));
+    assert.ok(src.includes('"free"'));
+    assert.ok(src.includes("stepCameraFollow("));
   });
 });

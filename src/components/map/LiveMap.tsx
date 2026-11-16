@@ -5,14 +5,17 @@ import type { StyleSpecification } from "maplibre-gl";
 import { MAP_CONFIG, SERVICE_AREA_CENTER } from "@/lib/map-config";
 import { haversineMeters, type LocationStatus } from "@/lib/live-location";
 import {
-  extrapolatePosition,
-  isAcceptableNavFix,
+  createFixBufferState,
   NAV_CONFIG,
   projectPointOntoRoute,
+  pushFixToBuffer,
+  sampleBufferedPosition,
   smoothHeading,
   splitRouteAtProjection,
+  stepCameraFollow,
   updateOffRouteState,
-  type LocalFix,
+  type CameraPose,
+  type FixBufferState,
   type OffRouteState,
 } from "@/lib/live-navigation";
 import { useDeviceHeading } from "@/hooks/useDeviceHeading";
@@ -271,7 +274,12 @@ function remoteStatusBadgeText(status: LocationStatus): { text: string; bg: stri
 function buildRemotePlumberElement(
   label: string,
   status: LocationStatus
-): { root: HTMLDivElement; iconWrap: HTMLDivElement; badge: HTMLSpanElement } {
+): {
+  root: HTMLDivElement;
+  iconWrap: HTMLDivElement;
+  badge: HTMLSpanElement;
+  nameSpan: HTMLSpanElement;
+} {
   const safeLabel = escapeHtml(label);
   const badgeInfo = remoteStatusBadgeText(status);
 
@@ -332,7 +340,7 @@ function buildRemotePlumberElement(
 
   root.appendChild(pill);
   root.appendChild(iconWrap);
-  return { root, iconWrap, badge };
+  return { root, iconWrap, badge, nameSpan };
 }
 
 const OVERLAY_SOURCE_IDS = {
@@ -341,6 +349,8 @@ const OVERLAY_SOURCE_IDS = {
   roadRoute: "live-map-road-route-src",
   straightLine: "live-map-straight-line-src",
 } as const;
+
+export type CameraMode = "following-own" | "following-remote" | "overview" | "free";
 
 export function LiveMap({
   markers,
@@ -395,6 +405,9 @@ export function LiveMap({
   const [followPaused, setFollowPaused] = useState(false);
   const [headingUp, setHeadingUp] = useState(true);
   const [lowFps, setLowFps] = useState(false);
+  const [cameraMode, setCameraMode] = useState<CameraMode>(
+    navigationMode ? "following-own" : "overview"
+  );
 
   const followPausedRef = useRef(false);
   const headingUpRef = useRef(true);
@@ -403,9 +416,19 @@ export function LiveMap({
   const resumeTimerRef = useRef<number | null>(null);
   const navModeRef = useRef(navigationMode);
   const destinationRef = useRef(destination);
+  const cameraModeRef = useRef<CameraMode>(navigationMode ? "following-own" : "overview");
 
   useEffect(() => {
     navModeRef.current = navigationMode;
+    if (navigationMode) {
+      cameraModeRef.current = "following-own";
+      setCameraMode("following-own");
+      setFollowPaused(false);
+      followPausedRef.current = false;
+    } else if (cameraModeRef.current === "following-own") {
+      cameraModeRef.current = "overview";
+      setCameraMode("overview");
+    }
   }, [navigationMode]);
 
   useEffect(() => {
@@ -696,6 +719,8 @@ export function LiveMap({
         if (!ev?.originalEvent) return;
         setFollowPaused(true);
         followPausedRef.current = true;
+        cameraModeRef.current = "free";
+        setCameraMode("free");
         if (resumeTimerRef.current != null) {
           window.clearTimeout(resumeTimerRef.current);
         }
@@ -703,6 +728,10 @@ export function LiveMap({
           setFollowPaused(false);
           followPausedRef.current = false;
           resumeTimerRef.current = null;
+          if (navModeRef.current) {
+            cameraModeRef.current = "following-own";
+            setCameraMode("following-own");
+          }
         }, 10_000);
       };
       map.on("dragstart", pauseFollowForUser);
@@ -756,35 +785,67 @@ export function LiveMap({
   }, [styleLoaded, roadRoutePoints, straightLine, polyline, accuracyCircle, syncOverlaysToMap]);
 
   // ---------------------------------------------------------------------------
-  // 60 fps Own-Position Blue Dot + Cone + Accuracy Circle + Follow Camera
+  // Continuous 60 fps Own-Position + Remote-Plumber + Camera-Follow Controller
   // ---------------------------------------------------------------------------
   const ownMarkerRef = useRef<{
     marker: import("maplibre-gl").Marker;
     cone: HTMLDivElement;
   } | null>(null);
-  const ownAcceptFixRef = useRef<LocalFix | null>(null);
-  const lastAccurateFixMsRef = useRef<number>(0);
-  const ownAnimRef = useRef<{
-    fromLat: number;
-    fromLng: number;
-    toLat: number;
-    toLng: number;
-    startPerfMs: number;
-    durationMs: number;
-    fixAtPerfMs: number;
-    speedMps: number | null;
-    headingDeg: number | null;
-    accuracyM: number | null;
+  const ownBufferRef = useRef<FixBufferState>(createFixBufferState());
+  const ownLatestRef = useRef(ownPosition);
+  useEffect(() => {
+    ownLatestRef.current = ownPosition;
+  }, [ownPosition]);
+
+  const remoteMarkerRef = useRef<{
+    marker: import("maplibre-gl").Marker;
+    iconWrap: HTMLDivElement;
+    badge: HTMLSpanElement;
+    nameSpan: HTMLSpanElement;
   } | null>(null);
+  const remoteBufferRef = useRef<FixBufferState>(createFixBufferState());
+  const remoteHeadingRef = useRef<number | null>(null);
+  const remoteLatestRef = useRef(remotePlumber);
+  useEffect(() => {
+    remoteLatestRef.current = remotePlumber;
+  }, [remotePlumber]);
+
+  const cameraPoseRef = useRef<CameraPose | null>(null);
   const offRouteRef = useRef<OffRouteState>({ offRouteSinceMs: null, lastRerouteAtMs: 0 });
+  const prevRouteSegRef = useRef<number | null>(null);
+  const lastRouteKeyRef = useRef<string>("");
   const lastRouteSplitMsRef = useRef(0);
+  const lastSplitSegRef = useRef<number | null>(null);
+  const lastAccUpdateMsRef = useRef(0);
+  const lastAccStateRef = useRef<{ lat: number; lng: number; radiusM: number } | null>(null);
   const arrivalFittedRef = useRef(false);
+  const remoteFittedKeyRef = useRef<string>("");
+
+  // Reset route continuity ONLY when a genuinely new route is installed
+  useEffect(() => {
+    const pts = roadRoutePoints;
+    const key =
+      pts && pts.length >= 2
+        ? `${pts.length}:${pts[0][0].toFixed(4)},${pts[0][1].toFixed(4)}->${pts[pts.length - 1][0].toFixed(4)},${pts[pts.length - 1][1].toFixed(4)}`
+        : "";
+    if (key !== lastRouteKeyRef.current) {
+      lastRouteKeyRef.current = key;
+      prevRouteSegRef.current = null;
+      lastSplitSegRef.current = null;
+    }
+  }, [roadRoutePoints]);
+
+  // 1) Own-position GPS ingestion (keyed on primitive values, never restarts rAF)
+  const ownLat = ownPosition?.lat ?? null;
+  const ownLng = ownPosition?.lng ?? null;
+  const ownTs = ownPosition?.timestampMs ?? null;
+  const ownAcc = ownPosition?.accuracyM ?? null;
+  const ownSpeed = ownPosition?.speed ?? null;
+  const ownHeading = ownPosition?.heading ?? null;
 
   useEffect(() => {
-    if (!ownPosition) {
-      ownAcceptFixRef.current = null;
-      lastAccurateFixMsRef.current = 0;
-      ownAnimRef.current = null;
+    if (ownLat == null || ownLng == null) {
+      ownBufferRef.current = createFixBufferState();
       arrivalFittedRef.current = false;
       if (ownMarkerRef.current) {
         ownMarkerRef.current.marker.remove();
@@ -793,140 +854,234 @@ export function LiveMap({
       return;
     }
 
-    const candidate: LocalFix = {
-      lat: ownPosition.lat,
-      lng: ownPosition.lng,
-      accuracy: ownPosition.accuracyM,
-      speed: ownPosition.speed,
-      heading: ownPosition.heading,
-      timestampMs: ownPosition.timestampMs || Date.now(),
-    };
-    const acceptable = isAcceptableNavFix(candidate, ownAcceptFixRef.current);
-    const hasValidCoords =
-      Number.isFinite(candidate.lat) &&
-      Number.isFinite(candidate.lng) &&
-      !(candidate.lat === 0 && candidate.lng === 0);
-
-    // Reject impossible jumps or older timestamps always.
-    // For accuracy > 100 m: ignore short spikes when we had a <=100 m fix in the last 10s,
-    // but allow updates if >10s has passed without a <=100 m fix so the dot never freezes indoors.
-    if (!acceptable) {
-      const onlyAccuracyFailed = isAcceptableNavFix(
-        { ...candidate, accuracy: 50 },
-        ownAcceptFixRef.current
-      );
-      const staleAccurate = Date.now() - lastAccurateFixMsRef.current > 10_000;
-      if (!hasValidCoords || !onlyAccuracyFailed || !staleAccurate) {
-        return;
-      }
-    } else {
-      lastAccurateFixMsRef.current = Date.now();
-    }
-
-    const prev = ownAcceptFixRef.current;
-    ownAcceptFixRef.current = candidate;
-    const nowPerf = performance.now();
-    const fixDeltaMs = prev ? Math.max(250, Math.min(2000, candidate.timestampMs - prev.timestampMs)) : 400;
-
     const currentDrawn = ownMarkerRef.current
       ? ownMarkerRef.current.marker.getLngLat()
-      : { lat: candidate.lat, lng: candidate.lng };
+      : null;
 
-    ownAnimRef.current = {
-      fromLat: currentDrawn.lat,
-      fromLng: currentDrawn.lng,
-      toLat: candidate.lat,
-      toLng: candidate.lng,
-      startPerfMs: nowPerf,
-      durationMs: reducedMotionRef.current ? 1 : fixDeltaMs,
-      fixAtPerfMs: nowPerf,
-      speedMps: candidate.speed ?? null,
-      headingDeg: candidate.heading ?? null,
-      accuracyM: candidate.accuracy ?? null,
-    };
-  }, [ownPosition]);
+    const { accepted, nextState } = pushFixToBuffer(
+      ownBufferRef.current,
+      {
+        lat: ownLat,
+        lng: ownLng,
+        accuracy: ownAcc,
+        speed: ownSpeed,
+        heading: ownHeading,
+        timestampMs: ownTs || Date.now(),
+      },
+      performance.now(),
+      {
+        currentDisplayed: currentDrawn ? { lat: currentDrawn.lat, lng: currentDrawn.lng } : null,
+        minDurationMs: reducedMotionRef.current ? 1 : 250,
+        maxDurationMs: reducedMotionRef.current ? 1 : 2_000,
+        allowWarmupAccuracyMs: 10_000,
+      }
+    );
+    if (accepted) {
+      ownBufferRef.current = nextState;
+    }
+  }, [ownLat, ownLng, ownTs, ownAcc, ownSpeed, ownHeading]);
+
+  // 2) Remote-plumber GPS ingestion (keyed ONLY on primitive values; immune to parent re-renders)
+  const remLat = remotePlumber?.lat ?? null;
+  const remLng = remotePlumber?.lng ?? null;
+  const remCoordMs = remotePlumber?.coordinatesAtMs ?? null;
+  const remSpeed = remotePlumber?.speed ?? null;
+  const remHeading = remotePlumber?.heading ?? null;
+  const remAcc = remotePlumber?.accuracyM ?? null;
+
+  useEffect(() => {
+    if (remLat == null || remLng == null) {
+      remoteBufferRef.current = createFixBufferState();
+      remoteHeadingRef.current = null;
+      if (remoteMarkerRef.current) {
+        remoteMarkerRef.current.marker.remove();
+        remoteMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const currentDrawn = remoteMarkerRef.current
+      ? remoteMarkerRef.current.marker.getLngLat()
+      : null;
+
+    const { accepted, nextState } = pushFixToBuffer(
+      remoteBufferRef.current,
+      {
+        lat: remLat,
+        lng: remLng,
+        accuracy: remAcc,
+        speed: remSpeed,
+        heading: remHeading,
+        timestampMs: remCoordMs || Date.now(),
+      },
+      performance.now(),
+      {
+        currentDisplayed: currentDrawn ? { lat: currentDrawn.lat, lng: currentDrawn.lng } : null,
+        minDurationMs: reducedMotionRef.current ? 1 : 400,
+        maxDurationMs: reducedMotionRef.current ? 1 : 5_000,
+        allowWarmupAccuracyMs: 15_000,
+      }
+    );
+    if (accepted) {
+      remoteBufferRef.current = nextState;
+      if (remHeading != null && Number.isFinite(remHeading)) {
+        remoteHeadingRef.current = smoothHeading(remoteHeadingRef.current, remHeading, 0.35);
+      }
+    }
+  }, [remLat, remLng, remCoordMs, remSpeed, remHeading, remAcc]);
+
+  // 3) Remote-plumber metadata handler (updates label & LIVE/UPDATING/LAST SEEN badge in-place)
+  const remLabel = remotePlumber?.label ?? "";
+  const remStatus = remotePlumber?.status ?? "unavailable";
+
+  useEffect(() => {
+    const obj = remoteMarkerRef.current;
+    if (!obj) return;
+    const badgeInfo = remoteStatusBadgeText(remStatus);
+    obj.badge.textContent = badgeInfo.text;
+    obj.badge.style.background = badgeInfo.bg;
+    obj.nameSpan.textContent = escapeHtml(remLabel);
+  }, [remLabel, remStatus]);
+
+  // 4) One-time fit when tracked target/destination changes (NOT on every GPS tick!)
+  const markersKey = markers.map((m) => `${m.id}:${m.lat.toFixed(4)},${m.lng.toFixed(4)}`).join("|");
+  useEffect(() => {
+    const map = mapRef.current;
+    const ml = maplibreRef.current;
+    if (!map || !ml || !styleLoaded) return;
+    if (remLat == null || remLng == null) {
+      remoteFittedKeyRef.current = "";
+      return;
+    }
+    const fitKey = `${remLabel}|${markersKey}`;
+    if (fitKey === remoteFittedKeyRef.current) return;
+    remoteFittedKeyRef.current = fitKey;
+
+    if (cameraModeRef.current === "free") return;
+    if (markers.length > 0) {
+      const bounds = new ml.LngLatBounds([remLng, remLat], [remLng, remLat]);
+      for (const m of markers) bounds.extend([m.lng, m.lat]);
+      map.fitBounds(bounds, {
+        padding: 56,
+        maxZoom: 16,
+        duration: reducedMotionRef.current ? 0 : 600,
+      });
+    } else {
+      map.easeTo({
+        center: [remLng, remLat],
+        duration: reducedMotionRef.current ? 0 : 600,
+      });
+    }
+  }, [styleLoaded, remLabel, markersKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 5) Single continuous rAF animation & damped-spring camera loop per map lifecycle
+  const hasOwn = ownLat != null && ownLng != null;
+  const hasRemote = remLat != null && remLng != null;
 
   useEffect(() => {
     const map = mapRef.current;
     const ml = maplibreRef.current;
-    if (!map || !ml || !styleLoaded || !ownPosition) return;
+    if (!map || !ml || !styleLoaded || (!hasOwn && !hasRemote)) return;
 
-    if (!ownMarkerRef.current) {
+    if (hasOwn && !ownMarkerRef.current && ownLatestRef.current) {
       const { root, cone } = buildOwnDotElement();
       const marker = new ml.Marker({ element: root, anchor: "center" })
-        .setLngLat([ownPosition.lng, ownPosition.lat])
+        .setLngLat([ownLatestRef.current.lng, ownLatestRef.current.lat])
         .addTo(map);
       ownMarkerRef.current = { marker, cone };
+    }
+
+    if (hasRemote && !remoteMarkerRef.current && remoteLatestRef.current) {
+      const r = remoteLatestRef.current;
+      const { root, iconWrap, badge, nameSpan } = buildRemotePlumberElement(r.label, r.status);
+      const marker = new ml.Marker({ element: root, anchor: "bottom" })
+        .setLngLat([r.lng, r.lat])
+        .addTo(map);
+      remoteMarkerRef.current = { marker, iconWrap, badge, nameSpan };
     }
 
     let rafId = 0;
     let lastFramePerf = performance.now();
     let slowFrames = 0;
-    let lastCameraPerf = 0;
+    let fastFrames = 0;
 
     const tick = (nowPerf: number) => {
-      const frameDelta = nowPerf - lastFramePerf;
+      const frameDelta = Math.max(1, Math.min(100, nowPerf - lastFramePerf));
       lastFramePerf = nowPerf;
+
+      // Low-FPS hysteresis: drop pitch after 15 slow frames (>50ms), recover after 90 smooth frames (<25ms)
       if (frameDelta > 50) {
         slowFrames += 1;
+        fastFrames = 0;
         if (slowFrames >= 15 && !lowFpsRef.current) {
           lowFpsRef.current = true;
           setLowFps(true);
         }
-      } else if (slowFrames > 0) {
-        slowFrames = Math.max(0, slowFrames - 1);
+      } else {
+        slowFrames = 0;
+        if (lowFpsRef.current && frameDelta < 25) {
+          fastFrames += 1;
+          if (fastFrames >= 90) {
+            lowFpsRef.current = false;
+            setLowFps(false);
+            fastFrames = 0;
+          }
+        } else {
+          fastFrames = 0;
+        }
       }
 
-      const anim = ownAnimRef.current;
+      // ---- A. Own-position dot + route snap + continuous follow camera ----
       const dotObj = ownMarkerRef.current;
-      if (anim && dotObj) {
-        const elapsed = nowPerf - anim.startPerfMs;
-        let lat: number;
-        let lng: number;
-        if (elapsed < anim.durationMs) {
-          const t = Math.min(1, elapsed / anim.durationMs);
-          const eased = 1 - Math.pow(1 - t, 3);
-          lat = anim.fromLat + (anim.toLat - anim.fromLat) * eased;
-          lng = anim.fromLng + (anim.toLng - anim.fromLng) * eased;
-        } else {
-          const ext = extrapolatePosition({
-            lat: anim.toLat,
-            lng: anim.toLng,
-            speedMps: anim.speedMps,
-            headingDeg: headingStateRef.current.heading ?? anim.headingDeg,
-            elapsedMs: elapsed - anim.durationMs,
-            accuracyMeters: anim.accuracyM,
-            maxExtrapolationMs: NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS,
-          });
-          lat = ext.lat;
-          lng = ext.lng;
-        }
+      const ownSample = hasOwn
+        ? sampleBufferedPosition(
+            ownBufferRef.current,
+            nowPerf,
+            NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS,
+            headingStateRef.current.heading
+          )
+        : null;
 
-        // Route snap (<= 30m) + passed/remaining split + off-route (> 50m for 10s)
+      if (dotObj && ownSample) {
+        let lat = ownSample.lat;
+        let lng = ownSample.lng;
+
+        // Route projection & snapping (throttled to ~5 Hz for efficiency, with segment continuity)
         const routePts = overlaysRef.current.roadRoutePoints;
         if (routePts && routePts.length >= 2) {
-          const proj = projectPointOntoRoute([lat, lng], routePts);
-          if (proj && proj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M) {
-            lat = proj.snappedPoint[0];
-            lng = proj.snappedPoint[1];
-          }
-          if (proj && nowPerf - lastRouteSplitMsRef.current > 180) {
+          if (nowPerf - lastRouteSplitMsRef.current >= 200) {
             lastRouteSplitMsRef.current = nowPerf;
-            const { passed, remaining } = splitRouteAtProjection(routePts, proj);
-            const passedSrc = map.getSource(OVERLAY_SOURCE_IDS.passedRoute) as
-              | import("maplibre-gl").GeoJSONSource
-              | undefined;
-            const roadSrc = map.getSource(OVERLAY_SOURCE_IDS.roadRoute) as
-              | import("maplibre-gl").GeoJSONSource
-              | undefined;
-            if (passedSrc) passedSrc.setData(toLineGeoJson(passed));
-            if (roadSrc) roadSrc.setData(toLineGeoJson(remaining));
-
-            if (navModeRef.current) {
-              const rerouteCheck = updateOffRouteState(offRouteRef.current, proj.distanceMeters, Date.now());
-              offRouteRef.current = rerouteCheck.nextState;
-              if (rerouteCheck.shouldReroute) {
-                onNeedRerouteRef.current?.();
+            const proj = projectPointOntoRoute([lat, lng], routePts, {
+              prevSegmentIndex: prevRouteSegRef.current,
+            });
+            if (proj) {
+              prevRouteSegRef.current = proj.segmentIndex;
+              if (proj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M) {
+                lat = proj.snappedPoint[0];
+                lng = proj.snappedPoint[1];
+              }
+              if (lastSplitSegRef.current !== proj.segmentIndex) {
+                lastSplitSegRef.current = proj.segmentIndex;
+                const { passed, remaining } = splitRouteAtProjection(routePts, proj);
+                const passedSrc = map.getSource(OVERLAY_SOURCE_IDS.passedRoute) as
+                  | import("maplibre-gl").GeoJSONSource
+                  | undefined;
+                const roadSrc = map.getSource(OVERLAY_SOURCE_IDS.roadRoute) as
+                  | import("maplibre-gl").GeoJSONSource
+                  | undefined;
+                if (passedSrc) passedSrc.setData(toLineGeoJson(passed));
+                if (roadSrc) roadSrc.setData(toLineGeoJson(remaining));
+              }
+              if (navModeRef.current) {
+                const rerouteCheck = updateOffRouteState(
+                  offRouteRef.current,
+                  proj.distanceMeters,
+                  Date.now()
+                );
+                offRouteRef.current = rerouteCheck.nextState;
+                if (rerouteCheck.shouldReroute) {
+                  onNeedRerouteRef.current?.();
+                }
               }
             }
           }
@@ -944,24 +1099,35 @@ export function LiveMap({
           dotObj.cone.style.display = "none";
         }
 
-        // Accuracy circle source update
-        const accSrc = map.getSource(OVERLAY_SOURCE_IDS.accuracy) as
-          | import("maplibre-gl").GeoJSONSource
-          | undefined;
-        if (accSrc && anim.accuracyM != null) {
-          accSrc.setData(buildCircleGeoJson(lat, lng, anim.accuracyM));
+        // Throttled accuracy circle (~4.5 Hz, only when moved >=2m or radius changed >=3m)
+        const latestFix = ownBufferRef.current.latestFix;
+        if (latestFix?.accuracy != null && nowPerf - lastAccUpdateMsRef.current >= 220) {
+          const prevAcc = lastAccStateRef.current;
+          const movedEnough =
+            !prevAcc ||
+            haversineMeters(prevAcc.lat, prevAcc.lng, lat, lng) >= 2 ||
+            Math.abs(prevAcc.radiusM - latestFix.accuracy) >= 3;
+          if (movedEnough) {
+            lastAccUpdateMsRef.current = nowPerf;
+            lastAccStateRef.current = { lat, lng, radiusM: latestFix.accuracy };
+            const accSrc = map.getSource(OVERLAY_SOURCE_IDS.accuracy) as
+              | import("maplibre-gl").GeoJSONSource
+              | undefined;
+            if (accSrc) accSrc.setData(buildCircleGeoJson(lat, lng, latestFix.accuracy));
+          }
         }
 
-        // Follow camera in navigationMode
-        if (navModeRef.current && !followPausedRef.current && nowPerf - lastCameraPerf >= 90) {
-          lastCameraPerf = nowPerf;
+        // Continuous damped-spring camera follow (every rAF frame)
+        if (cameraModeRef.current === "following-own") {
           const dest = destinationRef.current;
           const distToDest = dest ? haversineMeters(lat, lng, dest.lat, dest.lng) : Infinity;
 
           if (dest && distToDest <= 75) {
             if (!arrivalFittedRef.current) {
               arrivalFittedRef.current = true;
-              map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+              if ((map.getPadding().top || 0) > 0) {
+                map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+              }
               const bounds = new ml.LngLatBounds([lng, lat], [lng, lat]);
               bounds.extend([dest.lng, dest.lat]);
               map.fitBounds(bounds, {
@@ -978,7 +1144,8 @@ export function LiveMap({
             if (Math.abs((curPad.top || 0) - targetTopPad) > 4) {
               map.setPadding({ top: targetTopPad, bottom: 0, left: 0, right: 0 });
             }
-            const speed = anim.speedMps ?? 0;
+
+            const speed = latestFix?.speed ?? 0;
             const targetZoom = speed >= 10 ? 16 : 17;
             const isPhone = typeof window !== "undefined" && window.innerWidth < 768;
             const targetPitch =
@@ -986,160 +1153,66 @@ export function LiveMap({
             const targetBearing =
               headingUpRef.current && hd.heading != null ? hd.heading : 0;
 
+            const nextPose = reducedMotionRef.current
+              ? { lat, lng, bearing: targetBearing }
+              : stepCameraFollow(
+                  cameraPoseRef.current,
+                  { lat, lng, bearing: targetBearing },
+                  frameDelta
+                );
+            cameraPoseRef.current = nextPose;
+
             map.jumpTo({
-              center: [lng, lat],
+              center: [nextPose.lng, nextPose.lat],
               zoom: targetZoom,
-              bearing: targetBearing,
+              bearing: nextPose.bearing,
               pitch: targetPitch,
             });
           }
-        } else if ((!navModeRef.current || followPausedRef.current) && (map.getPadding().top || 0) > 0) {
+        } else if ((map.getPadding().top || 0) > 0) {
           map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+          cameraPoseRef.current = null;
         }
       }
 
-      rafId = requestAnimationFrame(tick);
-    };
+      // ---- B. Remote-plumber marker (60 fps continuous buffer + 5s bounded extrapolation) ----
+      const remObj = remoteMarkerRef.current;
+      const remSample = hasRemote
+        ? sampleBufferedPosition(
+            remoteBufferRef.current,
+            nowPerf,
+            NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS
+          )
+        : null;
 
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  }, [styleLoaded, ownPosition != null]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ---------------------------------------------------------------------------
-  // 60 fps Remote Plumber Marker (Customer & Admin view: van/wrench + 5s extrap)
-  // ---------------------------------------------------------------------------
-  const remoteMarkerRef = useRef<{
-    marker: import("maplibre-gl").Marker;
-    iconWrap: HTMLDivElement;
-    badge: HTMLSpanElement;
-    signature: string;
-  } | null>(null);
-  const remoteAnimRef = useRef<{
-    fromLat: number;
-    fromLng: number;
-    toLat: number;
-    toLng: number;
-    startPerfMs: number;
-    durationMs: number;
-    speedMps: number | null;
-    headingDeg: number | null;
-    accuracyM: number | null;
-    smoothedHeading: number | null;
-    lastCoordAtMs: number;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!remotePlumber) {
-      remoteAnimRef.current = null;
-      if (remoteMarkerRef.current) {
-        remoteMarkerRef.current.marker.remove();
-        remoteMarkerRef.current = null;
-      }
-      return;
-    }
-
-    const nowPerf = performance.now();
-    const prevAnim = remoteAnimRef.current;
-    const coordMs = remotePlumber.coordinatesAtMs || Date.now();
-    const intervalMs = prevAnim
-      ? Math.max(400, Math.min(5000, coordMs - prevAnim.lastCoordAtMs || 1500))
-      : 600;
-    const currentLngLat = remoteMarkerRef.current
-      ? remoteMarkerRef.current.marker.getLngLat()
-      : { lat: remotePlumber.lat, lng: remotePlumber.lng };
-
-    const nextHeading =
-      remotePlumber.heading != null
-        ? smoothHeading(prevAnim?.smoothedHeading ?? null, remotePlumber.heading, 0.35)
-        : prevAnim?.smoothedHeading ?? null;
-
-    remoteAnimRef.current = {
-      fromLat: currentLngLat.lat,
-      fromLng: currentLngLat.lng,
-      toLat: remotePlumber.lat,
-      toLng: remotePlumber.lng,
-      startPerfMs: nowPerf,
-      durationMs: reducedMotionRef.current ? 1 : intervalMs,
-      speedMps: remotePlumber.speed,
-      headingDeg: remotePlumber.heading,
-      accuracyM: remotePlumber.accuracyM,
-      smoothedHeading: nextHeading,
-      lastCoordAtMs: coordMs,
-    };
-  }, [remotePlumber]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const ml = maplibreRef.current;
-    if (!map || !ml || !styleLoaded || !remotePlumber) return;
-
-    const sig = `${remotePlumber.label}|${remotePlumber.status}`;
-    if (!remoteMarkerRef.current || remoteMarkerRef.current.signature !== sig) {
-      if (remoteMarkerRef.current) remoteMarkerRef.current.marker.remove();
-      const { root, iconWrap, badge } = buildRemotePlumberElement(
-        remotePlumber.label,
-        remotePlumber.status
-      );
-      const marker = new ml.Marker({ element: root, anchor: "bottom" })
-        .setLngLat([remotePlumber.lng, remotePlumber.lat])
-        .addTo(map);
-      remoteMarkerRef.current = { marker, iconWrap, badge, signature: sig };
-    }
-
-    if (!followPausedRef.current) {
-      if (markers.length > 0) {
-        const bounds = new ml.LngLatBounds();
-        bounds.extend([remotePlumber.lng, remotePlumber.lat]);
-        for (const m of markers) bounds.extend([m.lng, m.lat]);
-        map.fitBounds(bounds, {
-          padding: 56,
-          maxZoom: 16,
-          duration: reducedMotionRef.current ? 0 : 600,
-        });
-      } else {
-        map.easeTo({
-          center: [remotePlumber.lng, remotePlumber.lat],
-          duration: reducedMotionRef.current ? 0 : 600,
-        });
-      }
-    }
-
-    let rafId = 0;
-    const tick = (nowPerf: number) => {
-      const anim = remoteAnimRef.current;
-      const obj = remoteMarkerRef.current;
-      if (anim && obj) {
-        const elapsed = nowPerf - anim.startPerfMs;
-        let lat: number;
-        let lng: number;
-        if (elapsed < anim.durationMs) {
-          const t = Math.min(1, elapsed / anim.durationMs);
-          const eased = 1 - Math.pow(1 - t, 3);
-          lat = anim.fromLat + (anim.toLat - anim.fromLat) * eased;
-          lng = anim.fromLng + (anim.toLng - anim.fromLng) * eased;
-        } else {
-          const ext = extrapolatePosition({
-            lat: anim.toLat,
-            lng: anim.toLng,
-            speedMps: anim.speedMps,
-            headingDeg: anim.headingDeg,
-            elapsedMs: elapsed - anim.durationMs,
-            accuracyMeters: anim.accuracyM,
-            maxExtrapolationMs: NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS,
+      if (remObj && remSample) {
+        remObj.marker.setLngLat([remSample.lng, remSample.lat]);
+        if (remoteHeadingRef.current != null) {
+          remObj.iconWrap.style.transform = `rotate(${remoteHeadingRef.current - map.getBearing()}deg)`;
+        }
+        if (cameraModeRef.current === "following-remote") {
+          const nextPose = reducedMotionRef.current
+            ? { lat: remSample.lat, lng: remSample.lng, bearing: map.getBearing() }
+            : stepCameraFollow(
+                cameraPoseRef.current,
+                { lat: remSample.lat, lng: remSample.lng, bearing: map.getBearing() },
+                frameDelta,
+                { posTauMs: 180 }
+              );
+          cameraPoseRef.current = nextPose;
+          map.jumpTo({
+            center: [nextPose.lng, nextPose.lat],
+            zoom: Math.max(map.getZoom(), 15),
           });
-          lat = ext.lat;
-          lng = ext.lng;
-        }
-        obj.marker.setLngLat([lng, lat]);
-        if (anim.smoothedHeading != null) {
-          obj.iconWrap.style.transform = `rotate(${anim.smoothedHeading - map.getBearing()}deg)`;
         }
       }
+
       rafId = requestAnimationFrame(tick);
     };
+
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [styleLoaded, remotePlumber]);
+  }, [styleLoaded, hasOwn, hasRemote]);
 
   const fitAllMarkersRef = useRef(fitAllMarkers);
   useEffect(() => {
@@ -1316,16 +1389,69 @@ export function LiveMap({
           </button>
         </div>
         {navigationMode && (
-          <button
-            type="button"
-            onClick={() => setHeadingUp((prev) => !prev)}
-            title={headingUp ? "Switch to North-Up" : "Switch to Heading-Up"}
-            className="rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1.5 text-[10px] font-bold text-[#0B1F3A] shadow-sm backdrop-blur-sm transition hover:bg-slate-50 sm:px-2.5 sm:text-[11px]"
-          >
-            {headingUp ? "Heading Up" : "North Up"}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => setHeadingUp((prev) => !prev)}
+              title={headingUp ? "Switch to North-Up" : "Switch to Heading-Up"}
+              className="rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1.5 text-[10px] font-bold text-[#0B1F3A] shadow-sm backdrop-blur-sm transition hover:bg-slate-50 sm:px-2.5 sm:text-[11px]"
+            >
+              {headingUp ? "Heading Up" : "North Up"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const map = mapRef.current;
+                const ml = maplibreRef.current;
+                if (cameraMode === "overview") {
+                  if (resumeTimerRef.current != null) {
+                    window.clearTimeout(resumeTimerRef.current);
+                    resumeTimerRef.current = null;
+                  }
+                  setFollowPaused(false);
+                  followPausedRef.current = false;
+                  cameraModeRef.current = "following-own";
+                  setCameraMode("following-own");
+                  const pos = sampleBufferedPosition(
+                    ownBufferRef.current,
+                    performance.now(),
+                    NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS
+                  );
+                  if (map && pos) {
+                    map.easeTo({
+                      center: [pos.lng, pos.lat],
+                      zoom: 17,
+                      duration: reducedMotionRef.current ? 0 : 450,
+                    });
+                  }
+                } else {
+                  cameraModeRef.current = "overview";
+                  setCameraMode("overview");
+                  if (map && ml) {
+                    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+                    const bounds = new ml.LngLatBounds();
+                    if (ownPosition) bounds.extend([ownPosition.lng, ownPosition.lat]);
+                    if (destination) bounds.extend([destination.lng, destination.lat]);
+                    if (roadRoutePoints) {
+                      for (const [lat, lng] of roadRoutePoints) bounds.extend([lng, lat]);
+                    }
+                    if (!bounds.isEmpty()) {
+                      map.fitBounds(bounds, {
+                        padding: 48,
+                        maxZoom: 16,
+                        duration: reducedMotionRef.current ? 0 : 500,
+                      });
+                    }
+                  }
+                }
+              }}
+              className="rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1.5 text-[10px] font-bold text-[#0B1F3A] shadow-sm backdrop-blur-sm transition hover:bg-slate-50 sm:px-2.5 sm:text-[11px]"
+            >
+              {cameraMode === "overview" ? "Follow" : "Overview"}
+            </button>
+          </>
         )}
-        {(followPaused || (navigationMode && followPaused)) && (
+        {(followPaused || cameraMode === "free") && (
           <button
             type="button"
             onClick={() => {
@@ -1335,11 +1461,73 @@ export function LiveMap({
               }
               setFollowPaused(false);
               followPausedRef.current = false;
-              if (!navigationMode) fitAllMarkers();
+              const map = mapRef.current;
+              if (navigationMode) {
+                cameraModeRef.current = "following-own";
+                setCameraMode("following-own");
+                const pos = sampleBufferedPosition(
+                  ownBufferRef.current,
+                  performance.now(),
+                  NAV_CONFIG.OWN_MAX_EXTRAPOLATION_MS
+                );
+                if (map && pos) {
+                  map.easeTo({
+                    center: [pos.lng, pos.lat],
+                    zoom: 17,
+                    duration: reducedMotionRef.current ? 0 : 450,
+                  });
+                }
+              } else if (remotePlumber) {
+                cameraModeRef.current = "following-remote";
+                setCameraMode("following-remote");
+                const pos = sampleBufferedPosition(
+                  remoteBufferRef.current,
+                  performance.now(),
+                  NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS
+                );
+                if (map && pos) {
+                  map.easeTo({
+                    center: [pos.lng, pos.lat],
+                    zoom: Math.max(map.getZoom(), 15),
+                    duration: reducedMotionRef.current ? 0 : 450,
+                  });
+                }
+              } else {
+                cameraModeRef.current = "overview";
+                setCameraMode("overview");
+                fitAllMarkers();
+              }
             }}
             className="rounded-lg bg-[#0B1F3A] px-2.5 py-1.5 text-[10px] font-bold text-white shadow-sm transition hover:bg-[#132E54] sm:text-[11px]"
           >
             Recenter
+          </button>
+        )}
+        {remotePlumber && !navigationMode && cameraMode !== "following-remote" && (
+          <button
+            type="button"
+            onClick={() => {
+              setFollowPaused(false);
+              followPausedRef.current = false;
+              cameraModeRef.current = "following-remote";
+              setCameraMode("following-remote");
+              const map = mapRef.current;
+              const pos = sampleBufferedPosition(
+                remoteBufferRef.current,
+                performance.now(),
+                NAV_CONFIG.REMOTE_MAX_EXTRAPOLATION_MS
+              );
+              if (map && pos) {
+                map.easeTo({
+                  center: [pos.lng, pos.lat],
+                  zoom: Math.max(map.getZoom(), 15),
+                  duration: reducedMotionRef.current ? 0 : 450,
+                });
+              }
+            }}
+            className="rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1.5 text-[10px] font-bold text-[#0B1F3A] shadow-sm backdrop-blur-sm transition hover:bg-slate-50 sm:px-2.5 sm:text-[11px]"
+          >
+            Follow Plumber
           </button>
         )}
         {deviceHeading.needsPermission && ownPosition && (

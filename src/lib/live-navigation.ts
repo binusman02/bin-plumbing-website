@@ -194,28 +194,32 @@ export interface RouteProjection {
   tOnSegment: number;
 }
 
-/**
- * Projects `[lat, lng]` onto a polyline `[lat, lng][]` using local equirectangular
- * coordinates (accurate within Kano / city-scale distances).
- */
-export function projectPointOntoRoute(
-  point: [number, number],
-  route: [number, number][]
-): RouteProjection | null {
-  if (!route || route.length < 2) return null;
-  const [pLat, pLng] = point;
-  if (!isValidCoord(pLat, pLng)) return null;
+export interface RouteProjectionOptions {
+  /** Previous matched segment index for route continuity. */
+  prevSegmentIndex?: number | null;
+  /** Number of segments ahead to search first (default: 18). */
+  forwardLookaheadSegments?: number;
+  /** Small backward tolerance in segments for GPS noise (default: 2). */
+  backwardToleranceSegments?: number;
+}
 
+function projectRange(
+  pLat: number,
+  pLng: number,
+  route: [number, number][],
+  startSeg: number,
+  endSeg: number
+): RouteProjection {
   const cosLat = Math.cos((pLat * Math.PI) / 180);
   const mPerDegLat = 111_320;
   const mPerDegLng = 111_320 * cosLat;
 
   let bestDist = Infinity;
-  let bestPoint: [number, number] = route[0];
-  let bestSeg = 0;
+  let bestPoint: [number, number] = route[startSeg];
+  let bestSeg = startSeg;
   let bestT = 0;
 
-  for (let i = 0; i < route.length - 1; i++) {
+  for (let i = startSeg; i <= endSeg; i++) {
     const [aLat, aLng] = route[i];
     const [bLat, bLng] = route[i + 1];
     const ax = (aLng - pLng) * mPerDegLng;
@@ -246,6 +250,42 @@ export function projectPointOntoRoute(
     segmentIndex: bestSeg,
     tOnSegment: bestT,
   };
+}
+
+/**
+ * Projects `[lat, lng]` onto a polyline `[lat, lng][]` using local equirectangular
+ * coordinates. When `options.prevSegmentIndex` is supplied, searches a forward-biased
+ * window first to preserve route continuity and avoid snapping to parallel roads.
+ */
+export function projectPointOntoRoute(
+  point: [number, number],
+  route: [number, number][],
+  options?: RouteProjectionOptions
+): RouteProjection | null {
+  if (!route || route.length < 2) return null;
+  const [pLat, pLng] = point;
+  if (!isValidCoord(pLat, pLng)) return null;
+
+  const maxSeg = route.length - 2;
+  const prevSeg = options?.prevSegmentIndex;
+
+  if (typeof prevSeg === "number" && Number.isInteger(prevSeg) && prevSeg >= 0 && prevSeg <= maxSeg) {
+    const back = Math.max(0, options?.backwardToleranceSegments ?? 2);
+    const ahead = Math.max(1, options?.forwardLookaheadSegments ?? 18);
+    const winStart = Math.max(0, prevSeg - back);
+    const winEnd = Math.min(maxSeg, prevSeg + ahead);
+    const localProj = projectRange(pLat, pLng, route, winStart, winEnd);
+
+    // Stay on the local route window unless we're well off-route (> 45m) and a global
+    // match is actually within snap distance (e.g., after a genuine shortcut/reroute).
+    if (localProj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M * 1.5) {
+      return localProj;
+    }
+    const globalProj = projectRange(pLat, pLng, route, 0, maxSeg);
+    return globalProj.distanceMeters <= NAV_CONFIG.ROUTE_SNAP_DISTANCE_M ? globalProj : localProj;
+  }
+
+  return projectRange(pLat, pLng, route, 0, maxSeg);
 }
 
 /** Splits a route into passed (`grey`) and remaining (`active`) segments at a projection. */
@@ -293,5 +333,191 @@ export function updateOffRouteState(
   return {
     nextState: { offRouteSinceMs: offSince, lastRerouteAtMs: prev.lastRerouteAtMs },
     shouldReroute: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Continuous GPS Fix Buffer & Damped-Spring Camera Controller
+// ---------------------------------------------------------------------------
+
+export interface FixBufferState {
+  prevFix: LocalFix | null;
+  latestFix: LocalFix | null;
+  lastAccurateFixAtMs: number;
+  fromLat: number;
+  fromLng: number;
+  renderStartMs: number;
+  interpDurationMs: number;
+}
+
+export function createFixBufferState(): FixBufferState {
+  return {
+    prevFix: null,
+    latestFix: null,
+    lastAccurateFixAtMs: 0,
+    fromLat: 0,
+    fromLng: 0,
+    renderStartMs: 0,
+    interpDurationMs: 400,
+  };
+}
+
+/**
+ * Ingests a new GPS fix into a time-ordered buffer, preserving movement continuity
+ * from `currentDisplayedPos` while rejecting duplicates, out-of-order timestamps,
+ * impossible jumps, and poor-accuracy spikes.
+ */
+export function pushFixToBuffer(
+  state: FixBufferState,
+  fix: LocalFix,
+  nowPerfMs: number,
+  options?: {
+    currentDisplayed?: { lat: number; lng: number } | null;
+    minDurationMs?: number;
+    maxDurationMs?: number;
+    allowWarmupAccuracyMs?: number;
+  }
+): { accepted: boolean; nextState: FixBufferState } {
+  if (!isValidCoord(fix.lat, fix.lng)) {
+    return { accepted: false, nextState: state };
+  }
+
+  const prev = state.latestFix;
+  if (prev) {
+    // Reject duplicate or out-of-order timestamps
+    if (fix.timestampMs <= prev.timestampMs) {
+      return { accepted: false, nextState: state };
+    }
+    // Reject exact duplicate coordinates if speed is 0 / unchanged
+    if (
+      Math.abs(fix.lat - prev.lat) < 1e-7 &&
+      Math.abs(fix.lng - prev.lng) < 1e-7 &&
+      fix.timestampMs - prev.timestampMs < 250
+    ) {
+      return { accepted: false, nextState: state };
+    }
+  }
+
+  const acceptable = isAcceptableNavFix(fix, prev);
+  let nextAccurateAt = state.lastAccurateFixAtMs;
+
+  if (!acceptable) {
+    // Reject impossible jumps always; only allow accuracy > 100 m if no accurate fix
+    // was received within `allowWarmupAccuracyMs` (so indoor warm-up doesn't freeze).
+    const onlyAccuracyFailed = isAcceptableNavFix({ ...fix, accuracy: 50 }, prev);
+    const warmupWindow = options?.allowWarmupAccuracyMs ?? 0;
+    const allowWarmup =
+      warmupWindow > 0 &&
+      (state.lastAccurateFixAtMs === 0 || nowPerfMs - state.lastAccurateFixAtMs > warmupWindow);
+    if (!onlyAccuracyFailed || !allowWarmup) {
+      return { accepted: false, nextState: state };
+    }
+  } else {
+    nextAccurateAt = nowPerfMs;
+  }
+
+  const minDur = options?.minDurationMs ?? 250;
+  const maxDur = options?.maxDurationMs ?? 2_000;
+  const rawDelta = prev ? fix.timestampMs - prev.timestampMs : 400;
+  // Adaptive interpolation window slightly cushions jitter while staying responsive
+  const interpDurationMs = Math.max(minDur, Math.min(maxDur, rawDelta));
+
+  const fromLat = options?.currentDisplayed ? options.currentDisplayed.lat : prev ? prev.lat : fix.lat;
+  const fromLng = options?.currentDisplayed ? options.currentDisplayed.lng : prev ? prev.lng : fix.lng;
+
+  return {
+    accepted: true,
+    nextState: {
+      prevFix: prev,
+      latestFix: fix,
+      lastAccurateFixAtMs: nextAccurateAt,
+      fromLat,
+      fromLng,
+      renderStartMs: nowPerfMs,
+      interpDurationMs,
+    },
+  };
+}
+
+/**
+ * Samples the continuous position at `nowPerfMs`: linear time-based interpolation
+ * during `[renderStartMs, renderStartMs + interpDurationMs]`, followed by bounded
+ * dead reckoning up to `maxExtrapolationMs` (stopping when stationary or accuracy > 100 m).
+ */
+export function sampleBufferedPosition(
+  state: FixBufferState,
+  nowPerfMs: number,
+  maxExtrapolationMs: number,
+  overrideHeadingDeg?: number | null
+): { lat: number; lng: number; extrapolating: boolean; stale: boolean } | null {
+  const latest = state.latestFix;
+  if (!latest) return null;
+
+  const elapsed = Math.max(0, nowPerfMs - state.renderStartMs);
+  if (elapsed < state.interpDurationMs) {
+    const t = Math.min(1, elapsed / Math.max(1, state.interpDurationMs));
+    return {
+      lat: state.fromLat + (latest.lat - state.fromLat) * t,
+      lng: state.fromLng + (latest.lng - state.fromLng) * t,
+      extrapolating: false,
+      stale: false,
+    };
+  }
+
+  const extraMs = elapsed - state.interpDurationMs;
+  const ext = extrapolatePosition({
+    lat: latest.lat,
+    lng: latest.lng,
+    speedMps: latest.speed,
+    headingDeg: overrideHeadingDeg ?? latest.heading,
+    elapsedMs: extraMs,
+    accuracyMeters: latest.accuracy,
+    maxExtrapolationMs,
+  });
+
+  return {
+    lat: ext.lat,
+    lng: ext.lng,
+    extrapolating: ext.extrapolated && extraMs < maxExtrapolationMs,
+    stale: extraMs >= maxExtrapolationMs,
+  };
+}
+
+export function computeFrameAlpha(deltaMs: number, timeConstantMs: number): number {
+  if (deltaMs <= 0 || timeConstantMs <= 0) return 1;
+  return 1 - Math.exp(-deltaMs / timeConstantMs);
+}
+
+export interface CameraPose {
+  lat: number;
+  lng: number;
+  bearing: number;
+}
+
+/**
+ * Smoothly steps camera centre & bearing toward `target` using an exponential
+ * damped spring (`alpha = 1 - exp(-dt / tau)`) and shortest-angle rotation.
+ */
+export function stepCameraFollow(
+  current: CameraPose | null,
+  target: CameraPose,
+  deltaMs: number,
+  options?: { posTauMs?: number; bearingTauMs?: number }
+): CameraPose {
+  if (!current) {
+    return {
+      lat: target.lat,
+      lng: target.lng,
+      bearing: normalizeHeading(target.bearing),
+    };
+  }
+  const posAlpha = computeFrameAlpha(deltaMs, options?.posTauMs ?? 140);
+  const bearingAlpha = computeFrameAlpha(deltaMs, options?.bearingTauMs ?? 120);
+  const dBearing = shortestAngleDelta(current.bearing, target.bearing);
+
+  return {
+    lat: current.lat + (target.lat - current.lat) * posAlpha,
+    lng: current.lng + (target.lng - current.lng) * posAlpha,
+    bearing: normalizeHeading(current.bearing + dBearing * bearingAlpha),
   };
 }
