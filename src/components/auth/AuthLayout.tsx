@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -84,7 +84,7 @@ export function AuthLayout({
             <Link href="/" className="inline-flex items-center justify-center gap-2.5">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301]/80 bg-white">
                 <Image
-                  src="/images/logo/bin-plumbing-logo.jpg"
+                  src="/images/logo/flowguard-icon.jpg"
                   alt="FlowGuard Plumbing Enterprises logo"
                   width={36}
                   height={36}

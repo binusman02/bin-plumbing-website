@@ -66,7 +66,7 @@ export default function Header({ companyName }: HeaderProps) {
           className="inline-flex items-center gap-2.5 font-bold text-xs sm:text-sm tracking-wide text-[#0B1F3A] whitespace-nowrap shrink-0 hover:text-[#07152B] transition-colors"
         >
           <Image
-            src="/images/logo/bin-plumbing-logo.jpg"
+            src="/images/logo/flowguard-icon.jpg"
             alt={`${companyName || COMPANY.name} logo`}
             width={36}
             height={36}

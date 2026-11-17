@@ -1,12 +1,12 @@
 // Minimal App-Shell Service Worker for PWA Installability ("Add to Home screen").
 // Private portal data, API calls, and Supabase requests are NEVER cached offline.
 
-const SHELL_CACHE = "bin-plumbing-shell-v2";
+const SHELL_CACHE = "bin-plumbing-shell-v3";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) => cache.addAll(["/images/logo/bin-plumbing-logo.jpg"]).catch(() => {}))
+    caches.open(SHELL_CACHE).then((cache) => cache.addAll(["/images/logo/flowguard-icon.jpg"]).catch(() => {}))
   );
 });
 

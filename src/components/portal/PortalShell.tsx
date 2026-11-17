@@ -230,7 +230,7 @@ export function PortalShell({
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white shadow-xs">
               <Image
-                src="/images/logo/bin-plumbing-logo.jpg"
+                src="/images/logo/flowguard-icon.jpg"
                 alt="FlowGuard Plumbing Enterprises"
                 width={36}
                 height={36}
@@ -353,7 +353,7 @@ export function PortalShell({
               <div className="flex items-center gap-2.5">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                   <Image
-                    src="/images/logo/bin-plumbing-logo.jpg"
+                    src="/images/logo/flowguard-icon.jpg"
                     alt="FlowGuard Plumbing"
                     width={32}
                     height={32}
@@ -409,7 +409,7 @@ export function PortalShell({
               className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white md:hidden"
             >
               <Image
-                src="/images/logo/bin-plumbing-logo.jpg"
+                src="/images/logo/flowguard-icon.jpg"
                 alt="FlowGuard Plumbing Enterprises"
                 width={32}
                 height={32}
@@ -632,7 +632,7 @@ export function PortalShell({
             <div className="flex items-center gap-2.5">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                 <Image
-                  src="/images/logo/bin-plumbing-logo.jpg"
+                  src="/images/logo/flowguard-icon.jpg"
                   alt="FlowGuard Plumbing"
                   width={32}
                   height={32}

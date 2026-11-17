@@ -56,7 +56,7 @@ export const metadata: Metadata = {
   category: "Home Services",
   applicationName: "FlowGuard Plumbing",
   icons: {
-    icon: "/images/logo/bin-plumbing-logo.jpg",
+    icon: "/images/logo/flowguard-icon.jpg",
     apple: "/icons/icon-192x192.png",
   },
   appleWebApp: {
@@ -132,7 +132,7 @@ async function OrganizationJsonLd() {
         alternateName: COMPANY.shortName,
         priceRange: "₦₦",
         url: siteUrl,
-        logo: `${siteUrl}/images/logo/bin-plumbing-logo.jpg`,
+        logo: `${siteUrl}/images/logo/flowguard-icon.jpg`,
         image: `${siteUrl}/opengraph-image`,
         description: COMPANY.tagline,
         telephone: settings.company_phone,

@@ -1,4 +1,4 @@
-﻿import Image from "next/image";
+import Image from "next/image";
 import Link from "next/link";
 import { Phone, MessageCircle, MapPin, Mail, Clock, ArrowRight } from "lucide-react";
 import type { MarketplaceSettings } from "@/lib/marketplace";
@@ -26,7 +26,7 @@ export default function Footer({ settings }: FooterProps) {
           <div className="lg:col-span-4 space-y-4">
             <Link href="/" className="inline-flex items-center gap-3">
               <Image
-                src="/images/logo/bin-plumbing-logo.jpg"
+                src="/images/logo/flowguard-icon.jpg"
                 alt={`${companyName} logo`}
                 width={40}
                 height={40}

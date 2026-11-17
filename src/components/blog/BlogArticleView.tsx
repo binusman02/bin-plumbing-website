@@ -114,7 +114,7 @@ export function BlogArticleView({
       name: companyName,
       logo: {
         "@type": "ImageObject",
-        url: canonicalUrl("/images/logo/bin-plumbing-logo.jpg"),
+        url: canonicalUrl("/images/logo/flowguard-icon.jpg"),
       },
     },
   };

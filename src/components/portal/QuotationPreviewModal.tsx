@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Image from "next/image";
 import { Printer, X } from "lucide-react";
@@ -111,7 +111,7 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white">
                   <Image
-                    src="/images/logo/bin-plumbing-logo.jpg"
+                    src="/images/logo/flowguard-icon.jpg"
                     alt="FlowGuard Plumbing Enterprises"
                     width={48}
                     height={48}
