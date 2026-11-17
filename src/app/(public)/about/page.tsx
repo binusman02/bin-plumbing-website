@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
@@ -6,14 +6,14 @@ import { ArrowRight, CheckCircle2, MapPin, Phone, Mail } from "lucide-react";
 import { getMarketplaceSettings } from "@/lib/marketplace";
 
 export const metadata: Metadata = {
-  title: "About Bin Plumbing Services Ltd | Kano Plumbing Company",
+  title: "About FlowGuard Plumbing Enterprises | Kano Plumbing Company",
   description:
-    "Learn how Bin Plumbing Services Ltd coordinates residential and commercial plumbing work in Kano State with reviewed technicians, transparent quotes, and live tracking.",
+    "Learn how FlowGuard Plumbing Enterprises coordinates residential and commercial plumbing work in Kano State with reviewed technicians, transparent quotes, and live tracking.",
   alternates: { canonical: "/about" },
   openGraph: {
-    title: "About Bin Plumbing Services Ltd | Kano Plumbing Company",
+    title: "About FlowGuard Plumbing Enterprises | Kano Plumbing Company",
     description:
-      "How Bin Plumbing Services Ltd coordinates reviewed plumbers, itemised quotes, and live tracking across Kano.",
+      "How FlowGuard Plumbing Enterprises coordinates reviewed plumbers, itemised quotes, and live tracking across Kano.",
     url: "/about",
     type: "website",
   },

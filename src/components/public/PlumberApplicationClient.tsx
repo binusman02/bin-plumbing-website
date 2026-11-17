@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -243,7 +243,7 @@ export default function PlumberApplicationClient({
           Application Received
         </h2>
         <p className="mt-2 text-base text-[#4B5B70]">
-          Thank you for applying to join Bin Plumbing Services Ltd. Keep your application reference for follow-up:
+          Thank you for applying to join FlowGuard Plumbing Enterprises. Keep your application reference for follow-up:
         </p>
         <div className="mx-auto mt-4 inline-block rounded-xl border border-[#E3E8EF] bg-[#F4F6F9] px-5 py-3 font-mono text-lg font-bold text-[#0B1F3A]">
           {applicationRef}

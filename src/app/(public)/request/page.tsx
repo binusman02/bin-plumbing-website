@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Suspense } from "react";
 import { cacheLife, cacheTag } from "next/cache";
 import { AlertCircle } from "lucide-react";
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     "Submit your plumbing service request in Kano online. Receive a tracking reference, on-site inspection review, and transparent itemised quotation.",
   alternates: { canonical: "/request" },
   openGraph: {
-    title: "Request a Plumber in Kano | Bin Plumbing Services Ltd",
+    title: "Request a Plumber in Kano | FlowGuard Plumbing Enterprises",
     description:
       "Book a reviewed plumber in Kano with upfront itemised quotation approval and live job tracking.",
     url: "/request",

@@ -1,11 +1,11 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import Link from "next/link";
 import { getMarketplaceSettings } from "@/lib/marketplace";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "Privacy Policy for Bin Plumbing Services Ltd explaining how customer and technician request information is handled.",
+    "Privacy Policy for FlowGuard Plumbing Enterprises explaining how customer and technician request information is handled.",
   alternates: { canonical: "/privacy" },
 };
 

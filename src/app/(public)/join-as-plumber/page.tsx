@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { connection } from "next/server";
 import { cookies } from "next/headers";
 import { ShieldCheck, CheckCircle2, Award } from "lucide-react";
@@ -21,7 +21,7 @@ export const instant = false;
 export const metadata: Metadata = {
   title: "Apply to Join as a Plumber",
   description:
-    "Create a plumber account and apply to join the reviewed plumbing technician network at Bin Plumbing Services Ltd.",
+    "Create a plumber account and apply to join the reviewed plumbing technician network at FlowGuard Plumbing Enterprises.",
   alternates: { canonical: "/join-as-plumber" },
 };
 

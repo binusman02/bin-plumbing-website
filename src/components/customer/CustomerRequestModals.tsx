@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, CheckCircle2, Crosshair, Eye, Landmark, Loader2, MapPin, RefreshCw, Star, Upload, X } from "lucide-react";
@@ -392,7 +392,7 @@ export function CustomerRequestDrawer({
                   </p>
                   <p>
                     <span className="font-semibold">Account Name:</span>{" "}
-                    {bankDetails.bankAccountName || "Bin Plumbing Services Ltd"}
+                    {bankDetails.bankAccountName || "FlowGuard Plumbing Enterprises"}
                   </p>
                   <p>
                     <span className="font-semibold">Account Number:</span>{" "}
@@ -447,7 +447,7 @@ export function CustomerRequestDrawer({
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
               <p className="text-sm font-bold text-emerald-900">Job Completed</p>
               <p className="text-xs text-emerald-800">
-                Thank you for choosing Bin Plumbing Services Ltd. Share your review or book another service anytime.
+                Thank you for choosing FlowGuard Plumbing Enterprises. Share your review or book another service anytime.
               </p>
               <div className="flex flex-wrap gap-2">
                 {onLeaveReview && (

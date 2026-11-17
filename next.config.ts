@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+﻿import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
@@ -12,20 +12,20 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        has: [{ type: "host", value: "www.binplumbing.com.ng" }],
-        destination: "https://binplumbing.com.ng/:path*",
+        has: [{ type: "host", value: "www.flowguard.com.ng" }],
+        destination: "https://flowguard.com.ng/:path*",
         permanent: true,
       },
       {
         source: "/:path*",
-        has: [{ type: "host", value: "binplumbing.com" }],
-        destination: "https://binplumbing.com.ng/:path*",
+        has: [{ type: "host", value: "flowguard.com.ng" }],
+        destination: "https://flowguard.com.ng/:path*",
         permanent: true,
       },
       {
         source: "/:path*",
-        has: [{ type: "host", value: "www.binplumbing.com" }],
-        destination: "https://binplumbing.com.ng/:path*",
+        has: [{ type: "host", value: "www.flowguard.com.ng" }],
+        destination: "https://flowguard.com.ng/:path*",
         permanent: true,
       },
       {

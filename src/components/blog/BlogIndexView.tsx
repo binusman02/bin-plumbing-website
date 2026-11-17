@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { ArrowRight, BookOpen, Globe } from "lucide-react";
 import type { BlogLanguage, GuideRecord } from "@/lib/marketplace";
 import type { BlogEngagementMap } from "@/lib/blog-engagement";
@@ -55,8 +55,8 @@ export function BlogIndexView({
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-relaxed text-[#C9D3E0] md:text-lg">
             {isHausa
-              ? "Bayani mai saukin fahimta kan gyaran injin famfo, bututun ruwa, tankin sama, bandaki, da magudanar ruwa daga Bin Plumbing Services Ltd."
-              : "Clear, practical advice on water pumps, leak prevention, overhead tanks, toilets, and drainage from Bin Plumbing Services Ltd in Kano."}
+              ? "Bayani mai saukin fahimta kan gyaran injin famfo, bututun ruwa, tankin sama, bandaki, da magudanar ruwa daga FlowGuard Plumbing Enterprises."
+              : "Clear, practical advice on water pumps, leak prevention, overhead tanks, toilets, and drainage from FlowGuard Plumbing Enterprises in Kano."}
           </p>
         </div>
       </section>

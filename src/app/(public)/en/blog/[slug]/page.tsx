@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const hasHa = post.ha_status === "published" && Boolean(post.ha_slug.trim());
 
   return {
-    title: { absolute: rawTitle.includes("Bin Plumbing") ? rawTitle : `${title} | Bin Plumbing Services Ltd` },
+    title: { absolute: rawTitle.includes("FlowGuard Plumbing") ? rawTitle : `${title} | FlowGuard Plumbing Enterprises` },
     description,
     alternates: {
       canonical: `/en/blog/${post.en_slug}`,

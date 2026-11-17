@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { Phone, Mail, MapPin, Clock, MessageSquare, ArrowRight } from "lucide-react";
@@ -6,12 +6,12 @@ import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace"
 import { ContactFormClient } from "./ContactFormClient";
 
 export const metadata: Metadata = {
-  title: "Contact Bin Plumbing Services Ltd in Kano",
+  title: "Contact FlowGuard Plumbing Enterprises in Kano",
   description:
-    "Contact Bin Plumbing Services Ltd in Kano State for plumbing enquiries, service requests, quotations, and customer support.",
+    "Contact FlowGuard Plumbing Enterprises in Kano State for plumbing enquiries, service requests, quotations, and customer support.",
   alternates: { canonical: "/contact" },
   openGraph: {
-    title: "Contact Bin Plumbing Services Ltd in Kano",
+    title: "Contact FlowGuard Plumbing Enterprises in Kano",
     description:
       "Speak with our coordination team in Kano for plumbing enquiries, quotations, and support.",
     url: "/contact",
@@ -172,7 +172,7 @@ export default async function ContactPage() {
                   </a>
                 </div>
                 <iframe
-                  title="Bin Plumbing Services Ltd Location Map"
+                  title="FlowGuard Plumbing Enterprises Location Map"
                   src={`https://maps.google.com/maps?q=${encodeURIComponent(
                     address || "Kano, Nigeria"
                   )}&t=&z=13&ie=UTF8&iwloc=&output=embed`}

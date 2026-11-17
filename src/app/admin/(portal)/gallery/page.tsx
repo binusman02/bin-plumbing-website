@@ -1,11 +1,11 @@
-import { connection } from "next/server";
+﻿import { connection } from "next/server";
 import { getAllGalleryItems, getMarketplaceSettings } from "@/lib/marketplace";
 import { GalleryManagerClient } from "@/components/admin/GalleryManagerClient";
 
 export const instant = false;
 
 export const metadata = {
-  title: "Gallery CMS | Bin Plumbing Admin",
+  title: "Gallery CMS | FlowGuard Plumbing Admin",
 };
 
 export default async function GalleryAdminPage() {

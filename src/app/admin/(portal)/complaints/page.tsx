@@ -1,11 +1,11 @@
-import { connection } from "next/server";
+﻿import { connection } from "next/server";
 import { getAllComplaints, getReviews } from "@/lib/marketplace";
 import { ComplaintsManagerClient } from "@/components/admin/ComplaintsManagerClient";
 
 export const instant = false;
 
 export const metadata = {
-  title: "Complaints & Reviews | Bin Plumbing Admin",
+  title: "Complaints & Reviews | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminComplaintsPage() {

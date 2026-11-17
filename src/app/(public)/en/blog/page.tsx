@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { BlogIndexView } from "@/components/blog/BlogIndexView";
 import { getPublishedBlogPosts } from "@/lib/marketplace";
 
@@ -15,9 +15,9 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "Plumbing Guides & Blog for Kano Homes | Bin Plumbing Services Ltd",
+    title: "Plumbing Guides & Blog for Kano Homes | FlowGuard Plumbing Enterprises",
     description:
-      "Practical plumbing guides on water pumps, leak prevention, water tanks, and drainage from Bin Plumbing Services Ltd in Kano.",
+      "Practical plumbing guides on water pumps, leak prevention, water tanks, and drainage from FlowGuard Plumbing Enterprises in Kano.",
     url: "/en/blog",
     locale: "en_NG",
     type: "website",

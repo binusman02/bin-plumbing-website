@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+﻿import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import localFont from "next/font/local";
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
   },
   description: `${SITE_NAME} provides residential and commercial plumbing services in Kano State—pipe repairs, leak detection, water pumps, overhead tanks, bathrooms, and drainage with itemised quotes.`,
   keywords: [
-    "Bin Plumbing Services Ltd",
+    "FlowGuard Plumbing Enterprises",
     "plumber in Kano",
     "plumbing services in Kano",
     "pumping machine repair in Kano",
@@ -54,7 +54,7 @@ export const metadata: Metadata = {
     "gyaran injin famfo",
   ],
   category: "Home Services",
-  applicationName: "Bin Plumbing",
+  applicationName: "FlowGuard Plumbing",
   icons: {
     icon: "/images/logo/bin-plumbing-logo.jpg",
     apple: "/icons/icon-192x192.png",
@@ -62,7 +62,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Bin Plumbing",
+    title: "FlowGuard Plumbing",
   },
   formatDetection: {
     telephone: true,
@@ -92,7 +92,7 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Bin Plumbing Services Ltd - Coordinated Plumbing Services",
+        alt: "FlowGuard Plumbing Enterprises - Coordinated Plumbing Services",
       },
     ],
   },
@@ -152,7 +152,7 @@ async function OrganizationJsonLd() {
           addressCountry: "NG",
         },
         hasMap: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-          settings.company_address?.trim() || "Bin Plumbing Services Ltd, Kano, Nigeria"
+          settings.company_address?.trim() || "FlowGuard Plumbing Enterprises, Kano, Nigeria"
         )}`,
         ...(settings.active_coverage_locations.length > 0
           ? {

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -85,7 +85,7 @@ export function AuthLayout({
               <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301]/80 bg-white">
                 <Image
                   src="/images/logo/bin-plumbing-logo.jpg"
-                  alt="Bin Plumbing Services Ltd logo"
+                  alt="FlowGuard Plumbing Enterprises logo"
                   width={36}
                   height={36}
                   className="h-full w-full scale-[1.08] object-cover"
@@ -93,7 +93,7 @@ export function AuthLayout({
                 />
               </div>
               <span className="text-xs font-bold tracking-wide text-white sm:text-sm">
-                BIN PLUMBING SERVICES LTD
+                FlowGuard Plumbing Enterprises
               </span>
             </Link>
 
@@ -120,7 +120,7 @@ export function AuthLayout({
 
       {/* Shared Footer */}
       <footer className="mx-auto w-full max-w-[1200px] shrink-0 pt-2 pb-2 text-center text-xs text-[#C9D3E0]/80">
-        © <CurrentYear fallback={2026} /> Bin Plumbing Services Ltd. All rights reserved.
+        © <CurrentYear fallback={2026} /> FlowGuard Plumbing Enterprises. All rights reserved.
       </footer>
     </div>
   );

@@ -1,4 +1,4 @@
-import { connection } from "next/server";
+﻿import { connection } from "next/server";
 import {
   getAllMessages,
   getAllPayments,
@@ -11,7 +11,7 @@ import { RequestsManagerClient } from "@/components/admin/RequestsManagerClient"
 export const instant = false;
 
 export const metadata = {
-  title: "Service Requests | Bin Plumbing Admin",
+  title: "Service Requests | FlowGuard Plumbing Admin",
 };
 
 export default async function RequestsAdminPage() {

@@ -1,4 +1,4 @@
-import { connection } from "next/server";
+﻿import { connection } from "next/server";
 import {
   getAllMessages,
   getAllPlumbers,
@@ -10,7 +10,7 @@ import CommunicationsManagerClient from "@/components/admin/CommunicationsManage
 export const instant = false;
 
 export const metadata = {
-  title: "Communications | Bin Plumbing Admin",
+  title: "Communications | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminCommunicationsPage() {

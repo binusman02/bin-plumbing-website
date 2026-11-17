@@ -41,7 +41,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description,
     alternates: { canonical: `/services/${canonicalSlug}` },
     openGraph: {
-      title: `${title} in Kano | Bin Plumbing Services Ltd`,
+      title: `${title} in Kano | FlowGuard Plumbing Enterprises`,
       description,
       url: `/services/${canonicalSlug}`,
       type: "website",
@@ -50,7 +50,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
             images: [
               {
                 url: service.image,
-                alt: `${title} - Bin Plumbing Services Ltd`,
+                alt: `${title} - FlowGuard Plumbing Enterprises`,
               },
             ],
           }
@@ -58,7 +58,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: `${title} | Bin Plumbing Services Ltd`,
+      title: `${title} | FlowGuard Plumbing Enterprises`,
       description,
       ...(service.image ? { images: [service.image] } : {}),
     },
@@ -154,7 +154,7 @@ export default async function ServiceDetailPage({ params }: Props) {
         url: `${baseUrl}/services/${canonicalSlug}`,
         provider: {
           "@type": "Plumber",
-          name: settings.company_name || "Bin Plumbing Services Ltd",
+          name: settings.company_name || "FlowGuard Plumbing Enterprises",
           ...(phone ? { telephone: phone } : {}),
           ...(settings.company_address
             ? {
@@ -215,7 +215,7 @@ export default async function ServiceDetailPage({ params }: Props) {
             <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-[#E3E8EF] bg-[#F4F6F9]">
               <Image
                 src={image}
-                alt={`${title} by ${settings.company_name || "Bin Plumbing Services Ltd"}`}
+                alt={`${title} by ${settings.company_name || "FlowGuard Plumbing Enterprises"}`}
                 fill
                 sizes="(max-width: 1024px) 100vw, 50vw"
                 className="object-cover"

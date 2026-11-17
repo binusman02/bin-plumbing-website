@@ -1,14 +1,14 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "How Our Kano Plumbing Service Works",
   description:
-    "See how Bin Plumbing Services Ltd works in Kano—from submitting your request and on-site inspection to itemised quote approval and completion.",
+    "See how FlowGuard Plumbing Enterprises works in Kano—from submitting your request and on-site inspection to itemised quote approval and completion.",
   alternates: { canonical: "/how-it-works" },
   openGraph: {
-    title: "How Our Kano Plumbing Service Works | Bin Plumbing Services Ltd",
+    title: "How Our Kano Plumbing Service Works | FlowGuard Plumbing Enterprises",
     description:
       "Step-by-step overview from request submission and inspection to quotation approval and live tracking.",
     url: "/how-it-works",

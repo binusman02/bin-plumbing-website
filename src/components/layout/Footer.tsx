@@ -1,4 +1,4 @@
-import Image from "next/image";
+﻿import Image from "next/image";
 import Link from "next/link";
 import { Phone, MessageCircle, MapPin, Mail, Clock, ArrowRight } from "lucide-react";
 import type { MarketplaceSettings } from "@/lib/marketplace";
@@ -9,7 +9,7 @@ interface FooterProps {
 }
 
 export default function Footer({ settings }: FooterProps) {
-  const companyName = settings.company_name || "Bin Plumbing Services Ltd";
+  const companyName = settings.company_name || "FlowGuard Plumbing Enterprises";
   const address = settings.company_address;
   const phone = settings.company_phone;
   const whatsapp = settings.company_whatsapp;

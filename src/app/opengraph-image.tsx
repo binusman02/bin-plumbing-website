@@ -1,6 +1,6 @@
-import { ImageResponse } from "next/og";
+﻿import { ImageResponse } from "next/og";
 
-export const alt = "Bin Plumbing Services Ltd — Coordinated Plumbing Services";
+export const alt = "FlowGuard Plumbing Enterprises — Coordinated Plumbing Services";
 export const size = {
   width: 1200,
   height: 630,
@@ -47,7 +47,7 @@ export default function OpenGraphImage() {
               textTransform: "uppercase",
             }}
           >
-            Bin Plumbing Services Ltd
+            FlowGuard Plumbing Enterprises
           </span>
         </div>
 
@@ -72,7 +72,7 @@ export default function OpenGraphImage() {
           }}
         >
           <span>Residential & Commercial Plumbing</span>
-          <span style={{ color: "#F5B301", fontWeight: 700 }}>binplumbing.com.ng</span>
+          <span style={{ color: "#F5B301", fontWeight: 700 }}>flowguard.com.ng</span>
         </div>
       </div>
     ),

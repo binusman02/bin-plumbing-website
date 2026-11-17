@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+﻿import { createClient } from "@/lib/supabase/server";
 import { connection } from "next/server";
 import { getMarketplaceSettings } from "@/lib/marketplace";
 import SettingsManagerClient from "@/components/admin/SettingsManagerClient";
@@ -6,7 +6,7 @@ import SettingsManagerClient from "@/components/admin/SettingsManagerClient";
 export const instant = false;
 
 export const metadata = {
-  title: "Settings | Bin Plumbing Admin",
+  title: "Settings | FlowGuard Plumbing Admin",
 };
 
 export default async function SettingsAdminPage() {

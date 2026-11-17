@@ -1,4 +1,4 @@
-import type { GuideRecord } from "@/lib/marketplace";
+﻿import type { GuideRecord } from "@/lib/marketplace";
 
 export type BilingualBlogSeedItem = Omit<
   GuideRecord,
@@ -46,12 +46,12 @@ Switch off the pump isolator at the wall so the motor does not keep overheating.
 
 ## Need Water Pump Repair in Kano?
 
-Bin Plumbing Services Ltd coordinates experienced technicians for pumping machine repair, pressure controller replacement, and borehole pump servicing across Kano. Log your request for an on-site inspection and itemised quote before work begins.`,
+FlowGuard Plumbing Enterprises coordinates experienced technicians for pumping machine repair, pressure controller replacement, and borehole pump servicing across Kano. Log your request for an on-site inspection and itemised quote before work begins.`,
     en_seo_title: "Why Your Water Pump Keeps Stopping | Pump Repair in Kano",
     en_meta_description:
       "Find out why your pumping machine stops mid-cycle in Kano—low borehole yield, pressure switch faults, air locks, or voltage drops—and book an inspection.",
     en_image_alt:
-      "Automatic yellow water pump pressure controller and PVC isolation valve installed by Bin Plumbing",
+      "Automatic yellow water pump pressure controller and PVC isolation valve installed by FlowGuard Plumbing",
     en_status: "published",
     ha_title: "Me Ya Sa Injin Ruwa Ke Kashewa Da Kansa?",
     ha_slug: "me-ya-sa-injin-ruwa-ke-kashewa-kano",
@@ -83,15 +83,15 @@ Ku kashe makunnin wutar injin domin kada motar ta ci gaba da zafi ko ta kone. Ku
 
 ## Gyaran Injin Famfo a Kano
 
-Idan kuna bukatar gyaran injin famfo a Kano, ku tura bukata ta shafin Bin Plumbing Services Ltd domin a duba injin a gani kuma a ba ku kiyasin farashi kafin a fara gyara.`,
+Idan kuna bukatar gyaran injin famfo a Kano, ku tura bukata ta shafin FlowGuard Plumbing Enterprises domin a duba injin a gani kuma a ba ku kiyasin farashi kafin a fara gyara.`,
     ha_seo_title: "Me Ya Sa Injin Ruwa Ke Kashewa? | Gyaran Injin Famfo Kano",
     ha_meta_description:
       "Ku gane dalilan da ke sa injin ruwa ke tsayawa da kansa da yadda za ku kare injinku. Ku nemi mai gyaran injin famfo a Kano.",
     ha_image_alt:
-      "Na'urar sarrafa karfin injin ruwa da bawul din PVC da Bin Plumbing suka girka",
+      "Na'urar sarrafa karfin injin ruwa da bawul din PVC da FlowGuard Plumbing suka girka",
     ha_status: "published",
     featured_image: "/images/blog/water-pump-pressure-controller-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field installation",
+    image_attribution: "FlowGuard Plumbing Enterprises field installation",
     target_service_slug: "water-pump-installation-repair",
     main_keyword: "pumping machine repair in Kano",
     supporting_keywords: [
@@ -99,7 +99,7 @@ Idan kuna bukatar gyaran injin famfo a Kano, ku tura bukata ta shafin Bin Plumbi
       "gyaran injin famfo",
       "automatic pressure controller",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-leaking-water-pipe",
@@ -137,12 +137,12 @@ Peeling paint, damp patches near skirting boards, or an unexpectedly fast-emptyi
 
 ## Book Leaking Pipe Repair in Kano
 
-Bin Plumbing Services Ltd provides on-site leak tracing and durable PPR, PVC, and copper pipe repairs in Kano with upfront itemised quotations.`,
+FlowGuard Plumbing Enterprises provides on-site leak tracing and durable PPR, PVC, and copper pipe repairs in Kano with upfront itemised quotations.`,
     en_seo_title: "How to Fix a Leaking Water Pipe | Water Leakage Repair in Kano",
     en_meta_description:
       "Safe steps when a water pipe leaks at home—shutting off valves, spotting hidden wall dampness, and booking lasting leaking pipe repair in Kano.",
     en_image_alt:
-      "Kitchen sink and chrome mixer tap installation inspected by Bin Plumbing",
+      "Kitchen sink and chrome mixer tap installation inspected by FlowGuard Plumbing",
     en_status: "published",
     ha_title: "Yadda Ake Gyara Bututun Ruwa Mai Yoyo",
     ha_slug: "yadda-ake-gyara-bututun-ruwa-mai-yoyo-kano",
@@ -170,15 +170,15 @@ Idan kuka ga danshi ko kumburin fenti a jikin bango, ko tankin ruwa yana saurin 
 
 ## Neman Mai Gyaran Bututun Ruwa a Kano
 
-Ku tuntubi Bin Plumbing Services Ltd domin a zo a duba yoyon bututu a gidanku a Kano tare da ba ku kiyasin gyara kafin a fara aiki.`,
+Ku tuntubi FlowGuard Plumbing Enterprises domin a zo a duba yoyon bututu a gidanku a Kano tare da ba ku kiyasin gyara kafin a fara aiki.`,
     ha_seo_title: "Yadda Ake Gyara Bututun Ruwa Mai Yoyo | Mai Gyaran Bututu Kano",
     ha_meta_description:
       "Matakan tsaro idan bututun ruwa ya fara yoyo a gida da yadda za a samu mai gyaran bututun ruwa a Kano.",
     ha_image_alt:
-      "Girkakken sinkin dafa abinci da famfo mai kyau da Bin Plumbing suka duba",
+      "Girkakken sinkin dafa abinci da famfo mai kyau da FlowGuard Plumbing suka duba",
     ha_status: "published",
     featured_image: "/images/blog/kitchen-sink-tap-installation-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field installation",
+    image_attribution: "FlowGuard Plumbing Enterprises field installation",
     target_service_slug: "leak-detection-repairs",
     main_keyword: "leaking pipe repair in Kano",
     supporting_keywords: [
@@ -186,7 +186,7 @@ Ku tuntubi Bin Plumbing Services Ltd domin a zo a duba yoyon bututu a gidanku a 
       "mai gyaran bututun ruwa",
       "burst water pipe repair",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-pump-needs-repair-signs",
@@ -224,7 +224,7 @@ A pump casing too hot to touch briefly—or one that trips the distribution brea
 
 ## Schedule a Pump Inspection in Kano
 
-Request a Bin Plumbing technician in Kano to inspect your pump, valves, and electrical controller and give you a clear repair quotation.`,
+Request a FlowGuard Plumbing technician in Kano to inspect your pump, valves, and electrical controller and give you a clear repair quotation.`,
     en_seo_title: "Signs Your Water Pump Needs Repair | Water Pump Technician Kano",
     en_meta_description:
       "Recognise early signs your water pump needs repair in Kano: grinding noises, slow tank filling, seal leaks, and overheating.",
@@ -256,14 +256,14 @@ Idan jikin injin yana yin zafi sosai ko yana kashe breaker, akwai bukatar a duba
 
 ## Tuntubi Mai Gyaran Injin Famfo a Kano
 
-Ku nemi ma'aikacin Bin Plumbing Services Ltd a Kano domin duba injin ruwanku tare da ba ku kiyasin gyara a rubuce.`,
+Ku nemi ma'aikacin FlowGuard Plumbing Enterprises a Kano domin duba injin ruwanku tare da ba ku kiyasin gyara a rubuce.`,
     ha_seo_title: "Alamomin Da Ke Nuna Injin Ruwa Na Bukatar Gyara | Kano",
     ha_meta_description:
       "Ku gane alamomin farko da ke nuna injin ruwa na bukatar gyara kafin ya lalace gaba daya a Kano.",
-    ha_image_alt: "Bututun ruwa da bawul din waje da ma'aikatan Bin Plumbing suka duba",
+    ha_image_alt: "Bututun ruwa da bawul din waje da ma'aikatan FlowGuard Plumbing suka duba",
     ha_status: "published",
     featured_image: "/images/gallery/real-work-external-pipe-valve.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "water-pump-installation-repair",
     main_keyword: "water pump repair in Kano",
     supporting_keywords: [
@@ -271,7 +271,7 @@ Ku nemi ma'aikacin Bin Plumbing Services Ltd a Kano domin duba injin ruwanku tar
       "borehole pump repair in Kano",
       "gyaran injin famfo",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-choose-water-pump",
@@ -307,11 +307,11 @@ Pair your pump with a quality non-return valve, isolation ball valves for easy s
 
 ## Professional Water Pump Installation in Kano
 
-Before purchasing a pump, you can request a Bin Plumbing inspection in Kano so our technician assesses your borehole or tank layout and recommends the right specification.`,
+Before purchasing a pump, you can request a FlowGuard Plumbing inspection in Kano so our technician assesses your borehole or tank layout and recommends the right specification.`,
     en_seo_title: "How to Choose a Water Pump for Your Home | Kano Plumbing Guide",
     en_meta_description:
       "Practical guide to choosing a surface, booster, or submersible borehole water pump for homes in Kano based on tank height and water source.",
-    en_image_alt: "Water tank and pipe fitting installation by Bin Plumbing",
+    en_image_alt: "Water tank and pipe fitting installation by FlowGuard Plumbing",
     en_status: "published",
     ha_title: "Yadda Ake Zabar Injin Ruwa Na Gida",
     ha_slug: "yadda-ake-zabar-injin-ruwa-na-gida",
@@ -337,14 +337,14 @@ Yin amfani da non-return valve, bawul din rufe ruwa, da pressure controller yana
 
 ## Girka Famfon Ruwa a Kano
 
-Kuna iya neman kwararren mai aikin famfo na Bin Plumbing Services Ltd a Kano domin duba tsarin gidanku kafin ku sayi injin.`,
+Kuna iya neman kwararren mai aikin famfo na FlowGuard Plumbing Enterprises a Kano domin duba tsarin gidanku kafin ku sayi injin.`,
     ha_seo_title: "Yadda Ake Zabar Injin Ruwa Na Gida | Girka Famfon Ruwa Kano",
     ha_meta_description:
       "Shawarwari masu amfani kan yadda za ku zabi injin ruwa da ya dace da gidanku a Kano.",
-    ha_image_alt: "Tankin ruwa da bututun da Bin Plumbing suka hada",
+    ha_image_alt: "Tankin ruwa da bututun da FlowGuard Plumbing suka hada",
     ha_status: "published",
     featured_image: "/images/gallery/real-work-water-tank-fitting.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "water-pump-installation-repair",
     main_keyword: "water pump installation in Kano",
     supporting_keywords: [
@@ -352,7 +352,7 @@ Kuna iya neman kwararren mai aikin famfo na Bin Plumbing Services Ltd a Kano dom
       "girka famfon ruwa",
       "water tank installation in Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-low-water-pressure",
@@ -390,10 +390,10 @@ Air trapped inside horizontal lines after a tank runs dry, or a hidden pipe leak
 
 ## Low Water Pressure Repair in Kano
 
-Bin Plumbing Services Ltd diagnoses pressure issues on site in Kano and provides a transparent quotation before replacing valves, clearing lines, or installing a booster pump.`,
+FlowGuard Plumbing Enterprises diagnoses pressure issues on site in Kano and provides a transparent quotation before replacing valves, clearing lines, or installing a booster pump.`,
     en_seo_title: "Common Causes of Low Water Pressure | Plumbing Repair Kano",
     en_meta_description:
-      "Find out what causes weak tap and shower pressure in Kano homes and when to call Bin Plumbing for low water pressure repair.",
+      "Find out what causes weak tap and shower pressure in Kano homes and when to call FlowGuard Plumbing for low water pressure repair.",
     en_image_alt: "Multi-storey green PPR water riser and PVC drainage pipework installation",
     en_status: "published",
     ha_title: "Dalilan Raguwar Karfin Ruwan Gida",
@@ -422,14 +422,14 @@ Idan tanki ya kafe gaba daya, iska kan shiga cikin bututu ta rage karfin ruwa. H
 
 ## Gyaran Matsalar Ruwa a Kano
 
-Ku tura bukata zuwa Bin Plumbing Services Ltd domin a duba tsarin bututun gidanku a Kano a dawo da karfin ruwa yadda ya kamata.`,
+Ku tura bukata zuwa FlowGuard Plumbing Enterprises domin a duba tsarin bututun gidanku a Kano a dawo da karfin ruwa yadda ya kamata.`,
     ha_seo_title: "Dalilan Raguwar Karfin Ruwan Gida | Gyaran Matsalar Ruwa Kano",
     ha_meta_description:
       "Ku gano dalilan da ke rage karfin ruwa a gida da yadda kwararrun ma'aikatan famfo a Kano ke magance matsalar.",
     ha_image_alt: "Bututun PPR da na magudanar ruwa da aka girka a ginin bene",
     ha_status: "published",
     featured_image: "/images/blog/ppr-riser-pipe-installation-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "pipe-installation-repairs",
     main_keyword: "low water pressure repair in Kano",
     supporting_keywords: [
@@ -437,7 +437,7 @@ Ku tura bukata zuwa Bin Plumbing Services Ltd domin a duba tsarin bututun gidank
       "water pipe installation in Kano",
       "pipe fitting services in Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-emergency-plumbing",
@@ -471,11 +471,11 @@ If water is leaking near a water heater switch or pump control box, turn off pow
 
 ## Request an Emergency Plumber in Kano
 
-Submit an urgent request on Bin Plumbing Services Ltd with your area and live map pin. Our coordinator assigns an available technician and shares a tracking reference right away.`,
+Submit an urgent request on FlowGuard Plumbing Enterprises with your area and live map pin. Our coordinator assigns an available technician and shares a tracking reference right away.`,
     en_seo_title: "Emergency Plumbing Problems & What to Do | Emergency Plumber Kano",
     en_meta_description:
       "Fast emergency steps for burst pipes, overflowing toilets, and water leaks—plus how to request an emergency plumber in Kano.",
-    en_image_alt: "Bin Plumbing emergency pipe repair on external supply line",
+    en_image_alt: "FlowGuard Plumbing emergency pipe repair on external supply line",
     en_status: "published",
     ha_title: "Matsalolin Famfo Na Gaggawa da Abin Yi",
     ha_slug: "matsalolin-famfo-na-gaggawa-da-abin-yi",
@@ -499,14 +499,14 @@ Idan ruwa yana digowa kusa da makunnin water heater ko akwatin injin famfo, ku k
 
 ## Neman Mai Aikin Famfo Na Gaggawa a Kano
 
-Ku yi amfani da shafin Request a Plumber na Bin Plumbing Services Ltd ku zabi 'Urgent' tare da sanya adireshinku a Kano domin a tura muku kwararren ma'aikaci.`,
+Ku yi amfani da shafin Request a Plumber na FlowGuard Plumbing Enterprises ku zabi 'Urgent' tare da sanya adireshinku a Kano domin a tura muku kwararren ma'aikaci.`,
     ha_seo_title: "Matsalolin Famfo Na Gaggawa da Abin Yi | Mai Aikin Famfo Kano",
     ha_meta_description:
       "Abin da ya kamata ku yi nan take idan bututu ya fashe ko bandaki ya ciko a Kano kafin mai aikin famfo ya iso.",
-    ha_image_alt: "Gyaran bututun ruwa na gaggawa da ma'aikacin Bin Plumbing ya yi",
+    ha_image_alt: "Gyaran bututun ruwa na gaggawa da ma'aikacin FlowGuard Plumbing ya yi",
     ha_status: "published",
     featured_image: "/images/services/real-work-pipe-repair.png",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "leak-detection-repairs",
     main_keyword: "emergency plumber in Kano",
     supporting_keywords: [
@@ -514,7 +514,7 @@ Ku yi amfani da shafin Request a Plumber na Bin Plumbing Services Ltd ku zabi 'U
       "mai aikin famfo Kano",
       "plumber in Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-maintain-water-tank",
@@ -552,11 +552,11 @@ Verify that outlet tank connectors and ball valves are not weeping onto steel st
 
 ## Book Water Tank Installation or Servicing in Kano
 
-Bin Plumbing Services Ltd installs, cleans, and re-pipes overhead and ground water tanks in Kano with transparent itemised quotes.`,
+FlowGuard Plumbing Enterprises installs, cleans, and re-pipes overhead and ground water tanks in Kano with transparent itemised quotes.`,
     en_seo_title: "How to Maintain Your Water Tank | Water Tank Installation Kano",
     en_meta_description:
       "Practical overhead water tank maintenance guide for Kano homes: sealing lids, flushing sediment, checking float valves, and preventing leaks.",
-    en_image_alt: "Overhead water tank piping and valve installation by Bin Plumbing",
+    en_image_alt: "Overhead water tank piping and valve installation by FlowGuard Plumbing",
     en_status: "published",
     ha_title: "Yadda Ake Kula da Tankin Ruwa",
     ha_slug: "yadda-ake-kula-da-tankin-ruwa",
@@ -584,14 +584,14 @@ Ku tabbatar babu digon ruwa a jikin gindin tanki domin kada karfen da ke dauke d
 
 ## Neman Aikin Tankin Ruwa a Kano
 
-Bin Plumbing Services Ltd na girka tankin ruwa tare da gyaran bawul da bututu a Kano.`,
+FlowGuard Plumbing Enterprises na girka tankin ruwa tare da gyaran bawul da bututu a Kano.`,
     ha_seo_title: "Yadda Ake Kula da Tankin Ruwa | Aikin Famfo Kano",
     ha_meta_description:
       "Shawarwari kan yadda ake kula da tankin ruwan sama a gida domin samun ruwa mai tsafta da kare bututu a Kano.",
     ha_image_alt: "Hadin bututu da bawul a jikin tankin ruwa",
     ha_status: "published",
     featured_image: "/images/gallery/real-work-water-tank-fitting.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "water-tank-installation",
     main_keyword: "water tank installation in Kano",
     supporting_keywords: [
@@ -599,7 +599,7 @@ Bin Plumbing Services Ltd na girka tankin ruwa tare da gyaran bawul da bututu a 
       "aikin famfo Kano",
       "gyaran matsalar ruwa",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-common-toilet-problems",
@@ -637,7 +637,7 @@ If the floor bolts loosen or silicone fails, movement stresses the pan connector
 
 ## Toilet Repair & Installation in Kano
 
-Book a Bin Plumbing technician in Kano for clean toilet repair, cistern kit replacement, or new WC installation.`,
+Book a FlowGuard Plumbing technician in Kano for clean toilet repair, cistern kit replacement, or new WC installation.`,
     en_seo_title: "Common Toilet Problems & Solutions | Toilet Repair in Kano",
     en_meta_description:
       "Learn how to handle running cisterns, weak flushes, and pan-connector leaks behind the toilet—and request toilet repair in Kano.",
@@ -670,14 +670,14 @@ Idan kusoshi sun saki, motsin bandaki kan cire hadin bututun baya. Gyara zaman W
 
 ## Gyaran Bandaki a Kano
 
-Ku nemi ma'aikacin Bin Plumbing Services Ltd domin gyaran bandaki ko saka sabon WC a Kano.`,
+Ku nemi ma'aikacin FlowGuard Plumbing Enterprises domin gyaran bandaki ko saka sabon WC a Kano.`,
     ha_seo_title: "Matsalolin Bandaki da Yadda Ake Magance Su | Gyaran Bandaki Kano",
     ha_meta_description:
       "Yadda ake magance matsalolin tankin flush, yoyon bayan bandaki, da rashin karfin flush a Kano.",
     ha_image_alt: "Binciken bututun bayan bandaki da famfon ruwa",
     ha_status: "published",
     featured_image: "/images/blog/toilet-pan-connector-repair-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field inspection",
+    image_attribution: "FlowGuard Plumbing Enterprises field inspection",
     target_service_slug: "bathroom-toilet-plumbing",
     main_keyword: "toilet repair in Kano",
     supporting_keywords: [
@@ -685,7 +685,7 @@ Ku nemi ma'aikacin Bin Plumbing Services Ltd domin gyaran bandaki ko saka sabon 
       "bathroom plumbing installation in Kano",
       "aikin famfo Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-prevent-blocked-drainage",
@@ -723,7 +723,7 @@ Repeatedly pouring strong corrosive chemicals can warp thin plastic traps or loo
 
 ## Blocked Drainage Repair in Kano
 
-When water backs up or drains gurgle, Bin Plumbing Services Ltd coordinates experienced technicians for drain unblocking and chamber repairs across Kano.`,
+When water backs up or drains gurgle, FlowGuard Plumbing Enterprises coordinates experienced technicians for drain unblocking and chamber repairs across Kano.`,
     en_seo_title: "How to Prevent Blocked Drainage | Blocked Drainage Repair Kano",
     en_meta_description:
       "Practical ways to prevent blocked kitchen sinks, bathroom traps, and outdoor drainage chambers—plus blocked drainage repair in Kano.",
@@ -755,14 +755,14 @@ Sinadari mai zafi sosai yana iya lalata bututun roba ba tare da ya cire abin da 
 
 ## Gyaran Toshewar Magudanar Ruwa a Kano
 
-Idan magudanar gidanku ta toshe, ku nemi Bin Plumbing Services Ltd a Kano domin budewa da gyara mai tsafta.`,
+Idan magudanar gidanku ta toshe, ku nemi FlowGuard Plumbing Enterprises a Kano domin budewa da gyara mai tsafta.`,
     ha_seo_title: "Yadda Ake Hana Toshewar Magudanar Ruwa | Gyaran Magudana Kano",
     ha_meta_description:
       "Yadda za ku kare sinki da bandaki da magudanar gida daga toshewa, da kuma neman mai gyaran magudana a Kano.",
     ha_image_alt: "Ramin duba magudanar ruwa da bututun PVC a karkashin kasa",
     ha_status: "published",
     featured_image: "/images/blog/underground-drainage-chamber-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "drainage-unblocking",
     main_keyword: "blocked drainage repair in Kano",
     supporting_keywords: [
@@ -770,7 +770,7 @@ Idan magudanar gidanku ta toshe, ku nemi Bin Plumbing Services Ltd a Kano domin 
       "kitchen plumbing installation in Kano",
       "aikin famfo Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-new-house-plumbing-kano",
@@ -808,7 +808,7 @@ Include separate isolation valves for each bathroom, kitchen, and overhead tank 
 
 ## Hire a Plumbing Contractor in Kano
 
-Bin Plumbing Services Ltd coordinates new-house first-fix, second-fix sanitaryware, tank stands, and pump installations across Kano with itemised quotations.`,
+FlowGuard Plumbing Enterprises coordinates new-house first-fix, second-fix sanitaryware, tank stands, and pump installations across Kano with itemised quotations.`,
     en_seo_title: "Plumbing Work for New Houses in Kano | Plumbing Contractor",
     en_meta_description:
       "Essential plumbing checklist for new houses in Kano: PPR rough-in pipework, pressure testing before plastering, drainage slope, and valve planning.",
@@ -840,14 +840,14 @@ Sanya bawul daban-daban ga kowane bandaki da kicin yana taimakawa idan za a yi g
 
 ## Neman Kwararren Mai Aikin Famfo a Kano
 
-Bin Plumbing Services Ltd na yin aikin famfo na sabon gini a Kano tun daga farko har karshe tare da bayar da takardar kiyasin aiki.`,
+FlowGuard Plumbing Enterprises na yin aikin famfo na sabon gini a Kano tun daga farko har karshe tare da bayar da takardar kiyasin aiki.`,
     ha_seo_title: "Aikin Famfo Na Sabon Gini a Kano | Sanya Bututun Ruwa",
     ha_meta_description:
       "Shawarwari ga masu sabon gini a Kano kan sanya bututun PPR, gwajin ruwa kafin filasta, da tsarin magudanar ruwa.",
     ha_image_alt: "Aikin binne koren bututun PPR a bangon sabon gini a Kano",
     ha_status: "published",
     featured_image: "/images/blog/ppr-pipework-new-house-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "pipe-installation-repairs",
     main_keyword: "water pipe installation in Kano",
     supporting_keywords: [
@@ -855,7 +855,7 @@ Bin Plumbing Services Ltd na yin aikin famfo na sabon gini a Kano tun daga farko
       "sanya bututun ruwa",
       "aikin famfo Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-bathroom-plumbing-installation",
@@ -893,8 +893,8 @@ Run the shower mixer, hand bidet spray, basin tap, and toilet flush together to 
 
 ## Bathroom Plumbing Installation in Kano
 
-Book Bin Plumbing Services Ltd in Kano for complete bathroom sanitaryware, shower mixer, and water heater installation.`,
-    en_seo_title: "Bathroom Plumbing Installation in Kano | Bin Plumbing",
+Book FlowGuard Plumbing Enterprises in Kano for complete bathroom sanitaryware, shower mixer, and water heater installation.`,
+    en_seo_title: "Bathroom Plumbing Installation in Kano | FlowGuard Plumbing",
     en_meta_description:
       "Guide to clean bathroom plumbing installation in Kano: shower mixers, WCs, washbasins, angle valves, and water heater connections.",
     en_image_alt:
@@ -926,14 +926,14 @@ A kunna shawa, famfo, da flush lokaci guda don tabbatar babu yoyo kuma ruwa yana
 
 ## Aikin Bandaki a Kano
 
-Ku nemi Bin Plumbing Services Ltd a Kano domin girka shawa, WC, sinki, da water heater cikin tsafta.`,
+Ku nemi FlowGuard Plumbing Enterprises a Kano domin girka shawa, WC, sinki, da water heater cikin tsafta.`,
     ha_seo_title: "Girka Kayan Bandaki Da Shawa | Aikin Famfo Kano",
     ha_meta_description:
       "Yadda ake girka shawa, mixer, WC, da sinkin bandaki cikin tsafta ba tare da yoyo ba a Kano.",
     ha_image_alt: "Girkakken shawa da mixer a bandaki mai tayis",
     ha_status: "published",
     featured_image: "/images/blog/bathroom-shower-mixer-installation-kano.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field installation",
+    image_attribution: "FlowGuard Plumbing Enterprises field installation",
     target_service_slug: "bathroom-toilet-plumbing",
     main_keyword: "bathroom plumbing installation in Kano",
     supporting_keywords: [
@@ -941,7 +941,7 @@ Ku nemi Bin Plumbing Services Ltd a Kano domin girka shawa, WC, sinki, da water 
       "toilet installation in Kano",
       "aikin famfo Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
   {
     id: "guide-when-to-call-plumber",
@@ -968,13 +968,13 @@ Some simple checks—like unscrewing a blocked tap aerator or closing an isolati
 - **Recurring Blocked Drains:** Repeated backups point to deeper line obstructions or slope issues in outdoor chambers.
 - **New Fixtures & Water Heaters:** Installing WCs, showers, or water heaters properly avoids voiding seals or damaging tiled walls.
 
-## How Bin Plumbing Works in Kano
+## How FlowGuard Plumbing Works in Kano
 
 Every request receives a tracking reference, an on-site inspection by a reviewed technician, and an itemised labour-and-materials quotation for your approval before work starts.`,
     en_seo_title: "When to Call a Professional Plumber | Plumber in Kano",
     en_meta_description:
       "Know when to handle a simple plumbing check yourself and when to call a professional plumber in Kano for pumps, leaks, and drains.",
-    en_image_alt: "Bin Plumbing field tools and pipe fittings ready for inspection",
+    en_image_alt: "FlowGuard Plumbing field tools and pipe fittings ready for inspection",
     en_status: "published",
     ha_title: "Yaushe Ya Kamata A Kira Kwararren Mai Aikin Famfo?",
     ha_slug: "yaushe-ya-kamata-a-kira-mai-aikin-famfo",
@@ -991,16 +991,16 @@ Akwai abubuwa masu sauki kamar wanke ragar bakin famfo ko rufe bawul idan ruwa n
 - **Yawan Toshewar Magudanar Ruwa:** Idan magudana tana yawan toshewa, akwai matsala a babban bututu ko ramin duba magudana.
 - **Girka Sabbin Kayan Bandaki Ko Water Heater:** Gyara mai kyau yana hana yoyo da lalacewar tayis.
 
-## Yadda Bin Plumbing Ke Aiki a Kano
+## Yadda FlowGuard Plumbing Ke Aiki a Kano
 
 Da zarar kun tura bukata, za a tura muku kwararren ma'aikaci ya duba aikin sannan a ba ku kiyasin farashi kafin a fara gyara.`,
     ha_seo_title: "Yaushe Ya Kamata A Kira Mai Aikin Famfo? | Kano",
     ha_meta_description:
       "Ku gane lokacin da ya kamata a kira kwararren mai aikin famfo a Kano don gyaran yoyo, injin ruwa, da magudana.",
-    ha_image_alt: "Kayan aikin famfo da bututu na Bin Plumbing Services Ltd",
+    ha_image_alt: "Kayan aikin famfo da bututu na FlowGuard Plumbing Enterprises",
     ha_status: "published",
     featured_image: "/images/gallery/real-work-tools-equipment.jpg",
-    image_attribution: "Bin Plumbing Services Ltd field work",
+    image_attribution: "FlowGuard Plumbing Enterprises field work",
     target_service_slug: "pipe-installation-repairs",
     main_keyword: "professional plumber in Kano",
     supporting_keywords: [
@@ -1008,6 +1008,6 @@ Da zarar kun tura bukata, za a tura muku kwararren ma'aikaci ya duba aikin sanna
       "mai aikin famfo Kano",
       "plumbing services in Kano",
     ],
-    author_name: "Bin Plumbing Editorial Team",
+    author_name: "FlowGuard Plumbing Editorial Team",
   },
 ];

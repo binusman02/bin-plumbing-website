@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { BlogIndexView } from "@/components/blog/BlogIndexView";
 import { getPublishedBlogPosts } from "@/lib/marketplace";
 
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "Shawarwarin Gyaran Famfo a Kano (Hausa) | Bin Plumbing Services Ltd",
+    title: "Shawarwarin Gyaran Famfo a Kano (Hausa) | FlowGuard Plumbing Enterprises",
     description:
       "Bayani cikin harshen Hausa kan gyaran injin ruwa, bututu, bandaki, da magudanar ruwa a Kano.",
     url: "/ha/blog",

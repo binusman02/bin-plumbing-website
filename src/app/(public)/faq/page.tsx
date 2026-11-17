@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
@@ -6,12 +6,12 @@ import { getMarketplaceSettings } from "@/lib/marketplace";
 import { FaqAccordion, type FaqItem } from "@/components/public/FaqAccordion";
 
 export const metadata: Metadata = {
-  title: "Plumbing FAQs | Bin Plumbing Services Ltd Kano",
+  title: "Plumbing FAQs | FlowGuard Plumbing Enterprises Kano",
   description:
     "Answers to common questions about requesting a plumber in Kano, on-site inspection quotations, active coverage areas, and live request tracking.",
   alternates: { canonical: "/faq" },
   openGraph: {
-    title: "Plumbing FAQs | Bin Plumbing Services Ltd Kano",
+    title: "Plumbing FAQs | FlowGuard Plumbing Enterprises Kano",
     description:
       "Answers to common questions about requesting a plumber, inspection quotes, and tracking in Kano.",
     url: "/faq",

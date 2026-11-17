@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import { getAllGalleryItems } from "@/lib/marketplace";
 import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
@@ -6,12 +6,12 @@ import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 export const metadata: Metadata = {
   title: "Project Gallery",
   description:
-    "Published project photos from Bin Plumbing Services Ltd completed plumbing installations and repairs.",
+    "Published project photos from FlowGuard Plumbing Enterprises completed plumbing installations and repairs.",
   alternates: { canonical: "/gallery" },
   openGraph: {
-    title: "Project Gallery | Bin Plumbing Services Ltd",
+    title: "Project Gallery | FlowGuard Plumbing Enterprises",
     description:
-      "Published project photos from Bin Plumbing Services Ltd completed plumbing installations and repairs.",
+      "Published project photos from FlowGuard Plumbing Enterprises completed plumbing installations and repairs.",
     url: "/gallery",
     type: "website",
   },

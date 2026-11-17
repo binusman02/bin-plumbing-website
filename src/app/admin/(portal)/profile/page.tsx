@@ -1,4 +1,4 @@
-import { connection } from "next/server";
+﻿import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { ProfileManager } from "@/components/portal/ProfileManager";
 import { resolvePortalActor } from "@/lib/portal-auth";
@@ -7,7 +7,7 @@ import { getServiceSupabase } from "@/lib/supabase/admin";
 export const instant = false;
 
 export const metadata = {
-  title: "Admin Profile | Bin Plumbing Admin",
+  title: "Admin Profile | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminProfilePage() {

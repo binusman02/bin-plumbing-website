@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,13 +9,13 @@ import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 
 export const metadata: Metadata = {
   title: {
-    absolute: "Plumber in Kano | Bin Plumbing Services Ltd",
+    absolute: "Plumber in Kano | FlowGuard Plumbing Enterprises",
   },
   description:
-    "Need a reliable plumber in Kano? Bin Plumbing Services Ltd coordinates residential and commercial plumbing repairs, water pump servicing, leak detection, and installations with upfront itemised quotes.",
+    "Need a reliable plumber in Kano? FlowGuard Plumbing Enterprises coordinates residential and commercial plumbing repairs, water pump servicing, leak detection, and installations with upfront itemised quotes.",
   alternates: { canonical: "/" },
   openGraph: {
-    title: "Plumber in Kano | Bin Plumbing Services Ltd",
+    title: "Plumber in Kano | FlowGuard Plumbing Enterprises",
     description:
       "Request residential and commercial plumbing inspections, water pump repairs, and leak detection in Kano with transparent quotation approval and live job tracking.",
     url: "/",

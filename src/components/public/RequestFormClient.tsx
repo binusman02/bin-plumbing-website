@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -232,7 +232,7 @@ export default function RequestFormClient({
 
   if (submittedTicket) {
     const shareText = encodeURIComponent(
-      `Bin Plumbing Service Request\nReference: ${submittedTicket.ticketNumber}\nService: ${formData.problemType}\nLocation: ${effectiveCityOrLga}, ${formData.state}`
+      `FlowGuard Plumbing Service Request\nReference: ${submittedTicket.ticketNumber}\nService: ${formData.problemType}\nLocation: ${effectiveCityOrLga}, ${formData.state}`
     );
 
     return (
@@ -779,7 +779,7 @@ export default function RequestFormClient({
               <Link href="/privacy" className="font-semibold text-[#0B1F3A] underline">
                 Privacy Policy
               </Link>{" "}
-              and consent to Bin Plumbing Services Ltd contacting me regarding this request.
+              and consent to FlowGuard Plumbing Enterprises contacting me regarding this request.
             </span>
           </label>
         </div>

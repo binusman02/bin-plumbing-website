@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import { Printer, X } from "lucide-react";
@@ -112,7 +112,7 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white">
                   <Image
                     src="/images/logo/bin-plumbing-logo.jpg"
-                    alt="Bin Plumbing Services Ltd"
+                    alt="FlowGuard Plumbing Enterprises"
                     width={48}
                     height={48}
                     className="h-full w-full scale-[1.08] object-cover"
@@ -120,7 +120,7 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
                 </div>
                 <div>
                   <h2 className="text-base font-extrabold tracking-wide text-[#0B1F3A]">
-                    BIN PLUMBING SERVICES LTD
+                    FlowGuard Plumbing Enterprises
                   </h2>
                   <p className="text-xs text-slate-500">
                     Professional Plumbing & Water Systems Engineering
@@ -274,7 +274,7 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
             )}
 
             <p className="mt-6 border-t border-slate-200 pt-3 text-center text-[11px] text-slate-400">
-              Bin Plumbing Services Ltd • Generated for Ticket {quote.ticketNumber}
+              FlowGuard Plumbing Enterprises • Generated for Ticket {quote.ticketNumber}
             </p>
           </div>
         </div>

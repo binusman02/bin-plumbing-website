@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useEffect } from "react";
 import { Loader2, CheckCircle2, Send } from "lucide-react";
@@ -94,7 +94,7 @@ export function ContactFormClient({ activeLocations, serviceOptions = [] }: Cont
           Enquiry Received
         </h3>
         <p className="mt-2 text-base text-[#5B6675]">
-          Thank you for contacting Bin Plumbing Services Ltd. Our team will review your message and reach out shortly.
+          Thank you for contacting FlowGuard Plumbing Enterprises. Our team will review your message and reach out shortly.
         </p>
         <button
           type="button"

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, MapPin } from "lucide-react";
 import { getMarketplaceSettings } from "@/lib/marketplace";
@@ -20,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "Service Areas",
     description:
-      "Active service coverage areas for Bin Plumbing Services Ltd, matching our verified operating address and dispatch settings.",
+      "Active service coverage areas for FlowGuard Plumbing Enterprises, matching our verified operating address and dispatch settings.",
     alternates: { canonical: "/areas" },
     ...(isReady ? {} : { robots: { index: false, follow: true } }),
   };
@@ -108,7 +108,7 @@ export default async function ServiceAreasPage() {
                 <div className="mt-3 grid grid-cols-1 gap-4 text-sm text-[#5B6675] md:grid-cols-3">
                   <div>
                     <p className="font-semibold text-[#0B1F3A]">Business Name</p>
-                    <p>{settings.company_name || "Bin Plumbing Services Ltd"}</p>
+                    <p>{settings.company_name || "FlowGuard Plumbing Enterprises"}</p>
                   </div>
                   <div>
                     <p className="font-semibold text-[#0B1F3A]">Address</p>
@@ -138,7 +138,7 @@ export default async function ServiceAreasPage() {
                   </a>
                 </div>
                 <iframe
-                  title="Bin Plumbing Service Areas Map"
+                  title="FlowGuard Plumbing Service Areas Map"
                   src={`https://maps.google.com/maps?q=${encodeURIComponent(
                     address || "Kano, Nigeria"
                   )}&t=&z=12&ie=UTF8&iwloc=&output=embed`}

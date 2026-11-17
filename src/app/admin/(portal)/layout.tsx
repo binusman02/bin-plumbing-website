@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+﻿import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { AdminLayoutShell } from "@/components/admin/AdminLayoutShell";
@@ -9,8 +9,8 @@ import { requireAdminUser } from "@/lib/security";
 export const instant = false;
 
 export const metadata = {
-  title: "Admin Portal | Bin Plumbing Services Ltd",
-  description: "Secure operational administration and CRM portal for Bin Plumbing Services Ltd.",
+  title: "Admin Portal | FlowGuard Plumbing Enterprises",
+  description: "Secure operational administration and CRM portal for FlowGuard Plumbing Enterprises.",
   robots: { index: false, follow: false },
 };
 
@@ -49,7 +49,7 @@ export default async function AdminPortalLayout({
 
   return (
     <AdminLayoutShell
-      userEmail={user.email || "admin@binplumbing.com"}
+      userEmail={user.email || "admin@flowguard.com.ng"}
       unreadCount={notifications.length}
       unreadEnquiriesCount={unreadEnquiriesCount}
       unreadCommunicationsCount={unreadCommunicationsCount}

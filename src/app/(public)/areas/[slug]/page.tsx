@@ -41,14 +41,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description,
     alternates: { canonical: `/areas/${slug}` },
     openGraph: {
-      title: `${title} | Bin Plumbing Services Ltd`,
+      title: `${title} | FlowGuard Plumbing Enterprises`,
       description,
       url: `/areas/${slug}`,
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: `${title} | Bin Plumbing Services Ltd`,
+      title: `${title} | FlowGuard Plumbing Enterprises`,
       description,
     },
   };
@@ -73,7 +73,7 @@ export default async function AreaDetailPage({ params }: Props) {
     .filter((c) => c.visible !== false && c.active !== false)
     .slice(0, 6);
   const phone = settings.company_phone?.trim() || "";
-  const companyName = settings.company_name || "Bin Plumbing Services Ltd";
+  const companyName = settings.company_name || "FlowGuard Plumbing Enterprises";
   const baseUrl = SITE_URL;
   const breadcrumbJsonLd = buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },

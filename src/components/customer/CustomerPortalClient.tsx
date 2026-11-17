@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { startTransition as startBackgroundTransition, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -1299,7 +1299,7 @@ export default function CustomerPortalClient({
               {bankDetails?.bankAccountNumber && (
                 <div className="rounded-lg border border-amber-200 bg-white p-3 text-xs text-slate-700">
                   <span className="font-semibold">Bank:</span> {bankDetails.bankName || "Configured Bank"} •{" "}
-                  <span className="font-semibold">Account:</span> {bankDetails.bankAccountName || "Bin Plumbing Services Ltd"} •{" "}
+                  <span className="font-semibold">Account:</span> {bankDetails.bankAccountName || "FlowGuard Plumbing Enterprises"} •{" "}
                   <span className="font-mono font-bold text-[#0B1F3A]">{bankDetails.bankAccountNumber}</span>
                 </div>
               )}
@@ -1591,7 +1591,7 @@ export default function CustomerPortalClient({
             }
           }}
           emptyTitle="No service conversations yet"
-          emptyDescription="Messages with Bin Plumbing dispatch and your assigned plumber appear here."
+          emptyDescription="Messages with FlowGuard Plumbing dispatch and your assigned plumber appear here."
           onTicketRead={(ticket) => {
             setMessages((prev) =>
               prev.map((m) =>

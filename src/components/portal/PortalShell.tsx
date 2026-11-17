@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
@@ -231,7 +231,7 @@ export function PortalShell({
             <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white shadow-xs">
               <Image
                 src="/images/logo/bin-plumbing-logo.jpg"
-                alt="Bin Plumbing Services Ltd"
+                alt="FlowGuard Plumbing Enterprises"
                 width={36}
                 height={36}
                 className="h-full w-full scale-[1.08] object-cover"
@@ -244,7 +244,7 @@ export function PortalShell({
                   {portalTitle}
                 </p>
                 <p className="truncate text-[10px] font-medium text-[#F5B301]">
-                  Bin Plumbing
+                  FlowGuard Plumbing
                 </p>
               </div>
             )}
@@ -354,7 +354,7 @@ export function PortalShell({
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                   <Image
                     src="/images/logo/bin-plumbing-logo.jpg"
-                    alt="Bin Plumbing"
+                    alt="FlowGuard Plumbing"
                     width={32}
                     height={32}
                     className="h-full w-full scale-[1.08] object-cover"
@@ -405,12 +405,12 @@ export function PortalShell({
           <div className="flex min-w-0 items-center gap-2.5">
             <Link
               href="/"
-              aria-label="Bin Plumbing Services Ltd"
+              aria-label="FlowGuard Plumbing Enterprises"
               className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white md:hidden"
             >
               <Image
                 src="/images/logo/bin-plumbing-logo.jpg"
-                alt="Bin Plumbing Services Ltd"
+                alt="FlowGuard Plumbing Enterprises"
                 width={32}
                 height={32}
                 className="h-full w-full scale-[1.08] object-cover"
@@ -633,7 +633,7 @@ export function PortalShell({
               <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                 <Image
                   src="/images/logo/bin-plumbing-logo.jpg"
-                  alt="Bin Plumbing"
+                  alt="FlowGuard Plumbing"
                   width={32}
                   height={32}
                   className="h-full w-full scale-[1.08] object-cover"

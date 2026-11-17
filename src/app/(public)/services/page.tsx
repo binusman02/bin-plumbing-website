@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     "Browse residential and commercial plumbing services in Kano: pipework, leak detection, water pump repair, overhead tank installation, bathrooms, and drainage.",
   alternates: { canonical: "/services" },
   openGraph: {
-    title: "Plumbing Services in Kano | Bin Plumbing Services Ltd",
+    title: "Plumbing Services in Kano | FlowGuard Plumbing Enterprises",
     description:
       "Browse residential and commercial plumbing services in Kano including pipework, leak detection, pump setup, tank installation, and drainage repairs.",
     url: "/services",
@@ -46,7 +46,7 @@ export default async function ServicesPage() {
       image: c.image || "/images/services/pipework-roughin.jpg",
     }));
 
-  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com.ng").replace(/\/+$/, "");
+  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng").replace(/\/+$/, "");
 
   const servicesJsonLd = {
     "@context": "https://schema.org",
@@ -71,7 +71,7 @@ export default async function ServicesPage() {
             url: `${baseUrl}/services/${service.slug || service.id}`,
             provider: {
               "@type": "Plumber",
-              name: settings.company_name || "Bin Plumbing Services Ltd",
+              name: settings.company_name || "FlowGuard Plumbing Enterprises",
             },
           },
         })),

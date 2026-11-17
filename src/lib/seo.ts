@@ -1,14 +1,14 @@
-export const SITE_NAME = "Bin Plumbing Services Ltd";
-export const SITE_SHORT_NAME = "Bin Plumbing";
+﻿export const SITE_NAME = "FlowGuard Plumbing Enterprises";
+export const SITE_SHORT_NAME = "FlowGuard Plumbing";
 export const PRIMARY_MARKET = "Kano State, Nigeria";
 
 /**
  * Single configurable production base URL.
- * Defaults to https://binplumbing.com.ng so canonicals, sitemaps,
+ * Defaults to https://flowguard.com.ng so canonicals, sitemaps,
  * Open Graph URLs, and structured data never split across domains.
  */
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL || "https://binplumbing.com.ng"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng"
 ).replace(/\/+$/, "");
 
 export function canonicalUrl(path = "/"): string {

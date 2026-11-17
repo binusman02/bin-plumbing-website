@@ -1,4 +1,4 @@
-import { connection } from "next/server";
+﻿import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   getAllComplaints,
@@ -15,7 +15,7 @@ import { DashboardClient } from "@/components/admin/DashboardClient";
 export const instant = false;
 
 export const metadata = {
-  title: "Admin Overview | Bin Plumbing Services Ltd",
+  title: "Admin Overview | FlowGuard Plumbing Enterprises",
 };
 
 export default async function AdminDashboardPage() {
