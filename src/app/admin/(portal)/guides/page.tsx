@@ -1,11 +1,11 @@
-﻿import { connection } from "next/server";
+import { connection } from "next/server";
 import { getGuides } from "@/lib/marketplace";
 import { GuidesManagerClient } from "@/components/admin/GuidesManagerClient";
 
 export const instant = false;
 
 export const metadata = {
-  title: "Guides CMS | FlowGuard Plumbing Admin",
+  title: "Guides CMS | Flow Guard Plumbing Admin",
 };
 
 export default async function AdminGuidesPage() {

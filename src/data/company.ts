@@ -6,8 +6,8 @@
 
 export const COMPANY = {
   name: "FlowGuard Plumbing Enterprises",
-  shortName: "FlowGuard Plumbing",
-  tagline: "Reliable Plumbing Services, Coordinated with Care",
+  shortName: "Flow Guard Plumbing",
+  tagline: "Reliable Solutions, Lasting Quality",
   heroHeadline: "Reliable Plumbing Services, Coordinated with Care.",
   heroSubheadline:
     "Tell us what you need. Our team reviews your request and helps coordinate an experienced plumbing professional for the job.",

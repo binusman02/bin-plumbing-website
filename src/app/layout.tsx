@@ -1,4 +1,4 @@
-﻿import { Suspense } from "react";
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import localFont from "next/font/local";
@@ -54,7 +54,7 @@ export const metadata: Metadata = {
     "gyaran injin famfo",
   ],
   category: "Home Services",
-  applicationName: "FlowGuard Plumbing",
+  applicationName: "Flow Guard Plumbing",
   icons: {
     icon: "/images/logo/bin-plumbing-logo.jpg",
     apple: "/icons/icon-192x192.png",
@@ -62,7 +62,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "FlowGuard Plumbing",
+    title: "Flow Guard Plumbing",
   },
   formatDetection: {
     telephone: true,

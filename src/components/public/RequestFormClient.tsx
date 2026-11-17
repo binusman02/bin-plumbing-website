@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -232,7 +232,7 @@ export default function RequestFormClient({
 
   if (submittedTicket) {
     const shareText = encodeURIComponent(
-      `FlowGuard Plumbing Service Request\nReference: ${submittedTicket.ticketNumber}\nService: ${formData.problemType}\nLocation: ${effectiveCityOrLga}, ${formData.state}`
+      `Flow Guard Plumbing Service Request\nReference: ${submittedTicket.ticketNumber}\nService: ${formData.problemType}\nLocation: ${effectiveCityOrLga}, ${formData.state}`
     );
 
     return (

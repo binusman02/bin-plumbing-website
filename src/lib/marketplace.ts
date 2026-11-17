@@ -1,4 +1,4 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { getRequiredAnonKey, getRequiredSupabaseUrl, getServiceSupabase } from "@/lib/supabase/admin";
@@ -525,7 +525,7 @@ const DEFAULT_SERVICE_CATEGORIES: ServiceCategorySetting[] = [
 
 const DEFAULT_SETTINGS: MarketplaceSettings = {
   company_name: "FlowGuard Plumbing Enterprises",
-  company_short_name: "FlowGuard Plumbing",
+  company_short_name: "Flow Guard Plumbing",
   rc_number: "",
   company_phone: "",
   company_whatsapp: "",
@@ -3388,7 +3388,7 @@ function normalizeGuideRecord(raw: Record<string, unknown>): GuideRecord {
       Array.isArray(raw.supporting_keywords) && raw.supporting_keywords.length > 0
         ? raw.supporting_keywords.map(String).filter(Boolean)
         : starterMatch?.supporting_keywords || [],
-    author_name: String(raw.author_name || starterMatch?.author_name || "FlowGuard Plumbing Editorial Team"),
+    author_name: String(raw.author_name || starterMatch?.author_name || "Flow Guard Plumbing Editorial Team"),
     published_at: raw.published_at
       ? String(raw.published_at)
       : legacyStatus === "published"
@@ -3546,7 +3546,7 @@ export async function upsertGuide(
     supporting_keywords: Array.isArray(guide.supporting_keywords)
       ? guide.supporting_keywords.map((k) => k.trim()).filter(Boolean)
       : [],
-    author_name: (guide.author_name || "FlowGuard Plumbing Editorial Team").trim(),
+    author_name: (guide.author_name || "Flow Guard Plumbing Editorial Team").trim(),
     published_at: anyPublished ? guide.published_at || now : guide.published_at || null,
   };
 

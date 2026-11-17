@@ -1,5 +1,5 @@
-﻿export const SITE_NAME = "FlowGuard Plumbing Enterprises";
-export const SITE_SHORT_NAME = "FlowGuard Plumbing";
+export const SITE_NAME = "FlowGuard Plumbing Enterprises";
+export const SITE_SHORT_NAME = "Flow Guard Plumbing";
 export const PRIMARY_MARKET = "Kano State, Nigeria";
 
 /**

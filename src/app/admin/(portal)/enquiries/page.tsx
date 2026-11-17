@@ -1,4 +1,4 @@
-﻿import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { connection } from "next/server";
 import { getEnquiryNotesMap } from "@/lib/marketplace";
 import { EnquiriesManagerClient } from "@/components/admin/EnquiriesManagerClient";
@@ -6,7 +6,7 @@ import { EnquiriesManagerClient } from "@/components/admin/EnquiriesManagerClien
 export const instant = false;
 
 export const metadata = {
-  title: "Direct Enquiries | FlowGuard Plumbing Admin",
+  title: "Direct Enquiries | Flow Guard Plumbing Admin",
 };
 
 export default async function EnquiriesAdminPage() {

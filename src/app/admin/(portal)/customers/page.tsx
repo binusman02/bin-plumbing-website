@@ -1,4 +1,4 @@
-﻿import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { connection } from "next/server";
 import {
   getAllComplaints,
@@ -15,7 +15,7 @@ import {
 export const instant = false;
 
 export const metadata = {
-  title: "Customers Directory | FlowGuard Plumbing Admin",
+  title: "Customers Directory | Flow Guard Plumbing Admin",
 };
 
 export default async function CustomersAdminPage() {

@@ -1,4 +1,4 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, MapPin } from "lucide-react";
 import { getMarketplaceSettings } from "@/lib/marketplace";
@@ -138,7 +138,7 @@ export default async function ServiceAreasPage() {
                   </a>
                 </div>
                 <iframe
-                  title="FlowGuard Plumbing Service Areas Map"
+                  title="Flow Guard Plumbing Service Areas Map"
                   src={`https://maps.google.com/maps?q=${encodeURIComponent(
                     address || "Kano, Nigeria"
                   )}&t=&z=12&ie=UTF8&iwloc=&output=embed`}

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { Download, Smartphone, X } from "lucide-react";
@@ -68,7 +68,7 @@ export function InstallAppButton() {
       <button
         type="button"
         onClick={handleInstall}
-        title="Install FlowGuard Plumbing App"
+        title="Install Flow Guard Plumbing App"
         className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#F5B301]/40 bg-[#F5B301]/15 px-2.5 text-xs font-bold text-[#F5B301] transition hover:bg-[#F5B301] hover:text-[#07152B]"
       >
         <Download className="h-3.5 w-3.5" />
@@ -87,7 +87,7 @@ export function InstallAppButton() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Smartphone className="h-5 w-5 text-[#F5B301]" />
-                <h3 className="text-sm font-bold text-[#0B1F3A]">Install FlowGuard Plumbing App</h3>
+                <h3 className="text-sm font-bold text-[#0B1F3A]">Install Flow Guard Plumbing App</h3>
               </div>
               <button
                 type="button"

@@ -1,4 +1,4 @@
-﻿import { connection } from "next/server";
+import { connection } from "next/server";
 import { ClipboardList } from "lucide-react";
 import { getAllAuditLogs } from "@/lib/marketplace";
 import { formatDateTime } from "@/lib/currency";
@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/currency";
 export const instant = false;
 
 export const metadata = {
-  title: "Audit Log | FlowGuard Plumbing Admin",
+  title: "Audit Log | Flow Guard Plumbing Admin",
 };
 
 export default async function AdminAuditLogPage() {

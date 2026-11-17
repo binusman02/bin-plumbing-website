@@ -1,10 +1,10 @@
-﻿import { connection } from "next/server";
+import { connection } from "next/server";
 import { NotificationDrawer } from "@/components/ui/NotificationDrawer";
 
 export const instant = false;
 
 export const metadata = {
-  title: "Notifications | FlowGuard Plumbing Admin",
+  title: "Notifications | Flow Guard Plumbing Admin",
 };
 
 export default async function AdminNotificationsPage() {

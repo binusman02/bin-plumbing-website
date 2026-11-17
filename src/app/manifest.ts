@@ -1,9 +1,9 @@
-﻿import type { MetadataRoute } from "next";
+import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "FlowGuard Plumbing Enterprises",
-    short_name: "FlowGuard Plumbing",
+    short_name: "Flow Guard Plumbing",
     description: "Coordinated Plumbing Services, Job Tracking & Management Portal",
     start_url: "/",
     display: "standalone",
