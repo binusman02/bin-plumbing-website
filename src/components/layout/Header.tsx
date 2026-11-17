@@ -60,7 +60,7 @@ export default function Header({ companyName }: HeaderProps) {
         scrolled ? "shadow-md" : "shadow-none"
       }`}
     >
-      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-4">
+      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 h-20 sm:h-24 flex items-center justify-between gap-4">
         {/* Left: Full FlowGuard Plumbing Logo */}
         <Link
           href="/"
@@ -71,9 +71,9 @@ export default function Header({ companyName }: HeaderProps) {
           <Image
             src="/images/logo/flowguard-logo.jpg"
             alt={rawBrandName || COMPANY.shortName}
-            width={240}
-            height={72}
-            className="h-14 w-auto scale-[1.08] object-contain sm:h-16"
+            width={280}
+            height={84}
+            className="h-[72px] w-auto scale-[1.1] object-contain sm:h-20"
             priority
           />
         </Link>
@@ -168,13 +168,13 @@ export default function Header({ companyName }: HeaderProps) {
       {/* Clean Full-Screen Mobile Menu */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 bg-white flex flex-col lg:hidden">
-          <div className="h-16 px-4 sm:px-6 flex items-center justify-between border-b border-[#E3E8EF]">
+          <div className="h-20 px-4 sm:px-6 flex items-center justify-between border-b border-[#E3E8EF]">
             <Image
               src="/images/logo/flowguard-logo.jpg"
               alt={rawBrandName || COMPANY.shortName}
-              width={210}
-              height={64}
-              className="h-12 w-auto scale-[1.08] object-contain"
+              width={240}
+              height={72}
+              className="h-16 w-auto scale-[1.1] object-contain"
             />
             <button
               type="button"
