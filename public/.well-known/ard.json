@@ -1,0 +1,70 @@
+{
+  "specVersion": "0.91",
+  "publisher": "flowguard.com.ng",
+  "updatedAt": "2026-11-17T00:00:00Z",
+  "entries": [
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:flowguard.com.ng:web:request-plumber",
+      "displayName": "FlowGuard Plumbing Service Request",
+      "type": "text/html",
+      "url": "https://flowguard.com.ng/request",
+      "description": "Submit a residential or commercial plumbing service request in Kano State and receive a tracking reference number.",
+      "representativeQueries": [
+        "Request a plumber in Kano State",
+        "Book emergency pipe repair or leak detection with FlowGuard Plumbing",
+        "Schedule bathroom plumbing or water pump installation in Kano"
+      ],
+      "capabilities": [
+        "service-booking",
+        "plumber-dispatch"
+      ]
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:flowguard.com.ng:web:track-request",
+      "displayName": "FlowGuard Live Request Tracker",
+      "type": "text/html",
+      "url": "https://flowguard.com.ng/tracking",
+      "description": "Track an active FlowGuard Plumbing service request using its reference number and customer phone number.",
+      "representativeQueries": [
+        "Track my FlowGuard Plumbing service request",
+        "Check plumber assignment and job status by reference number"
+      ],
+      "capabilities": [
+        "order-tracking",
+        "status-lookup"
+      ]
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:flowguard.com.ng:web:services",
+      "displayName": "FlowGuard Plumbing Services Catalog",
+      "type": "text/html",
+      "url": "https://flowguard.com.ng/services",
+      "description": "Browse plumbing services offered in Kano including pipe repairs, leak detection, water pump and tank installation, and drainage clearing.",
+      "representativeQueries": [
+        "What plumbing services does FlowGuard Plumbing offer in Kano",
+        "Find water pump, overhead tank, or drainage repair services"
+      ],
+      "capabilities": [
+        "service-catalog"
+      ]
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:flowguard.com.ng:web:service-areas",
+      "displayName": "FlowGuard Kano Service Coverage Areas",
+      "type": "text/html",
+      "url": "https://flowguard.com.ng/areas",
+      "description": "Check active plumbing service coverage areas across Kano State.",
+      "representativeQueries": [
+        "Which areas in Kano does FlowGuard Plumbing cover",
+        "Check plumber availability in Nassarawa, Tarauni, Gwale, or Fagge"
+      ],
+      "capabilities": [
+        "coverage-lookup"
+      ]
+    }
+  ]
+}
