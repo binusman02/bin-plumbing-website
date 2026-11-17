@@ -24,7 +24,7 @@ export default function WhatsAppFloatingButton({ whatsapp }: WhatsAppFloatingBut
     <aside aria-label="WhatsApp support" className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40">
       {cleanNumber ? (
         <a
-          href={`https://wa.me/${cleanNumber}?text=Hello%20Bin%20Plumbing%20Services%20Ltd,%20I%20would%20like%20to%20make%20an%20enquiry.`}
+          href={`https://wa.me/${cleanNumber}?text=Hello%20FlowGuard%20Plumbing,%20I%20would%20like%20to%20make%20an%20enquiry.`}
           target="_blank"
           rel="noopener noreferrer"
           className={className}

@@ -21,7 +21,7 @@ export default function Footer({ settings }: FooterProps) {
   const activeAreas = settings.active_coverage_locations || [];
 
   return (
-    <footer className="bg-[#07152B] text-[#C9D3E0] pt-16 pb-10">
+    <footer className="bg-[#07152B] text-[#C9D3E0] pt-16 pb-24 md:pb-10">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 pb-12">
           {/* Column 1: Company Profile (4 cols) */}
