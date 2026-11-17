@@ -26,13 +26,13 @@ export default function Footer({ settings }: FooterProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 pb-12">
           {/* Column 1: Company Profile (4 cols) */}
           <div className="lg:col-span-4 space-y-4">
-            <Link href="/" aria-label={companyName} className="inline-flex items-center">
+            <Link href="/" aria-label={companyName} className="inline-flex items-center overflow-hidden rounded-xl bg-white px-3 py-1.5 shadow-sm">
               <Image
                 src="/images/logo/flowguard-logo.jpg"
                 alt={companyName}
-                width={200}
-                height={58}
-                className="h-12 w-auto rounded-lg bg-white px-2.5 py-1 object-contain"
+                width={260}
+                height={78}
+                className="h-16 w-auto scale-[1.06] object-contain sm:h-[72px]"
               />
             </Link>
             <p className="text-sm text-[#C9D3E0] leading-relaxed max-w-sm">

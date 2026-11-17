@@ -66,14 +66,14 @@ export default function Header({ companyName }: HeaderProps) {
           href="/"
           onClick={closeAll}
           aria-label={rawBrandName || COMPANY.shortName}
-          className="inline-flex items-center shrink-0 transition-opacity hover:opacity-90"
+          className="inline-flex items-center shrink-0 overflow-hidden transition-opacity hover:opacity-90"
         >
           <Image
             src="/images/logo/flowguard-logo.jpg"
             alt={rawBrandName || COMPANY.shortName}
-            width={180}
-            height={52}
-            className="h-11 w-auto object-contain sm:h-12"
+            width={240}
+            height={72}
+            className="h-14 w-auto scale-[1.08] object-contain sm:h-16"
             priority
           />
         </Link>
@@ -172,9 +172,9 @@ export default function Header({ companyName }: HeaderProps) {
             <Image
               src="/images/logo/flowguard-logo.jpg"
               alt={rawBrandName || COMPANY.shortName}
-              width={160}
-              height={46}
-              className="h-10 w-auto object-contain"
+              width={210}
+              height={64}
+              className="h-12 w-auto scale-[1.08] object-contain"
             />
             <button
               type="button"
