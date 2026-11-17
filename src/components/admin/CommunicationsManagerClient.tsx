@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { WhatsAppChatWorkspace } from "@/components/chat/WhatsAppChatWorkspace";
+import { pushUrlIfChanged } from "@/lib/history";
 import {
   NOTIFICATION_NAV_EVENT,
   type NotificationNavigationRequest,
@@ -78,11 +79,25 @@ export default function CommunicationsManagerClient({
         navKey: detail.navKey,
       });
       if (typeof window !== "undefined") {
-        window.history.replaceState(null, "", detail.destination);
+        pushUrlIfChanged(detail.destination);
       }
     };
+    const onPopState = () => {
+      const sp = new URLSearchParams(window.location.search);
+      const nextTicket = sp.get("ticket");
+      const nextMessageId = sp.get("message");
+      setNavState({
+        ticket: nextTicket,
+        messageId: nextMessageId,
+        navKey: `pop-${nextTicket || ""}-${nextMessageId || ""}-${Date.now()}`,
+      });
+    };
     window.addEventListener(NOTIFICATION_NAV_EVENT, onNav);
-    return () => window.removeEventListener(NOTIFICATION_NAV_EVENT, onNav);
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener(NOTIFICATION_NAV_EVENT, onNav);
+      window.removeEventListener("popstate", onPopState);
+    };
   }, []);
 
   const handleTargetChange = useCallback(
@@ -104,11 +119,7 @@ export default function CommunicationsManagerClient({
         } else {
           url.searchParams.delete("message");
         }
-        window.history.replaceState(
-          null,
-          "",
-          url.pathname + url.search + url.hash
-        );
+        pushUrlIfChanged(url.pathname + url.search + url.hash);
       }
     },
     []

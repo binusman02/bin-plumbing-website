@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { LiveMap, type LiveMapMarker } from "@/components/map/LiveMap";
+import { pushUrlIfChanged } from "@/lib/history";
 import { WhatsAppChatWorkspace } from "@/components/chat/WhatsAppChatWorkspace";
 import { uploadChatFile } from "@/components/chat/ChatAttachment";
 import { ProfileManager } from "@/components/portal/ProfileManager";
@@ -121,7 +122,7 @@ export default function CustomerPortalClient({
         url.searchParams.delete("ticket");
         url.searchParams.delete("message");
       }
-      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      pushUrlIfChanged(url.pathname + url.search + url.hash);
     }
   }, []);
 
@@ -132,12 +133,8 @@ export default function CustomerPortalClient({
       const ticketParam = sp.get("ticket");
       const messageParam = sp.get("message");
 
-      if (ticketParam !== null) {
-        setActiveChatTicket(ticketParam);
-      }
-      if (messageParam !== null) {
-        setActiveChatMessageId(messageParam);
-      }
+      setActiveChatTicket(ticketParam ?? "");
+      setActiveChatMessageId(messageParam ?? null);
       if (ticketParam || messageParam) {
         setChatNavKey(`url-${ticketParam || ""}-${messageParam || ""}`);
       }
@@ -150,8 +147,10 @@ export default function CustomerPortalClient({
         param === "profile"
       ) {
         setActiveTabState(param);
-      } else if (messageParam) {
+      } else if (messageParam || ticketParam) {
         setActiveTabState("messages");
+      } else {
+        setActiveTabState("home");
       }
     };
     syncFromUrl();
@@ -803,7 +802,7 @@ export default function CustomerPortalClient({
             navReq?.navKey || `nav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
           );
           if (typeof window !== "undefined") {
-            window.history.replaceState(null, "", navReq?.destination || dest);
+            pushUrlIfChanged(navReq?.destination || dest);
           }
         } else if (dest.includes("tab=payments")) {
           setActiveTab("payments");
@@ -1583,11 +1582,7 @@ export default function CustomerPortalClient({
               else url.searchParams.delete("ticket");
               if (messageId) url.searchParams.set("message", messageId);
               else url.searchParams.delete("message");
-              window.history.replaceState(
-                null,
-                "",
-                url.pathname + url.search + url.hash
-              );
+              pushUrlIfChanged(url.pathname + url.search + url.hash);
             }
           }}
           emptyTitle="No service conversations yet"

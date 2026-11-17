@@ -16,6 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { WhatsAppChatWorkspace } from "@/components/chat/WhatsAppChatWorkspace";
+import { pushUrlIfChanged } from "@/lib/history";
 import { LiveMap, type LiveMapMarker } from "@/components/map/LiveMap";
 import { ProfileManager } from "@/components/portal/ProfileManager";
 import { ClassicSelect } from "@/components/ui/ClassicSelect";
@@ -100,7 +101,7 @@ export default function PlumberPortalClient({
         url.searchParams.delete("ticket");
         url.searchParams.delete("message");
       }
-      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      pushUrlIfChanged(url.pathname + url.search + url.hash);
     }
   }, []);
 
@@ -111,12 +112,8 @@ export default function PlumberPortalClient({
       const ticketParam = sp.get("ticket");
       const messageParam = sp.get("message");
 
-      if (ticketParam !== null) {
-        setActiveTicketForChat(ticketParam);
-      }
-      if (messageParam !== null) {
-        setActiveChatMessageId(messageParam);
-      }
+      setActiveTicketForChat(ticketParam ?? "");
+      setActiveChatMessageId(messageParam ?? null);
       if (ticketParam || messageParam) {
         setChatNavKey(`url-${ticketParam || ""}-${messageParam || ""}`);
       }
@@ -129,8 +126,10 @@ export default function PlumberPortalClient({
         param === "profile"
       ) {
         setActiveTabState(param);
-      } else if (messageParam) {
+      } else if (messageParam || ticketParam) {
         setActiveTabState("messages");
+      } else {
+        setActiveTabState("home");
       }
     };
     syncFromUrl();
@@ -796,7 +795,7 @@ export default function PlumberPortalClient({
             navReq?.navKey || `nav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
           );
           if (typeof window !== "undefined") {
-            window.history.replaceState(null, "", navReq?.destination || dest);
+            pushUrlIfChanged(navReq?.destination || dest);
           }
         } else if (dest.includes("tab=earnings")) {
           setActiveTab("earnings");
@@ -1502,11 +1501,7 @@ export default function PlumberPortalClient({
               else url.searchParams.delete("ticket");
               if (messageId) url.searchParams.set("message", messageId);
               else url.searchParams.delete("message");
-              window.history.replaceState(
-                null,
-                "",
-                url.pathname + url.search + url.hash
-              );
+              pushUrlIfChanged(url.pathname + url.search + url.hash);
             }
           }}
           emptyTitle="No job conversations yet"
@@ -1665,11 +1660,7 @@ export default function PlumberPortalClient({
             url.searchParams.set("tab", "messages");
             url.searchParams.set("ticket", ticketNumber);
             url.searchParams.delete("message");
-            window.history.replaceState(
-              null,
-              "",
-              url.pathname + url.search + url.hash
-            );
+            pushUrlIfChanged(url.pathname + url.search + url.hash);
           }
         }}
         onUploadJobPhoto={async (ticketNumber, photoName, url) => {
