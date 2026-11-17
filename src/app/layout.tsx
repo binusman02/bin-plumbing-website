@@ -199,15 +199,13 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${plusJakarta.variable} ${inter.variable} font-sans h-full antialiased scroll-smooth`}
     >
-      <head>
-        <Suspense fallback={null}>
-          <OrganizationJsonLd />
-        </Suspense>
-      </head>
       <body
         suppressHydrationWarning
         className="min-h-full flex flex-col bg-white text-[#1B2430] selection:bg-[#0B1F3A] selection:text-white"
       >
+        <Suspense fallback={null}>
+          <OrganizationJsonLd />
+        </Suspense>
         <ServiceWorkerRegister />
         {children}
         <SpeedInsights />

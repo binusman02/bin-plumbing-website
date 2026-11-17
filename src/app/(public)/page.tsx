@@ -196,7 +196,7 @@ export default async function HomePage() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#7A5400]">
                 Our Services
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -243,6 +243,7 @@ export default async function HomePage() {
                       className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:text-[#E0A200]"
                     >
                       Request this service
+                      <span className="sr-only"> — {service.title || service.name}</span>
                       <ArrowRight className="h-4 w-4 text-[#F5B301]" />
                     </Link>
                   </div>
@@ -258,7 +259,7 @@ export default async function HomePage() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#7A5400]">
                 Process
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -318,7 +319,7 @@ export default async function HomePage() {
             </div>
 
             <div className="lg:col-span-6">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#7A5400]">
                 Why Choose Us
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -354,7 +355,7 @@ export default async function HomePage() {
           <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
             <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div className="max-w-2xl">
-                <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
+                <p className="text-sm font-semibold uppercase tracking-wider text-[#7A5400]">
                   Completed Work
                 </p>
                 <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -382,7 +383,7 @@ export default async function HomePage() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#7A5400]">
                 Common Questions
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
@@ -412,7 +413,7 @@ export default async function HomePage() {
         <section className="bg-[#F4F6F9] py-14 md:py-20">
           <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-wider text-[#9A6B00]">
+              <p className="text-sm font-semibold uppercase tracking-wider text-[#7A5400]">
                 Customer Feedback
               </p>
               <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-[#0B1F3A] md:text-[38px]">
