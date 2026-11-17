@@ -18,7 +18,9 @@ export default function Header({ companyName }: HeaderProps) {
   const pathname = usePathname();
   const loginRef = useRef<HTMLDivElement>(null);
 
-  const brandText = (companyName || COMPANY.name).toUpperCase();
+  const rawBrandName = (companyName || COMPANY.shortName)
+    .replace(/\s+Enterprises?\b/i, "")
+    .trim();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -59,21 +61,21 @@ export default function Header({ companyName }: HeaderProps) {
       }`}
     >
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-4">
-        {/* Left: Rounded Logo + Brand Mark on One Line */}
+        {/* Left: Full FlowGuard Plumbing Logo */}
         <Link
           href="/"
           onClick={closeAll}
-          className="inline-flex items-center gap-2.5 font-bold text-xs sm:text-sm tracking-wide text-[#0B1F3A] whitespace-nowrap shrink-0 hover:text-[#07152B] transition-colors"
+          aria-label={rawBrandName || COMPANY.shortName}
+          className="inline-flex items-center shrink-0 transition-opacity hover:opacity-90"
         >
           <Image
-            src="/images/logo/flowguard-icon.jpg"
-            alt={`${companyName || COMPANY.name} logo`}
-            width={36}
-            height={36}
-            className="h-9 w-9 rounded-full object-cover border border-[#E3E8EF] shrink-0"
+            src="/images/logo/flowguard-logo.jpg"
+            alt={rawBrandName || COMPANY.shortName}
+            width={180}
+            height={52}
+            className="h-11 w-auto object-contain sm:h-12"
             priority
           />
-          <span className="leading-none">{brandText}</span>
         </Link>
 
         {/* Middle: Desktop Navigation Links */}
@@ -167,9 +169,13 @@ export default function Header({ companyName }: HeaderProps) {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 bg-white flex flex-col lg:hidden">
           <div className="h-16 px-4 sm:px-6 flex items-center justify-between border-b border-[#E3E8EF]">
-            <span className="font-extrabold text-sm tracking-tight text-[#0B1F3A]">
-              {brandText}
-            </span>
+            <Image
+              src="/images/logo/flowguard-logo.jpg"
+              alt={rawBrandName || COMPANY.shortName}
+              width={160}
+              height={46}
+              className="h-10 w-auto object-contain"
+            />
             <button
               type="button"
               onClick={closeAll}

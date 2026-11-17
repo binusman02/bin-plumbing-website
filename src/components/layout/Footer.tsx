@@ -9,7 +9,9 @@ interface FooterProps {
 }
 
 export default function Footer({ settings }: FooterProps) {
-  const companyName = settings.company_name || "FlowGuard Plumbing Enterprises";
+  const rawCompanyName = settings.company_name || "FlowGuard Plumbing";
+  const companyName =
+    rawCompanyName.replace(/\s+Enterprises?\b/i, "").trim() || "FlowGuard Plumbing";
   const address = settings.company_address;
   const phone = settings.company_phone;
   const whatsapp = settings.company_whatsapp;
@@ -24,17 +26,14 @@ export default function Footer({ settings }: FooterProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 pb-12">
           {/* Column 1: Company Profile (4 cols) */}
           <div className="lg:col-span-4 space-y-4">
-            <Link href="/" className="inline-flex items-center gap-3">
+            <Link href="/" aria-label={companyName} className="inline-flex items-center">
               <Image
-                src="/images/logo/flowguard-icon.jpg"
-                alt={`${companyName} logo`}
-                width={40}
-                height={40}
-                className="h-10 w-10 rounded-full object-cover border border-white/20 shrink-0"
+                src="/images/logo/flowguard-logo.jpg"
+                alt={companyName}
+                width={200}
+                height={58}
+                className="h-12 w-auto rounded-lg bg-white px-2.5 py-1 object-contain"
               />
-              <span className="text-white font-bold text-sm tracking-wide leading-none">
-                {companyName.toUpperCase()}
-              </span>
             </Link>
             <p className="text-sm text-[#C9D3E0] leading-relaxed max-w-sm">
               Coordinated plumbing services, sanitaryware installations, water storage systems, and pipework repairs with transparent itemised quotations.
