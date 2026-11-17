@@ -1529,7 +1529,7 @@ export function LiveMap({
 
   return (
     <div
-      className={`relative w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 ${heightClassName}`}
+      className={`relative isolate z-0 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 ${heightClassName}`}
     >
       <div
         ref={containerRef}
