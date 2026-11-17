@@ -187,7 +187,7 @@ export function GuidesManagerClient({ initialGuides }: GuidesManagerClientProps)
         target_service_slug: (editing.target_service_slug || "").trim(),
         main_keyword: (editing.main_keyword || "").trim(),
         supporting_keywords: supportingKeywords,
-        author_name: (editing.author_name || "Flow Guard Plumbing Editorial Team").trim(),
+        author_name: (editing.author_name || "FlowGuard Plumbing Editorial Team").trim(),
         published_at: editing.published_at || null,
       });
 
@@ -256,7 +256,7 @@ export function GuidesManagerClient({ initialGuides }: GuidesManagerClientProps)
                 target_service_slug: "",
                 main_keyword: "",
                 supporting_keywords: [],
-                author_name: "Flow Guard Plumbing Editorial Team",
+                author_name: "FlowGuard Plumbing Editorial Team",
                 needs_owner_review: true,
               })
             }
@@ -649,7 +649,7 @@ export function GuidesManagerClient({ initialGuides }: GuidesManagerClientProps)
               <div>
                 <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
                   <ImageIcon className="h-3.5 w-3.5" />
-                  Quick-Pick Authentic Flow Guard Plumbing Photos
+                  Quick-Pick Authentic FlowGuard Plumbing Photos
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {BLOG_IMAGE_PRESETS.map((preset) => (

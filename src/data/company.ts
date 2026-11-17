@@ -1,4 +1,4 @@
-﻿export interface NavItem {
+export interface NavItem {
   name: string;
   href: string;
   badge?: string;
@@ -6,7 +6,7 @@
 
 export const COMPANY = {
   name: "FlowGuard Plumbing Enterprises",
-  shortName: "Flow Guard Plumbing",
+  shortName: "FlowGuard Plumbing",
   tagline: "Reliable Solutions, Lasting Quality",
   heroHeadline: "Reliable Plumbing Services, Coordinated with Care.",
   heroSubheadline:

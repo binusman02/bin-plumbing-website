@@ -5,7 +5,7 @@ import { GuidesManagerClient } from "@/components/admin/GuidesManagerClient";
 export const instant = false;
 
 export const metadata = {
-  title: "Guides CMS | Flow Guard Plumbing Admin",
+  title: "Guides CMS | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminGuidesPage() {

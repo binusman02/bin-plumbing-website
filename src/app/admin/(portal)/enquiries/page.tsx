@@ -6,7 +6,7 @@ import { EnquiriesManagerClient } from "@/components/admin/EnquiriesManagerClien
 export const instant = false;
 
 export const metadata = {
-  title: "Direct Enquiries | Flow Guard Plumbing Admin",
+  title: "Direct Enquiries | FlowGuard Plumbing Admin",
 };
 
 export default async function EnquiriesAdminPage() {

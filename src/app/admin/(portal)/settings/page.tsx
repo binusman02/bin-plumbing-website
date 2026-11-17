@@ -6,7 +6,7 @@ import SettingsManagerClient from "@/components/admin/SettingsManagerClient";
 export const instant = false;
 
 export const metadata = {
-  title: "Settings | Flow Guard Plumbing Admin",
+  title: "Settings | FlowGuard Plumbing Admin",
 };
 
 export default async function SettingsAdminPage() {

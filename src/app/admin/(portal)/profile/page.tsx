@@ -7,7 +7,7 @@ import { getServiceSupabase } from "@/lib/supabase/admin";
 export const instant = false;
 
 export const metadata = {
-  title: "Admin Profile | Flow Guard Plumbing Admin",
+  title: "Admin Profile | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminProfilePage() {

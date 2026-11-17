@@ -4,7 +4,7 @@ import { NotificationDrawer } from "@/components/ui/NotificationDrawer";
 export const instant = false;
 
 export const metadata = {
-  title: "Notifications | Flow Guard Plumbing Admin",
+  title: "Notifications | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminNotificationsPage() {

@@ -5,7 +5,7 @@ import { ComplaintsManagerClient } from "@/components/admin/ComplaintsManagerCli
 export const instant = false;
 
 export const metadata = {
-  title: "Complaints & Reviews | Flow Guard Plumbing Admin",
+  title: "Complaints & Reviews | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminComplaintsPage() {

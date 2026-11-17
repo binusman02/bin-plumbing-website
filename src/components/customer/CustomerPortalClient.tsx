@@ -1591,7 +1591,7 @@ export default function CustomerPortalClient({
             }
           }}
           emptyTitle="No service conversations yet"
-          emptyDescription="Messages with Flow Guard Plumbing dispatch and your assigned plumber appear here."
+          emptyDescription="Messages with FlowGuard Plumbing dispatch and your assigned plumber appear here."
           onTicketRead={(ticket) => {
             setMessages((prev) =>
               prev.map((m) =>

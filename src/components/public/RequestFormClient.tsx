@@ -232,7 +232,7 @@ export default function RequestFormClient({
 
   if (submittedTicket) {
     const shareText = encodeURIComponent(
-      `Flow Guard Plumbing Service Request\nReference: ${submittedTicket.ticketNumber}\nService: ${formData.problemType}\nLocation: ${effectiveCityOrLga}, ${formData.state}`
+      `FlowGuard Plumbing Service Request\nReference: ${submittedTicket.ticketNumber}\nService: ${formData.problemType}\nLocation: ${effectiveCityOrLga}, ${formData.state}`
     );
 
     return (

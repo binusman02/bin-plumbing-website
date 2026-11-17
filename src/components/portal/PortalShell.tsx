@@ -244,7 +244,7 @@ export function PortalShell({
                   {portalTitle}
                 </p>
                 <p className="truncate text-[10px] font-medium text-[#F5B301]">
-                  Flow Guard Plumbing
+                  FlowGuard Plumbing
                 </p>
               </div>
             )}
@@ -354,7 +354,7 @@ export function PortalShell({
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                   <Image
                     src="/images/logo/bin-plumbing-logo.jpg"
-                    alt="Flow Guard Plumbing"
+                    alt="FlowGuard Plumbing"
                     width={32}
                     height={32}
                     className="h-full w-full scale-[1.08] object-cover"
@@ -633,7 +633,7 @@ export function PortalShell({
               <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                 <Image
                   src="/images/logo/bin-plumbing-logo.jpg"
-                  alt="Flow Guard Plumbing"
+                  alt="FlowGuard Plumbing"
                   width={32}
                   height={32}
                   className="h-full w-full scale-[1.08] object-cover"

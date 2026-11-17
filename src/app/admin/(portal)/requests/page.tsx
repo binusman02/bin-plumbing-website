@@ -11,7 +11,7 @@ import { RequestsManagerClient } from "@/components/admin/RequestsManagerClient"
 export const instant = false;
 
 export const metadata = {
-  title: "Service Requests | Flow Guard Plumbing Admin",
+  title: "Service Requests | FlowGuard Plumbing Admin",
 };
 
 export default async function RequestsAdminPage() {

@@ -5,7 +5,7 @@ import { GalleryManagerClient } from "@/components/admin/GalleryManagerClient";
 export const instant = false;
 
 export const metadata = {
-  title: "Gallery CMS | Flow Guard Plumbing Admin",
+  title: "Gallery CMS | FlowGuard Plumbing Admin",
 };
 
 export default async function GalleryAdminPage() {

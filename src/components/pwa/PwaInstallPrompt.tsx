@@ -47,7 +47,7 @@ export function PwaInstallPrompt() {
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-[#F5B301]/40 bg-[#0B1F3A] px-4 py-3 text-white shadow-xs">
       <div className="min-w-0">
-        <p className="text-sm font-bold text-[#F5B301]">Install Flow Guard Plumbing App</p>
+        <p className="text-sm font-bold text-[#F5B301]">Install FlowGuard Plumbing App</p>
         <p className="text-xs text-slate-300">
           Add to your home screen for faster access to jobs, quotes, and chat.
         </p>

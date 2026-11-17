@@ -138,7 +138,7 @@ export default async function ServiceAreasPage() {
                   </a>
                 </div>
                 <iframe
-                  title="Flow Guard Plumbing Service Areas Map"
+                  title="FlowGuard Plumbing Service Areas Map"
                   src={`https://maps.google.com/maps?q=${encodeURIComponent(
                     address || "Kano, Nigeria"
                   )}&t=&z=12&ie=UTF8&iwloc=&output=embed`}

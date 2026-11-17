@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/currency";
 export const instant = false;
 
 export const metadata = {
-  title: "Audit Log | Flow Guard Plumbing Admin",
+  title: "Audit Log | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminAuditLogPage() {

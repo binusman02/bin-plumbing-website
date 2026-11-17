@@ -15,7 +15,7 @@ import {
 export const instant = false;
 
 export const metadata = {
-  title: "Customers Directory | Flow Guard Plumbing Admin",
+  title: "Customers Directory | FlowGuard Plumbing Admin",
 };
 
 export default async function CustomersAdminPage() {

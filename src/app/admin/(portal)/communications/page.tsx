@@ -10,7 +10,7 @@ import CommunicationsManagerClient from "@/components/admin/CommunicationsManage
 export const instant = false;
 
 export const metadata = {
-  title: "Communications | Flow Guard Plumbing Admin",
+  title: "Communications | FlowGuard Plumbing Admin",
 };
 
 export default async function AdminCommunicationsPage() {
