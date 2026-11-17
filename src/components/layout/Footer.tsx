@@ -169,7 +169,7 @@ export default function Footer({ settings }: FooterProps) {
         </div>
 
         {/* Thin line before copyright row */}
-        <div className="pt-8 border-t border-white/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-[#C9D3E0]">
+        <div className="pt-8 border-t border-white/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-[#C9D3E0] lg:pr-44">
           <p>
             © <CurrentYear fallback={2026} /> {companyName}. All rights reserved.
             {rcNumber ? ` RC: ${rcNumber}.` : ""}

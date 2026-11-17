@@ -556,7 +556,10 @@ const DEFAULT_SETTINGS: MarketplaceSettings = {
 };
 
 function isBuildPhase(): boolean {
-  return process.env.NEXT_PHASE === "phase-production-build";
+  return (
+    process.env.NEXT_PHASE === "phase-production-build" &&
+    !process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
 }
 
 function normalizePhoneDigits(phone: string): string {

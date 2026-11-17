@@ -488,7 +488,7 @@ export default async function HomePage() {
           src="/images/gallery/real-work-tools-equipment.jpg"
           alt="Plumbing tools and fittings ready for site dispatch"
           fill
-          sizes="100vw"
+          sizes="(max-width: 768px) 100vw, 1200px"
           className="object-cover object-center"
         />
         <div className="absolute inset-0 bg-[#07152B]/85" aria-hidden="true" />
