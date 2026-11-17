@@ -1,7 +1,7 @@
 // Minimal App-Shell Service Worker for PWA Installability ("Add to Home screen").
 // Private portal data, API calls, and Supabase requests are NEVER cached offline.
 
-const SHELL_CACHE = "bin-plumbing-shell-v3";
+const SHELL_CACHE = "bin-plumbing-shell-v4";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
