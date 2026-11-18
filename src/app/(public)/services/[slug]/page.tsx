@@ -9,7 +9,7 @@ import {
   getServiceCategories,
 } from "@/lib/marketplace";
 import { SITE_URL, buildBreadcrumbJsonLd } from "@/lib/seo";
-import { resolveSharpServiceImage } from "@/lib/service-images";
+import { resolveServiceImageAlt, resolveSharpServiceImage } from "@/lib/service-images";
 
 export const instant = false;
 
@@ -36,6 +36,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     `Professional ${title} in Kano with on-site inspection and itemised quotation before work begins.`;
   const description = rawDesc.length > 158 ? `${rawDesc.slice(0, 155)}...` : rawDesc;
   const canonicalSlug = service.slug || service.id;
+  const seoImage = resolveSharpServiceImage(service.image, service.slug);
+  const seoAlt = resolveServiceImageAlt(service.slug, title);
 
   return {
     title: `${title} in Kano`,
@@ -46,22 +48,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description,
       url: `/services/${canonicalSlug}`,
       type: "website",
-      ...(service.image
-        ? {
-            images: [
-              {
-                url: service.image,
-                alt: `${title} - FlowGuard Plumbing Enterprises`,
-              },
-            ],
-          }
-        : {}),
+      images: [
+        {
+          url: seoImage,
+          alt: seoAlt,
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",
       title: `${title} | FlowGuard Plumbing Enterprises`,
       description,
-      ...(service.image ? { images: [service.image] } : {}),
+      images: [seoImage],
     },
   };
 }
@@ -88,6 +86,7 @@ export default async function ServiceDetailPage({ params }: Props) {
     service.short_description ||
     "Professional inspection and transparent itemised quotation before work begins.";
   const image = resolveSharpServiceImage(service.image, service.slug);
+  const imageAlt = resolveServiceImageAlt(service.slug, title);
   const canonicalSlug = service.slug || service.id;
   const activeAreas = settings.active_coverage_locations || [];
   const phone = settings.company_phone;
@@ -153,6 +152,12 @@ export default async function ServiceDetailPage({ params }: Props) {
         name: title,
         description,
         url: `${baseUrl}/services/${canonicalSlug}`,
+        image: {
+          "@type": "ImageObject",
+          url: image.startsWith("http") ? image : `${baseUrl}${image}`,
+          caption: imageAlt,
+          representativeOfPage: true,
+        },
         provider: {
           "@type": "Plumber",
           name: settings.company_name || "FlowGuard Plumbing Enterprises",
@@ -216,7 +221,8 @@ export default async function ServiceDetailPage({ params }: Props) {
             <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-[#E3E8EF] bg-[#F4F6F9]">
               <Image
                 src={image}
-                alt={`${title} by ${settings.company_name || "FlowGuard Plumbing Enterprises"}`}
+                alt={imageAlt}
+                title={imageAlt}
                 fill
                 quality={85}
                 sizes="(max-width: 1024px) 100vw, 50vw"

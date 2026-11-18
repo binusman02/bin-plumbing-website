@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Phone } from "lucide-react";
 import { getAllGalleryItems, getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
-import { resolveSharpServiceImage } from "@/lib/service-images";
+import { resolveServiceImageAlt, resolveSharpServiceImage } from "@/lib/service-images";
 import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 
 export const metadata: Metadata = {
@@ -45,6 +45,7 @@ export default async function ServicesPage() {
         c.short_description ||
         "Professional inspection and transparent quotation before work begins.",
       image: resolveSharpServiceImage(c.image, c.slug),
+      imageAlt: resolveServiceImageAlt(c.slug, c.title || c.name),
     }));
 
   const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng").replace(/\/+$/, "");
@@ -70,6 +71,13 @@ export default async function ServicesPage() {
             name: service.title,
             description: service.description,
             url: `${baseUrl}/services/${service.slug || service.id}`,
+            image: {
+              "@type": "ImageObject",
+              url: service.image.startsWith("http")
+                ? service.image
+                : `${baseUrl}${service.image}`,
+              caption: service.imageAlt,
+            },
             provider: {
               "@type": "Plumber",
               name: settings.company_name || "FlowGuard Plumbing Enterprises",
@@ -119,7 +127,8 @@ export default async function ServicesPage() {
                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#F4F6F9]">
                   <Image
                     src={service.image}
-                    alt={`${service.title} service`}
+                    alt={service.imageAlt}
+                    title={service.imageAlt}
                     fill
                     quality={85}
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 420px"

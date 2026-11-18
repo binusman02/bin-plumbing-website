@@ -6,6 +6,7 @@ import {
   getServiceCategories,
 } from "@/lib/marketplace";
 import { SITE_URL, slugifySeo } from "@/lib/seo";
+import { resolveSharpServiceImage } from "@/lib/service-images";
 
 const STATIC_BASELINE_DATE = new Date("2026-11-15T00:00:00.000Z");
 
@@ -105,21 +106,37 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       u.startsWith("http") ? u : `${SITE_URL}${u.startsWith("/") ? "" : "/"}${u}`
     );
 
-  const enrichedStaticRoutes = staticRoutes.map((entry) =>
-    entry.url === `${SITE_URL}/gallery` && galleryImages.length > 0
-      ? { ...entry, images: galleryImages }
-      : entry
+  const serviceImageUrls = Array.from(
+    new Set(
+      categories
+        .filter((c) => c.visible !== false && c.active !== false)
+        .map((c) => resolveSharpServiceImage(c.image, c.slug))
+        .map((u) => (u.startsWith("http") ? u : `${SITE_URL}${u}`))
+    )
   );
+
+  const enrichedStaticRoutes = staticRoutes.map((entry) => {
+    if (entry.url === `${SITE_URL}/gallery` && galleryImages.length > 0) {
+      return { ...entry, images: galleryImages };
+    }
+    if (entry.url === `${SITE_URL}/services` && serviceImageUrls.length > 0) {
+      return { ...entry, images: serviceImageUrls };
+    }
+    return entry;
+  });
 
   const serviceEntries: MetadataRoute.Sitemap = categories
     .filter((c) => c.slug || c.title)
     .map((c) => {
       const catRec = c as unknown as { updated_at?: string; created_at?: string };
+      const imgPath = resolveSharpServiceImage(c.image, c.slug);
+      const imgUrl = imgPath.startsWith("http") ? imgPath : `${SITE_URL}${imgPath}`;
       return {
         url: `${SITE_URL}/services/${c.slug || slugifySeo(c.title || "")}`,
         lastModified: toSafeDate(catRec.updated_at || catRec.created_at, settingsDate),
         changeFrequency: "weekly" as const,
         priority: 0.85,
+        images: [imgUrl],
       };
     });
 

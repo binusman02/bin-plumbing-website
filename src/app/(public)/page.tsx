@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Phone, ShieldCheck, Star } from "lucide-react";
 import { getAllGalleryItems, getApprovedReviews, getMarketplaceSettings } from "@/lib/marketplace";
-import { resolveSharpServiceImage } from "@/lib/service-images";
+import { resolveServiceImageAlt, resolveSharpServiceImage } from "@/lib/service-images";
 import { FaqAccordion, type FaqItem } from "@/components/public/FaqAccordion";
 import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 
@@ -225,7 +225,8 @@ export default async function HomePage() {
                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#F4F6F9]">
                   <Image
                     src={resolveSharpServiceImage(service.image, service.slug)}
-                    alt={`${service.title || service.name} service`}
+                    alt={resolveServiceImageAlt(service.slug, service.title || service.name)}
+                    title={resolveServiceImageAlt(service.slug, service.title || service.name)}
                     fill
                     quality={85}
                     sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 420px"
