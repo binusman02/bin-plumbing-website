@@ -1,0 +1,13 @@
+User-Agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /admin
+Disallow: /api/
+Disallow: /customer/
+Disallow: /customer
+Disallow: /plumber/
+Disallow: /plumber
+Disallow: /tracking/
+Disallow: /tracking
+
+Sitemap: https://flowguard.com.ng/sitemap.xml
