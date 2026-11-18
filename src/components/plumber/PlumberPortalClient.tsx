@@ -1273,7 +1273,7 @@ export default function PlumberPortalClient({
                       <button
                         type="button"
                         onClick={() => openJobDetail(activeOverviewJob)}
-                        className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-xs font-bold text-[#0B1F3A] transition hover:bg-slate-100 active:scale-[0.98]"
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-xs font-bold text-[#0B1F3A] transition hover:bg-slate-100 active:opacity-90"
                       >
                         Open Job Details
                       </button>
@@ -1285,7 +1285,7 @@ export default function PlumberPortalClient({
                           setChatNavKey(`open-${activeOverviewJob.ticket_number}-${Date.now()}`);
                           setActiveTab("messages");
                         }}
-                        className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white transition hover:bg-[#132f57] active:scale-[0.98]"
+                        className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white transition hover:bg-[#132f57] active:opacity-90"
                       >
                         <MessageSquare className="h-3.5 w-3.5 text-[#F5B301]" />
                         Message
@@ -1293,7 +1293,7 @@ export default function PlumberPortalClient({
                       {activeOverviewJob.customer_phone && (
                         <a
                           href={`tel:${activeOverviewJob.customer_phone}`}
-                          className="col-span-2 inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.98] sm:col-span-1"
+                          className="col-span-2 inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 active:opacity-90 sm:col-span-1"
                         >
                           <Phone className="h-3.5 w-3.5 text-emerald-600" />
                           Call Customer

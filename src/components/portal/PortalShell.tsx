@@ -553,7 +553,7 @@ export function PortalShell({
 
             const inner = (
               <span
-                className={`flex w-full flex-col items-center justify-center rounded-xl py-1 transition active:scale-95 ${
+                className={`flex w-full flex-col items-center justify-center rounded-xl py-1 transition active:opacity-80 ${
                   isActive ? "bg-[#0B1F3A]/[0.06]" : ""
                 }`}
               >

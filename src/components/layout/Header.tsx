@@ -145,7 +145,7 @@ export default function Header({ companyName }: HeaderProps) {
 
           <Link
             href="/request"
-            className="inline-flex items-center gap-2 bg-[#F5B301] hover:bg-[#E0A200] text-[#0B1F3A] font-bold h-11 px-5 text-sm rounded-lg transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap"
+            className="inline-flex items-center gap-2 bg-[#F5B301] hover:bg-[#E0A200] text-[#0B1F3A] font-bold h-11 px-5 text-sm rounded-lg transition-colors duration-200 active:opacity-90 whitespace-nowrap"
           >
             <span>REQUEST A PLUMBER</span>
             <ArrowRight className="w-4 h-4" />

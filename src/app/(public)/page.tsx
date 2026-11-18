@@ -507,7 +507,7 @@ export default async function HomePage() {
           <div className="flex w-full shrink-0 flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
             <Link
               href="/request"
-              className="inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#F5B301] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200] sm:w-auto"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg py-2.5 text-center leading-snug bg-[#F5B301] px-6 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200] sm:w-auto"
             >
               Request a Plumber
               <ArrowRight className="h-4 w-4 shrink-0" />
@@ -515,7 +515,7 @@ export default async function HomePage() {
             {phone && (
               <a
                 href={`tel:${phone.replace(/\s+/g, "")}`}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-white/50 bg-[#07152B]/60 px-6 text-base font-semibold text-white transition-colors hover:border-[#F5B301] hover:text-[#F5B301] sm:w-auto"
+                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg py-2.5 text-center leading-snug border border-white/50 bg-[#07152B]/60 px-6 text-base font-semibold text-white transition-colors hover:border-[#F5B301] hover:text-[#F5B301] sm:w-auto"
               >
                 <Phone className="h-4 w-4 shrink-0 text-[#F5B301]" />
                 {phone}

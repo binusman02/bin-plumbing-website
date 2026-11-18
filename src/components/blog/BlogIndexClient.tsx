@@ -254,7 +254,7 @@ export function BlogIndexClient({
             return (
               <article
                 key={post.id}
-                className="group flex flex-col justify-between overflow-hidden rounded-2xl border border-[#E3E8EF] bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-[#F5B301] hover:shadow-md"
+                className="group flex flex-col justify-between overflow-hidden rounded-2xl border border-[#E3E8EF] bg-white shadow-sm transition hover:border-[#F5B301] hover:shadow-md"
               >
                 <div>
                   {post.featured_image && (

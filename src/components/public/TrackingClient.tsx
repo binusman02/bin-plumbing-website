@@ -342,7 +342,7 @@ export default function TrackingClient() {
                     type="button"
                     disabled={approvingQuoteId === pendingQuote.id}
                     onClick={() => handleQuoteDecision(pendingQuote.id, "approved")}
-                    className="bg-[#F5B301] hover:bg-[#E0A200] text-[#0B1F3A] font-black text-xs sm:text-sm px-6 py-2.5 rounded-xl shadow-xs transition-transform active:scale-95 flex items-center gap-2"
+                    className="bg-[#F5B301] hover:bg-[#E0A200] text-[#0B1F3A] font-black text-xs sm:text-sm px-6 py-2.5 rounded-xl shadow-xs transition-colors active:opacity-90 flex items-center gap-2"
                   >
                     <ThumbsUp className="w-4 h-4" />
                     <span>

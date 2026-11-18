@@ -1452,7 +1452,7 @@ export function RequestsManagerClient({
                     key={req.id}
                     type="button"
                     onClick={() => openDetail(req)}
-                    className={`w-full rounded-2xl border p-3.5 text-left shadow-xs transition active:scale-[0.99] ${
+                    className={`w-full rounded-2xl border p-3.5 text-left shadow-xs transition active:opacity-90 ${
                       hasUnread
                         ? "border-[#F5B301] bg-amber-50/40"
                         : "border-slate-200 bg-white hover:border-[#0B1F3A]/30"

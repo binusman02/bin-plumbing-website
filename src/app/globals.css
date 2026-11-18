@@ -49,14 +49,46 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-plus-jakarta), system-ui, -apple-system, sans-serif;
 }
 
-/* Consistent soft shadow & hover lift (150-250ms, 2-4px lift) */
+/*
+ * Consistent, stable button behaviour across the public website and the
+ * customer / plumber / admin apps:
+ * - no grey tap flash or double-tap zoom delay on Android/iOS
+ * - buttons never grow wider than their container
+ * - icons never get squashed when labels wrap
+ * Pressed feedback is colour/opacity only (no translate/scale), so a
+ * button never shifts or spills out of its card while being pressed.
+ */
+button,
+a,
+[role="button"],
+input[type="submit"],
+input[type="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button,
+[role="button"] {
+  max-width: 100%;
+}
+
+button svg,
+a svg {
+  flex-shrink: 0;
+}
+
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+/* Consistent soft shadow on cards (no positional lift, so content never shifts) */
 .card-elevated {
   box-shadow: 0 4px 20px -4px rgba(11, 31, 58, 0.06);
-  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+  transition: box-shadow 200ms ease, border-color 200ms ease;
 }
 
 .card-elevated:hover {
-  transform: translateY(-3px);
   box-shadow: 0 12px 28px -6px rgba(11, 31, 58, 0.1);
 }
 

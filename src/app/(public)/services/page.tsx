@@ -196,7 +196,7 @@ export default async function ServicesPage() {
           <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Link
               href="/request"
-              className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#F5B301] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg text-center leading-snug bg-[#F5B301] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#E0A200]"
             >
               <span>Request a Plumber</span>
               <ArrowRight className="h-4 w-4 shrink-0" />
@@ -204,7 +204,7 @@ export default async function ServicesPage() {
             {phone && (
               <a
                 href={`tel:${phone.replace(/\s+/g, "")}`}
-                className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#0B1F3A] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg text-center leading-snug border border-[#0B1F3A] px-6 py-2.5 text-base font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
               >
                 <Phone className="h-4 w-4 shrink-0" />
                 <span>{phone}</span>

@@ -18,7 +18,7 @@ export default function WhatsAppFloatingButton({ whatsapp }: WhatsAppFloatingBut
 
   const cleanNumber = (whatsapp || "").replace(/\D/g, "");
   const className =
-    "w-12 h-12 flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:-translate-y-0.5";
+    "w-12 h-12 flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg hover:shadow-xl transition-colors duration-200 active:opacity-90";
 
   return (
     <aside aria-label="WhatsApp support" className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40">

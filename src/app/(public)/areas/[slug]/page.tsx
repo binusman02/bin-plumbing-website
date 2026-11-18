@@ -197,7 +197,7 @@ export default async function AreaDetailPage({ params }: Props) {
               {phone && (
                 <a
                   href={`tel:${phone.replace(/\s+/g, "")}`}
-                  className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#0B1F3A] bg-white px-5 py-2.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg text-center leading-snug border border-[#0B1F3A] bg-white px-5 py-2.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:bg-[#0B1F3A] hover:text-white"
                 >
                   <Phone className="h-4 w-4 shrink-0" />
                   <span>Call {phone}</span>

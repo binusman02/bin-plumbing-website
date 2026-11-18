@@ -842,7 +842,7 @@ export default function CustomerPortalClient({
             <button
               type="button"
               onClick={() => setShowNewRequestModal(true)}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] active:scale-[0.98] sm:w-auto"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] active:opacity-90 sm:w-auto"
             >
               <Plus className="h-4 w-4" />
               New Plumbing Request
@@ -1613,7 +1613,7 @@ export default function CustomerPortalClient({
                   key={p.id}
                   type="button"
                   onClick={() => setSelectedPayment(p)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-[#F5B301] active:scale-[0.99]"
+                  className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-[#F5B301] active:opacity-90"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-xs font-bold text-[#0B1F3A]">
