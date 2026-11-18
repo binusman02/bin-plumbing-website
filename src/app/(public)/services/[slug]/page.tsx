@@ -9,6 +9,7 @@ import {
   getServiceCategories,
 } from "@/lib/marketplace";
 import { SITE_URL, buildBreadcrumbJsonLd } from "@/lib/seo";
+import { SERVICE_CONTENT_BY_SLUG } from "@/lib/service-content";
 import { resolveServiceImageAlt, resolveSharpServiceImage } from "@/lib/service-images";
 
 export const instant = false;
@@ -30,21 +31,24 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     };
   }
   const title = service.title || service.name || "Plumbing Service";
+  const canonicalSlug = service.slug || service.id;
+  const richContent = SERVICE_CONTENT_BY_SLUG[canonicalSlug];
   const rawDesc =
+    richContent?.metaDescription ||
     service.description ||
     service.short_description ||
     `Professional ${title} in Kano with on-site inspection and itemised quotation before work begins.`;
   const description = rawDesc.length > 158 ? `${rawDesc.slice(0, 155)}...` : rawDesc;
-  const canonicalSlug = service.slug || service.id;
+  const seoTitle = richContent?.seoTitle || `${title} in Kano`;
   const seoImage = resolveSharpServiceImage(service.image, service.slug);
   const seoAlt = resolveServiceImageAlt(service.slug, title, service.image_alt);
 
   return {
-    title: `${title} in Kano`,
+    title: seoTitle,
     description,
     alternates: { canonical: `/services/${canonicalSlug}` },
     openGraph: {
-      title: `${title} in Kano | FlowGuard Plumbing Enterprises`,
+      title: `${seoTitle} | FlowGuard Plumbing Enterprises`,
       description,
       url: `/services/${canonicalSlug}`,
       type: "website",
@@ -81,13 +85,15 @@ export default async function ServiceDetailPage({ params }: Props) {
   }
 
   const title = service.title || service.name || "Plumbing Service";
+  const canonicalSlug = service.slug || service.id;
+  const richContent = SERVICE_CONTENT_BY_SLUG[canonicalSlug];
   const description =
     service.description ||
     service.short_description ||
+    richContent?.overview ||
     "Professional inspection and transparent itemised quotation before work begins.";
   const image = resolveSharpServiceImage(service.image, service.slug);
   const imageAlt = resolveServiceImageAlt(service.slug, title, service.image_alt);
-  const canonicalSlug = service.slug || service.id;
   const activeAreas = settings.active_coverage_locations || [];
   const phone = settings.company_phone;
   const baseUrl = SITE_URL;
@@ -95,11 +101,18 @@ export default async function ServiceDetailPage({ params }: Props) {
   const commonProblems =
     service.common_problems && service.common_problems.length > 0
       ? service.common_problems
-      : [
+      : richContent?.commonProblems || [
           `Sudden leaks, dripping joints, or pressure loss affecting ${title.toLowerCase()}`,
           "Worn valves, seals, or fittings causing water waste or dampness",
           "Faulty or incomplete previous installations needing clean correction",
         ];
+
+  const signsYouNeed = richContent?.signsYouNeed || [];
+  const beforeArrivalSteps = richContent?.beforeArrivalSteps || [
+    "Close the nearest isolation valve or overhead tank outlet if water is leaking actively.",
+    "Switch off nearby water pump or heater breakers if water is near electrical points.",
+    "Clear access around the sink, pump stand, or toilet so the technician can inspect cleanly.",
+  ];
 
   const serviceFaqs: { question: string; answer: string }[] =
     service.faqs && service.faqs.length > 0
@@ -107,7 +120,7 @@ export default async function ServiceDetailPage({ params }: Props) {
           question: item.question,
           answer: item.answer,
         }))
-      : [
+      : richContent?.faqs || [
           {
             question: `How do you quote for ${title} in Kano?`,
             answer:
@@ -120,13 +133,18 @@ export default async function ServiceDetailPage({ params }: Props) {
           },
         ];
 
+  const targetRelatedSlugs =
+    service.related_slugs && service.related_slugs.length > 0
+      ? service.related_slugs
+      : richContent?.relatedSlugs || [];
+
   const relatedServices = categories
     .filter(
       (c) =>
         c.id !== service.id &&
         c.visible !== false &&
         c.active !== false &&
-        (!service.related_slugs?.length || service.related_slugs.includes(c.slug || ""))
+        (targetRelatedSlugs.length === 0 || targetRelatedSlugs.includes(c.slug || ""))
     )
     .slice(0, 3);
 
@@ -238,6 +256,7 @@ export default async function ServiceDetailPage({ params }: Props) {
               </h2>
               <p className="mt-2 text-base leading-relaxed text-[#5B6675]">
                 {service.quotation_notes?.trim() ||
+                  richContent?.overview ||
                   "Every request is logged with a tracking reference number, inspected on site by an assigned technician, and quoted in itemised form before repair or installation starts."}
               </p>
             </div>
@@ -318,10 +337,27 @@ export default async function ServiceDetailPage({ params }: Props) {
                 What to Do Before Your Plumber Arrives
               </h2>
               <ul className="mt-4 space-y-3 text-sm text-[#2C3A4B]">
-                <li>1. Close the nearest isolation valve or overhead tank outlet if water is leaking actively.</li>
-                <li>2. Switch off nearby water pump or heater breakers if water is near electrical points.</li>
-                <li>3. Clear access around the sink, pump stand, or toilet so the technician can inspect cleanly.</li>
+                {beforeArrivalSteps.map((step, i) => (
+                  <li key={step}>
+                    {i + 1}. {step}
+                  </li>
+                ))}
               </ul>
+              {signsYouNeed.length > 0 && (
+                <div className="mt-6 border-t border-slate-100 pt-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#5B6675]">
+                    Signs You Need {title}
+                  </h3>
+                  <ul className="mt-2.5 space-y-2 text-sm text-[#2C3A4B]">
+                    {signsYouNeed.map((sign) => (
+                      <li key={sign} className="flex items-start gap-2">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#F5B301]" />
+                        <span>{sign}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
 

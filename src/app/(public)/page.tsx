@@ -130,7 +130,7 @@ export default async function HomePage() {
           fetchPriority="high"
           sizes="(max-width: 768px) 100vw, 1360px"
           quality={75}
-          className="object-cover object-center"
+          className="object-cover object-[center_20%]"
         />
         <div className="absolute inset-0 bg-[#07152B]/75" aria-hidden="true" />
 
@@ -140,7 +140,7 @@ export default async function HomePage() {
               {settings.company_name}
             </p>
             <h1 className="mt-4 font-heading text-[34px] font-bold leading-[1.12] tracking-tight text-white sm:text-5xl lg:text-[56px]">
-              Reliable Plumbing Services, Coordinated Clearly.
+              Plumbing Services in Kano for Homes and Businesses
             </h1>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-[#C9D3E0] sm:text-lg">
               Book residential or commercial plumbing work across Kano State with structured inspection, upfront quotation approval, and live request tracking from start to finish.
@@ -235,12 +235,24 @@ export default async function HomePage() {
                 </div>
                 <div className="flex flex-1 flex-col p-6">
                   <h3 className="font-heading text-xl font-bold text-[#0B1F3A]">
-                    {service.title || service.name}
+                    <Link
+                      href={`/services/${service.slug || service.id}`}
+                      className="transition-colors hover:text-[#E0A200]"
+                    >
+                      {service.title || service.name}
+                    </Link>
                   </h3>
                   <p className="mt-2 flex-1 text-base leading-relaxed text-[#5B6675] line-clamp-2">
                     {service.short_description || service.description}
                   </p>
-                  <div className="mt-5 pt-2">
+                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 pt-2">
+                    <Link
+                      href={`/services/${service.slug || service.id}`}
+                      className="text-sm font-semibold text-[#5B6675] underline-offset-4 hover:text-[#0B1F3A] hover:underline"
+                    >
+                      View details
+                      <span className="sr-only"> for {service.title || service.name}</span>
+                    </Link>
                     <Link
                       href={`/request?service=${encodeURIComponent(service.title)}`}
                       className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:text-[#E0A200]"

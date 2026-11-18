@@ -37,6 +37,24 @@ export const SERVICE_IMAGE_PRESETS: Array<{ label: string; url: string }> = [
   },
 ];
 
+const VERIFIED_LOCAL_IMAGES = new Set<string>([
+  "/images/services/surface-ppr-pipe-installation-kano.jpg",
+  "/images/services/real-work-pipe-repair.png",
+  "/images/services/underground-drainage-chamber-installation-kano.jpg",
+  "/images/services/bathroom-shower-water-heater-installation-kano.jpg",
+  "/images/services/kitchen-sink-tap-installation-kano.jpg",
+  "/images/services/overhead-water-tank-installation-kano.png",
+  "/images/services/water-pump-pressure-controller-setup-kano.jpg",
+  "/images/services/multi-storey-ppr-riser-piping-kano.jpg",
+  "/images/services/ppr-valve-fitting-maintenance-kano.png",
+  "/images/services/pipework-roughin.jpg",
+  "/images/gallery/real-work-tap-servicing.png",
+  "/images/gallery/real-work-subfloor-pipe-repair.png",
+  "/images/gallery/real-work-toilet-line-repair.jpg",
+  "/images/gallery/real-work-tools-equipment.jpg",
+  "/images/about/plumbing-installation-standards.jpg",
+]);
+
 const SLUG_TO_SEO_IMAGE: Record<string, string> = {
   "pipe-installation-repairs":
     "/images/services/surface-ppr-pipe-installation-kano.jpg",
@@ -55,27 +73,6 @@ const SLUG_TO_SEO_IMAGE: Record<string, string> = {
     "/images/services/multi-storey-ppr-riser-piping-kano.jpg",
   "plumbing-maintenance":
     "/images/services/ppr-valve-fitting-maintenance-kano.png",
-};
-
-const LEGACY_IMAGE_REPLACEMENTS: Record<string, string> = {
-  "/images/services/pipework-roughin.jpg":
-    "/images/services/surface-ppr-pipe-installation-kano.jpg",
-  "/images/gallery/copper-pipework-roughin.jpg":
-    "/images/services/surface-ppr-pipe-installation-kano.jpg",
-  "/images/services/drainage-under-sink.jpg":
-    "/images/services/underground-drainage-chamber-installation-kano.jpg",
-  "/images/services/bathroom-sanitaryware.jpg":
-    "/images/services/bathroom-shower-water-heater-installation-kano.jpg",
-  "/images/services/tap-fittings-repair.jpg":
-    "/images/services/ppr-valve-fitting-maintenance-kano.png",
-  "/images/gallery/real-work-kitchen-sink-tap.jpg":
-    "/images/services/kitchen-sink-tap-installation-kano.jpg",
-  "/images/gallery/real-work-water-tank-fitting.jpg":
-    "/images/services/overhead-water-tank-installation-kano.png",
-  "/images/gallery/real-work-external-pipe-valve.jpg":
-    "/images/services/water-pump-pressure-controller-setup-kano.jpg",
-  "/images/gallery/real-work-residential-building.jpg":
-    "/images/services/multi-storey-ppr-riser-piping-kano.jpg",
 };
 
 const SLUG_TO_SEO_ALT: Record<string, string> = {
@@ -100,8 +97,10 @@ const SLUG_TO_SEO_ALT: Record<string, string> = {
 };
 
 /**
- * Resolves the service image URL. Respects any custom or uploaded image set by
- * the Admin, while upgrading legacy stock/low-res paths to sharp Kano photos.
+ * Resolves a guaranteed-valid service image URL.
+ * - Keeps uploaded `/api/gallery/file/...` or `https://...` URLs and verified local assets.
+ * - Automatically maps any dead/legacy `/images/...` path (such as old DB defaults
+ *   like `/images/services/leak-detection.jpg`) to its sharp Kano photo by slug.
  */
 export function resolveSharpServiceImage(
   image?: string | null,
@@ -109,15 +108,21 @@ export function resolveSharpServiceImage(
 ): string {
   const clean = image?.trim() || "";
   const cleanSlug = slug?.trim() || "";
-  if (clean && LEGACY_IMAGE_REPLACEMENTS[clean]) {
-    return LEGACY_IMAGE_REPLACEMENTS[clean];
-  }
-  if (clean) {
+
+  if (
+    clean &&
+    (clean.startsWith("/api/") ||
+      clean.startsWith("http://") ||
+      clean.startsWith("https://") ||
+      VERIFIED_LOCAL_IMAGES.has(clean))
+  ) {
     return clean;
   }
+
   if (cleanSlug && SLUG_TO_SEO_IMAGE[cleanSlug]) {
     return SLUG_TO_SEO_IMAGE[cleanSlug];
   }
+
   return "/images/services/surface-ppr-pipe-installation-kano.jpg";
 }
 
