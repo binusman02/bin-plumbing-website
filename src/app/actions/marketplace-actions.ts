@@ -1045,6 +1045,8 @@ export async function saveMarketplaceSettingsAction(
     revalidatePath("/contact");
     revalidatePath("/about");
     revalidatePath("/services");
+    revalidatePath("/services/[slug]", "page");
+    revalidatePath("/sitemap.xml");
     revalidatePath("/faq");
     revalidatePath("/request");
     revalidatePath("/join-as-plumber");
@@ -1868,6 +1870,43 @@ export async function addGalleryItemAction(formData: FormData) {
     return { success: true, item };
   } catch (err: any) {
     return { success: false, error: err.message || "Failed to upload gallery item." };
+  }
+}
+
+export async function uploadServiceImageAction(formData: FormData) {
+  try {
+    const admin = await requireAdminUser();
+    if (!admin) {
+      return { success: false, error: "Admin authorisation required." };
+    }
+    const file = formData.get("image") as File | null;
+    if (!file || file.size === 0) {
+      return { success: false, error: "Please select an image file to upload." };
+    }
+    if (!ALLOWED_PHOTO_TYPES.has(file.type) || file.size > MAX_FILE_BYTES) {
+      return { success: false, error: "Image must be JPG, PNG, or WEBP under 5MB." };
+    }
+
+    const safeName = `service-${Date.now().toString(36)}-${sanitizeFileName(file.name)}`;
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const adminSupabase = getServiceSupabase();
+    const { error: uploadErr } = await adminSupabase.storage
+      .from("chat-uploads")
+      .upload(`gallery/${safeName}`, buffer, {
+        contentType: file.type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (uploadErr) {
+      return { success: false, error: uploadErr.message };
+    }
+
+    return {
+      success: true,
+      imageUrl: `/api/gallery/file/${encodeURIComponent(safeName)}`,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Failed to upload service image." };
   }
 }
 

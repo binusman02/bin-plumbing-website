@@ -45,7 +45,7 @@ export default async function ServicesPage() {
         c.short_description ||
         "Professional inspection and transparent quotation before work begins.",
       image: resolveSharpServiceImage(c.image, c.slug),
-      imageAlt: resolveServiceImageAlt(c.slug, c.title || c.name),
+      imageAlt: resolveServiceImageAlt(c.slug, c.title || c.name, c.image_alt),
     }));
 
   const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng").replace(/\/+$/, "");

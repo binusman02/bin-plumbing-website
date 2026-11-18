@@ -225,8 +225,8 @@ export default async function HomePage() {
                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#F4F6F9]">
                   <Image
                     src={resolveSharpServiceImage(service.image, service.slug)}
-                    alt={resolveServiceImageAlt(service.slug, service.title || service.name)}
-                    title={resolveServiceImageAlt(service.slug, service.title || service.name)}
+                    alt={resolveServiceImageAlt(service.slug, service.title || service.name, service.image_alt)}
+                    title={resolveServiceImageAlt(service.slug, service.title || service.name, service.image_alt)}
                     fill
                     quality={85}
                     sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 420px"

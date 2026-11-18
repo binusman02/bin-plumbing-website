@@ -1,3 +1,42 @@
+export const SERVICE_IMAGE_PRESETS: Array<{ label: string; url: string }> = [
+  {
+    label: "Surface & Wall PPR Pipe Installation (Kano)",
+    url: "/images/services/surface-ppr-pipe-installation-kano.jpg",
+  },
+  {
+    label: "Underground & Subfloor Pipe Leak Repair",
+    url: "/images/services/real-work-pipe-repair.png",
+  },
+  {
+    label: "Underground Drainage & Inspection Chamber",
+    url: "/images/services/underground-drainage-chamber-installation-kano.jpg",
+  },
+  {
+    label: "Bathroom Shower Mixer & Sanitaryware",
+    url: "/images/services/bathroom-shower-water-heater-installation-kano.jpg",
+  },
+  {
+    label: "Kitchen Sink & Gooseneck Mixer Tap",
+    url: "/images/services/kitchen-sink-tap-installation-kano.jpg",
+  },
+  {
+    label: "Overhead Poly Water Storage Tanks & Tower",
+    url: "/images/services/overhead-water-tank-installation-kano.png",
+  },
+  {
+    label: "Water Pump & Automatic Pressure Controller",
+    url: "/images/services/water-pump-pressure-controller-setup-kano.jpg",
+  },
+  {
+    label: "Multi-Storey PPR Riser & Waste Stack",
+    url: "/images/services/multi-storey-ppr-riser-piping-kano.jpg",
+  },
+  {
+    label: "PPR Isolation Valves & Preventative Servicing",
+    url: "/images/services/ppr-valve-fitting-maintenance-kano.png",
+  },
+];
+
 const SLUG_TO_SEO_IMAGE: Record<string, string> = {
   "pipe-installation-repairs":
     "/images/services/surface-ppr-pipe-installation-kano.jpg",
@@ -61,31 +100,38 @@ const SLUG_TO_SEO_ALT: Record<string, string> = {
 };
 
 /**
- * Resolves the highest-clarity, SEO-named real Kano plumbing photo for a
- * service category or gallery item, overriding legacy stock or low-res paths.
+ * Resolves the service image URL. Respects any custom or uploaded image set by
+ * the Admin, while upgrading legacy stock/low-res paths to sharp Kano photos.
  */
 export function resolveSharpServiceImage(
   image?: string | null,
   slug?: string | null
 ): string {
-  const cleanSlug = slug?.trim() || "";
-  if (cleanSlug && SLUG_TO_SEO_IMAGE[cleanSlug]) {
-    return SLUG_TO_SEO_IMAGE[cleanSlug];
-  }
   const clean = image?.trim() || "";
+  const cleanSlug = slug?.trim() || "";
   if (clean && LEGACY_IMAGE_REPLACEMENTS[clean]) {
     return LEGACY_IMAGE_REPLACEMENTS[clean];
   }
-  return clean || "/images/services/surface-ppr-pipe-installation-kano.jpg";
+  if (clean) {
+    return clean;
+  }
+  if (cleanSlug && SLUG_TO_SEO_IMAGE[cleanSlug]) {
+    return SLUG_TO_SEO_IMAGE[cleanSlug];
+  }
+  return "/images/services/surface-ppr-pipe-installation-kano.jpg";
 }
 
 /**
- * Returns descriptive, natural SEO alt text for each plumbing service image.
+ * Returns descriptive SEO alt text, preferring any custom alt text saved by the Admin.
  */
 export function resolveServiceImageAlt(
   slug?: string | null,
-  title?: string | null
+  title?: string | null,
+  customAlt?: string | null
 ): string {
+  if (customAlt && customAlt.trim()) {
+    return customAlt.trim();
+  }
   const cleanSlug = slug?.trim() || "";
   if (cleanSlug && SLUG_TO_SEO_ALT[cleanSlug]) {
     return SLUG_TO_SEO_ALT[cleanSlug];

@@ -6,15 +6,29 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Image as ImageIcon,
   Loader2,
+  Pencil,
   Plus,
   Save,
   Trash2,
+  Upload,
 } from "lucide-react";
-import { saveMarketplaceSettingsAction } from "@/app/actions/marketplace-actions";
+import {
+  saveMarketplaceSettingsAction,
+  uploadServiceImageAction,
+} from "@/app/actions/marketplace-actions";
 import { ClassicSelect } from "@/components/ui/ClassicSelect";
-import type { MarketplaceSettings } from "@/lib/marketplace";
+import type { MarketplaceSettings, ServiceCategorySetting } from "@/lib/marketplace";
 import { MAP_CONFIG } from "@/lib/map-config";
+import {
+  SERVICE_IMAGE_PRESETS,
+  resolveServiceImageAlt,
+  resolveSharpServiceImage,
+} from "@/lib/service-images";
 
 interface SettingsManagerClientProps {
   initialSettings: MarketplaceSettings;
@@ -86,6 +100,44 @@ export default function SettingsManagerClient({
   );
   const [newCatName, setNewCatName] = useState("");
   const [newCatDesc, setNewCatDesc] = useState("");
+  const [expandedCatId, setExpandedCatId] = useState<string | null>(null);
+  const [uploadingCatId, setUploadingCatId] = useState<string | null>(null);
+
+  const updateCategoryField = (
+    idx: number,
+    patch: Partial<ServiceCategorySetting>
+  ) => {
+    setCategories((prev) =>
+      prev.map((c, i) => (i === idx ? { ...c, ...patch } : c))
+    );
+  };
+
+  const handleServiceImageUpload = async (idx: number, file: File | null) => {
+    if (!file) return;
+    const cat = categories[idx];
+    if (!cat) return;
+    setUploadingCatId(cat.id);
+    setFeedback(null);
+    try {
+      const fd = new FormData();
+      fd.set("image", file);
+      const res = await uploadServiceImageAction(fd);
+      if (res.success && res.imageUrl) {
+        updateCategoryField(idx, { image: res.imageUrl });
+        setFeedback({
+          type: "success",
+          text: `Uploaded photo for "${cat.title}". Click Save Settings to publish.`,
+        });
+      } else {
+        setFeedback({
+          type: "error",
+          text: res.error || "Could not upload service image.",
+        });
+      }
+    } finally {
+      setUploadingCatId(null);
+    }
+  };
 
   // Coverage Areas (State / Area / Active)
   const [coverageAreas, setCoverageAreas] = useState(
@@ -131,19 +183,36 @@ export default function SettingsManagerClient({
 
   const addCategory = () => {
     if (!newCatName.trim()) return;
-    const slug = newCatName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const slug = newCatName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+    const id = `cat-${slug}`;
     setCategories((prev) => [
       ...prev,
       {
-        id: slug,
+        id,
+        name: newCatName.trim(),
         title: newCatName.trim(),
         slug,
+        short_description: newCatDesc.trim(),
         description: newCatDesc.trim(),
-        image: "/images/hero-plumber.jpg",
+        image: "/images/services/surface-ppr-pipe-installation-kano.jpg",
+        image_alt: `${newCatName.trim()} in Kano — FlowGuard Plumbing Enterprises`,
+        common_problems: [],
+        quotation_notes: "",
+        faqs: [],
+        related_slugs: [],
+        icon_name: "Wrench",
         visible: true,
+        active: true,
+        published: true,
         order: prev.length + 1,
+        sort_order: prev.length + 1,
       },
     ]);
+    setExpandedCatId(id);
     setNewCatName("");
     setNewCatDesc("");
   };
@@ -323,88 +392,611 @@ export default function SettingsManagerClient({
         </div>
       </section>
 
-      {/* 2. Service Categories */}
+      {/* 2. Service Categories (Full Service CMS Editor) */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-bold text-[#0B1F3A]">Service Categories</h2>
-        <p className="text-xs text-slate-500">
-          Add, edit, hide, or reorder plumbing services shown on the public Services page.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-[#0B1F3A]">
+              Plumbing Services CMS ({categories.length})
+            </h2>
+            <p className="text-xs text-slate-500">
+              Edit everything about each service: title, URL slug, short &amp; full descriptions, photo, SEO alt text, common problems, quotation notes, FAQs, related services, visibility, and order.
+            </p>
+          </div>
+        </div>
 
-        <div className="mt-4 space-y-2.5">
-          {categories.map((cat, idx) => (
-            <div
-              key={cat.id}
-              className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3 sm:flex-row sm:items-center"
-            >
-              <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  type="text"
-                  value={cat.title}
-                  onChange={(e) =>
-                    setCategories((prev) =>
-                      prev.map((c, i) => (i === idx ? { ...c, title: e.target.value } : c))
-                    )
-                  }
-                  className="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold"
-                />
-                <input
-                  type="text"
-                  value={cat.description || ""}
-                  onChange={(e) =>
-                    setCategories((prev) =>
-                      prev.map((c, i) =>
-                        i === idx ? { ...c, description: e.target.value } : c
-                      )
-                    )
-                  }
-                  placeholder="Short description"
-                  className="h-10 rounded-lg border border-slate-200 px-3 text-sm"
-                />
+        <div className="mt-4 space-y-3">
+          {categories.map((cat, idx) => {
+            const isExpanded = expandedCatId === cat.id;
+            const resolvedImg = resolveSharpServiceImage(cat.image, cat.slug);
+            const defaultAlt = resolveServiceImageAlt(cat.slug, cat.title);
+            const problems = cat.common_problems || [];
+            const faqs = cat.faqs || [];
+            const relatedSlugs = cat.related_slugs || [];
+
+            return (
+              <div
+                key={cat.id}
+                className={`rounded-xl border transition-colors ${
+                  isExpanded
+                    ? "border-[#F5B301] bg-slate-50/70 shadow-sm"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                {/* Compact Row Header */}
+                <div className="flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={resolvedImg}
+                      alt={cat.image_alt || defaultAlt}
+                      className="h-14 w-20 shrink-0 rounded-lg border border-slate-200 bg-slate-100 object-cover"
+                    />
+                    <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div>
+                        <input
+                          type="text"
+                          value={cat.title}
+                          onChange={(e) =>
+                            updateCategoryField(idx, {
+                              title: e.target.value,
+                              name: e.target.value,
+                            })
+                          }
+                          placeholder="Service title"
+                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0B1F3A]"
+                        />
+                        <p className="mt-0.5 truncate text-[11px] text-slate-400">
+                          /services/{cat.slug}
+                        </p>
+                      </div>
+                      <input
+                        type="text"
+                        value={cat.short_description || cat.description || ""}
+                        onChange={(e) =>
+                          updateCategoryField(idx, {
+                            short_description: e.target.value,
+                            ...(cat.description ? {} : { description: e.target.value }),
+                          })
+                        }
+                        placeholder="Short card summary (shown on homepage)"
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={cat.visible !== false}
+                        onChange={(e) =>
+                          updateCategoryField(idx, {
+                            visible: e.target.checked,
+                            active: e.target.checked,
+                          })
+                        }
+                      />
+                      Visible
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedCatId(isExpanded ? null : cat.id)
+                      }
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition-colors ${
+                        isExpanded
+                          ? "border-[#0B1F3A] bg-[#0B1F3A] text-[#F5B301]"
+                          : "border-slate-200 bg-white text-[#0B1F3A] hover:bg-slate-50"
+                      }`}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      {isExpanded ? "Close Editor" : "Edit Full Service"}
+                      {isExpanded ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveCategory(idx, -1)}
+                      className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+                      aria-label="Move up"
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveCategory(idx, 1)}
+                      className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+                      aria-label="Move down"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCategories((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                      className="rounded-lg border border-red-200 bg-white p-2 text-red-600 hover:bg-red-50"
+                      aria-label="Delete category"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded Full Service Detail Editor */}
+                {isExpanded && (
+                  <div className="border-t border-slate-200 bg-white p-4 sm:p-5 space-y-6 rounded-b-xl">
+                    {/* A. Core Identity & URL */}
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                          Service Title
+                        </label>
+                        <input
+                          type="text"
+                          value={cat.title}
+                          onChange={(e) =>
+                            updateCategoryField(idx, {
+                              title: e.target.value,
+                              name: e.target.value,
+                            })
+                          }
+                          className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <div className="mb-1 flex items-center justify-between">
+                          <label className="block text-xs font-semibold uppercase text-slate-500">
+                            URL Slug (/services/...)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateCategoryField(idx, {
+                                slug: cat.title
+                                  .toLowerCase()
+                                  .trim()
+                                  .replace(/[^a-z0-9]+/g, "-")
+                                  .replace(/(^-|-$)/g, ""),
+                              })
+                            }
+                            className="text-[11px] font-semibold text-[#0B1F3A] underline hover:text-[#E0A200]"
+                          >
+                            Generate from title
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={cat.slug}
+                          onChange={(e) =>
+                            updateCategoryField(idx, {
+                              slug: e.target.value
+                                .toLowerCase()
+                                .replace(/[^a-z0-9-]/g, "-"),
+                            })
+                          }
+                          className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                          Icon &amp; Public Page
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={cat.icon_name || "Wrench"}
+                            onChange={(e) =>
+                              updateCategoryField(idx, { icon_name: e.target.value })
+                            }
+                            className="h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                          >
+                            {[
+                              "Wrench",
+                              "Search",
+                              "Droplet",
+                              "Bath",
+                              "Utensils",
+                              "Database",
+                              "Zap",
+                              "Building2",
+                              "ShieldCheck",
+                            ].map((ic) => (
+                              <option key={ic} value={ic}>
+                                Icon: {ic}
+                              </option>
+                            ))}
+                          </select>
+                          <a
+                            href={`/services/${cat.slug}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                          >
+                            View <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* B. Descriptions & Quotation Notes */}
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                          Short Card Description (Homepage Card)
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={cat.short_description || ""}
+                          onChange={(e) =>
+                            updateCategoryField(idx, {
+                              short_description: e.target.value,
+                            })
+                          }
+                          placeholder="Concise 1-2 sentence summary shown on homepage service cards..."
+                          className="w-full rounded-lg border border-slate-200 p-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                          Full Service Description (/services &amp; Detail Page)
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={cat.description || ""}
+                          onChange={(e) =>
+                            updateCategoryField(idx, {
+                              description: e.target.value,
+                            })
+                          }
+                          placeholder="Detailed service description shown on the Services catalog and service detail page..."
+                          className="w-full rounded-lg border border-slate-200 p-3 text-sm"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+                          How We Handle This Service / Quotation Notes (Shown on Detail Page)
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={cat.quotation_notes || ""}
+                          onChange={(e) =>
+                            updateCategoryField(idx, {
+                              quotation_notes: e.target.value,
+                            })
+                          }
+                          placeholder="Every request is logged with a tracking reference number, inspected on site by an assigned technician, and quoted in itemised form before repair or installation starts."
+                          className="w-full rounded-lg border border-slate-200 p-3 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* C. Service Photo & Image SEO */}
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+                        <ImageIcon className="h-4 w-4 text-[#F5B301]" />
+                        Service Photo &amp; Image SEO
+                      </h3>
+                      <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-12">
+                        <div className="md:col-span-4">
+                          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={resolvedImg}
+                              alt={cat.image_alt || defaultAlt}
+                              className="aspect-[4/3] w-full object-cover"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-3 md:col-span-8">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-1 block text-xs font-semibold text-slate-600">
+                                Choose Preset Kano Plumbing Photo
+                              </label>
+                              <select
+                                value={
+                                  SERVICE_IMAGE_PRESETS.some(
+                                    (p) => p.url === resolvedImg
+                                  )
+                                    ? resolvedImg
+                                    : ""
+                                }
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    updateCategoryField(idx, {
+                                      image: e.target.value,
+                                    });
+                                  }
+                                }}
+                                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium"
+                              >
+                                <option value="">-- Custom / Uploaded Photo --</option>
+                                {SERVICE_IMAGE_PRESETS.map((preset) => (
+                                  <option key={preset.url} value={preset.url}>
+                                    {preset.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs font-semibold text-slate-600">
+                                Or Upload New Service Photo (Max 5MB)
+                              </label>
+                              <label className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100">
+                                {uploadingCatId === cat.id ? (
+                                  <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    Uploading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="h-3.5 w-3.5 text-[#F5B301]" />
+                                    Upload Image File
+                                  </>
+                                )}
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  className="hidden"
+                                  disabled={uploadingCatId === cat.id}
+                                  onChange={(e) =>
+                                    handleServiceImageUpload(
+                                      idx,
+                                      e.target.files?.[0] || null
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">
+                              Image Path or URL
+                            </label>
+                            <input
+                              type="text"
+                              value={cat.image || resolvedImg}
+                              onChange={(e) =>
+                                updateCategoryField(idx, { image: e.target.value })
+                              }
+                              placeholder="/images/services/..."
+                              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-mono"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">
+                              SEO Image Alt Text &amp; Schema Caption
+                            </label>
+                            <input
+                              type="text"
+                              value={cat.image_alt || ""}
+                              onChange={(e) =>
+                                updateCategoryField(idx, {
+                                  image_alt: e.target.value,
+                                })
+                              }
+                              placeholder={defaultAlt}
+                              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* D. Common Problems We Handle */}
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+                            Common Problems We Handle ({problems.length})
+                          </h3>
+                          <p className="text-[11px] text-slate-500">
+                            Bullet points displayed on /services/{cat.slug} under &ldquo;Common Problems We Handle&rdquo;.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateCategoryField(idx, {
+                              common_problems: [...problems, ""],
+                            })
+                          }
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add Problem
+                        </button>
+                      </div>
+                      {problems.length === 0 ? (
+                        <p className="mt-2 text-xs italic text-slate-400">
+                          No custom problems added yet (default problems are shown until you add custom bullets).
+                        </p>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          {problems.map((prob, pIdx) => (
+                            <div key={pIdx} className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={prob}
+                                onChange={(e) => {
+                                  const next = [...problems];
+                                  next[pIdx] = e.target.value;
+                                  updateCategoryField(idx, {
+                                    common_problems: next,
+                                  });
+                                }}
+                                placeholder="e.g. Leaking concealed PPR or PVC joints causing wall dampness"
+                                className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateCategoryField(idx, {
+                                    common_problems: problems.filter(
+                                      (_, i) => i !== pIdx
+                                    ),
+                                  })
+                                }
+                                className="rounded-lg border border-red-200 p-1.5 text-red-600 hover:bg-red-50"
+                                aria-label="Remove problem"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* E. Service-Specific FAQs (Page + FAQPage JSON-LD) */}
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+                            Service FAQs &amp; Rich Schema ({faqs.length})
+                          </h3>
+                          <p className="text-[11px] text-slate-500">
+                            Displayed on /services/{cat.slug} and included in Google FAQPage structured data.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateCategoryField(idx, {
+                              faqs: [...faqs, { question: "", answer: "" }],
+                            })
+                          }
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add FAQ
+                        </button>
+                      </div>
+                      {faqs.length === 0 ? (
+                        <p className="mt-2 text-xs italic text-slate-400">
+                          No custom FAQs added yet (default service FAQs are shown until you add custom Q&amp;As).
+                        </p>
+                      ) : (
+                        <div className="mt-3 space-y-3">
+                          {faqs.map((faq, fIdx) => (
+                            <div
+                              key={fIdx}
+                              className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={faq.question}
+                                  onChange={(e) => {
+                                    const next = [...faqs];
+                                    next[fIdx] = {
+                                      ...next[fIdx],
+                                      question: e.target.value,
+                                    };
+                                    updateCategoryField(idx, { faqs: next });
+                                  }}
+                                  placeholder="Question (e.g. How do you quote for pipe installation in Kano?)"
+                                  className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateCategoryField(idx, {
+                                      faqs: faqs.filter((_, i) => i !== fIdx),
+                                    })
+                                  }
+                                  className="rounded-lg border border-red-200 bg-white p-1.5 text-red-600 hover:bg-red-50"
+                                  aria-label="Remove FAQ"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={faq.answer}
+                                onChange={(e) => {
+                                  const next = [...faqs];
+                                  next[fIdx] = {
+                                    ...next[fIdx],
+                                    answer: e.target.value,
+                                  };
+                                  updateCategoryField(idx, { faqs: next });
+                                }}
+                                placeholder="Answer..."
+                                className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* F. Related Services Cross-Linking */}
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+                        Related Services Linked on /services/{cat.slug}
+                      </h3>
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        {categories
+                          .filter((_, i) => i !== idx)
+                          .map((other) => {
+                            const selected = relatedSlugs.includes(other.slug);
+                            return (
+                              <button
+                                key={other.id}
+                                type="button"
+                                onClick={() => {
+                                  const next = selected
+                                    ? relatedSlugs.filter((s) => s !== other.slug)
+                                    : [...relatedSlugs, other.slug];
+                                  updateCategoryField(idx, {
+                                    related_slugs: next,
+                                  });
+                                }}
+                                className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                                  selected
+                                    ? "border-[#0B1F3A] bg-[#0B1F3A] text-[#F5B301]"
+                                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                                }`}
+                              >
+                                {selected ? "✓ " : "+ "}
+                                {other.title}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedCatId(null)}
+                        className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Done Editing {cat.title}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isPending}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#F5B301] px-4 py-2 text-xs font-bold text-[#07152B] hover:bg-[#e5a700] disabled:opacity-50"
+                      >
+                        {isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Save className="h-3.5 w-3.5" />
+                        )}
+                        Save All Services
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={cat.visible}
-                    onChange={(e) =>
-                      setCategories((prev) =>
-                        prev.map((c, i) =>
-                          i === idx ? { ...c, visible: e.target.checked } : c
-                        )
-                      )
-                    }
-                  />
-                  Visible
-                </label>
-                <button
-                  type="button"
-                  onClick={() => moveCategory(idx, -1)}
-                  className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-                  aria-label="Move up"
-                >
-                  <ArrowUp className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveCategory(idx, 1)}
-                  className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-                  aria-label="Move down"
-                >
-                  <ArrowDown className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCategories((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                  className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
-                  aria-label="Delete category"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -412,14 +1004,14 @@ export default function SettingsManagerClient({
             type="text"
             value={newCatName}
             onChange={(e) => setNewCatName(e.target.value)}
-            placeholder="New category name"
+            placeholder="New service name (e.g. Borehole & Submersible Pump Servicing)"
             className="h-11 flex-1 rounded-xl border border-slate-200 px-3 text-sm"
           />
           <input
             type="text"
             value={newCatDesc}
             onChange={(e) => setNewCatDesc(e.target.value)}
-            placeholder="Description (optional)"
+            placeholder="Short summary (optional)"
             className="h-11 flex-1 rounded-xl border border-slate-200 px-3 text-sm"
           />
           <button
@@ -427,7 +1019,7 @@ export default function SettingsManagerClient({
             onClick={addCategory}
             className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-[#0B1F3A] hover:bg-slate-100"
           >
-            <Plus className="h-4 w-4" /> Add Category
+            <Plus className="h-4 w-4" /> Add New Service
           </button>
         </div>
       </section>

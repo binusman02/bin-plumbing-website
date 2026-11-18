@@ -37,7 +37,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description = rawDesc.length > 158 ? `${rawDesc.slice(0, 155)}...` : rawDesc;
   const canonicalSlug = service.slug || service.id;
   const seoImage = resolveSharpServiceImage(service.image, service.slug);
-  const seoAlt = resolveServiceImageAlt(service.slug, title);
+  const seoAlt = resolveServiceImageAlt(service.slug, title, service.image_alt);
 
   return {
     title: `${title} in Kano`,
@@ -86,7 +86,7 @@ export default async function ServiceDetailPage({ params }: Props) {
     service.short_description ||
     "Professional inspection and transparent itemised quotation before work begins.";
   const image = resolveSharpServiceImage(service.image, service.slug);
-  const imageAlt = resolveServiceImageAlt(service.slug, title);
+  const imageAlt = resolveServiceImageAlt(service.slug, title, service.image_alt);
   const canonicalSlug = service.slug || service.id;
   const activeAreas = settings.active_coverage_locations || [];
   const phone = settings.company_phone;
@@ -237,8 +237,8 @@ export default async function ServiceDetailPage({ params }: Props) {
                 How We Handle {title}
               </h2>
               <p className="mt-2 text-base leading-relaxed text-[#5B6675]">
-                Every request is logged with a tracking reference number, inspected on site by an
-                assigned technician, and quoted in itemised form before repair or installation starts.
+                {service.quotation_notes?.trim() ||
+                  "Every request is logged with a tracking reference number, inspected on site by an assigned technician, and quoted in itemised form before repair or installation starts."}
               </p>
             </div>
 

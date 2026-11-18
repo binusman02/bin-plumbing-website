@@ -254,6 +254,7 @@ export interface ServiceCategorySetting {
   description: string;
   short_description?: string;
   image?: string;
+  image_alt?: string;
   common_problems?: string[];
   quotation_notes?: string;
   faqs?: { question: string; answer: string }[];
@@ -818,24 +819,59 @@ export async function getServiceCategories(onlyActive = false): Promise<ServiceC
       .select("*")
       .order("sort_order", { ascending: true });
     if (onlyActive) query = query.eq("is_active", true);
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) return DEFAULT_SERVICE_CATEGORIES;
+    const [{ data, error }, { data: settingRow }] = await Promise.all([
+      query,
+      supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "marketplace_settings")
+        .maybeSingle(),
+    ]);
+    const storedCats =
+      ((settingRow?.value as Partial<MarketplaceSettings> | undefined)
+        ?.service_categories as ServiceCategorySetting[] | undefined) || [];
+    if (error || !data || data.length === 0) {
+      if (storedCats.length > 0) {
+        return onlyActive ? storedCats.filter((c) => c.visible !== false && c.active !== false) : storedCats;
+      }
+      return DEFAULT_SERVICE_CATEGORIES;
+    }
     return data.map((c) => {
       const slug = String(c.slug);
       const fallback = DEFAULT_SERVICE_CATEGORIES.find((d) => d.slug === slug);
+      const storedMatch = storedCats.find(
+        (s) => s.slug === slug || s.id === String(c.id)
+      );
       return {
         id: String(c.id),
         slug,
         name: String(c.name),
-        title: String(c.name),
-        description: String(c.long_description || c.short_description || ""),
-        short_description: String(c.short_description || ""),
-        image: fallback?.image || "/images/services/pipework-roughin.jpg",
-        common_problems: Array.isArray(c.common_problems) ? c.common_problems : [],
-        quotation_notes: c.quotation_notes ? String(c.quotation_notes) : "",
-        faqs: Array.isArray(c.faqs) ? c.faqs : [],
-        related_slugs: Array.isArray(c.related_slugs) ? c.related_slugs : [],
-        icon_name: c.icon_name ? String(c.icon_name) : "Wrench",
+        title: storedMatch?.title || String(c.name),
+        description: String(c.long_description || c.short_description || storedMatch?.description || ""),
+        short_description: String(c.short_description || storedMatch?.short_description || ""),
+        image:
+          storedMatch?.image ||
+          fallback?.image ||
+          "/images/services/surface-ppr-pipe-installation-kano.jpg",
+        image_alt: storedMatch?.image_alt || "",
+        common_problems:
+          Array.isArray(c.common_problems) && c.common_problems.length > 0
+            ? c.common_problems
+            : storedMatch?.common_problems || [],
+        quotation_notes: c.quotation_notes
+          ? String(c.quotation_notes)
+          : storedMatch?.quotation_notes || "",
+        faqs:
+          Array.isArray(c.faqs) && c.faqs.length > 0
+            ? c.faqs
+            : storedMatch?.faqs || [],
+        related_slugs:
+          Array.isArray(c.related_slugs) && c.related_slugs.length > 0
+            ? c.related_slugs
+            : storedMatch?.related_slugs || [],
+        icon_name: c.icon_name
+          ? String(c.icon_name)
+          : storedMatch?.icon_name || "Wrench",
         sort_order: Number(c.sort_order || 0),
         order: Number(c.sort_order || 0),
         active: Boolean(c.is_active),
@@ -2893,6 +2929,16 @@ export async function updateMarketplaceSettings(
       });
     if (catRows.length > 0) {
       await supabase.from("service_categories").upsert(catRows, { onConflict: "slug" });
+      const activeSlugs = catRows.map((r) => r.slug);
+      const { data: existingRows } = await supabase
+        .from("service_categories")
+        .select("slug");
+      const removedSlugs = (existingRows || [])
+        .map((r) => String(r.slug))
+        .filter((s) => !activeSlugs.includes(s));
+      if (removedSlugs.length > 0) {
+        await supabase.from("service_categories").delete().in("slug", removedSlugs);
+      }
     }
   }
 
