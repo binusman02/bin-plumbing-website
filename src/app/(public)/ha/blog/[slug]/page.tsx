@@ -27,12 +27,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const rawTitle = post.ha_seo_title || post.ha_title;
   const rawDesc = post.ha_meta_description || post.ha_summary || post.ha_title;
-  const title = rawTitle.length > 65 ? `${rawTitle.slice(0, 62)}...` : rawTitle;
+  const title = rawTitle.length > 52 ? `${rawTitle.slice(0, 49)}...` : rawTitle;
   const description = rawDesc.length > 160 ? `${rawDesc.slice(0, 157)}...` : rawDesc;
   const hasEn = post.en_status === "published" && Boolean(post.en_slug.trim());
 
   return {
-    title: { absolute: rawTitle.includes("FlowGuard Plumbing") ? rawTitle : `${title} | FlowGuard Plumbing Enterprises` },
+    title: { absolute: rawTitle.includes("FlowGuard Plumbing") ? rawTitle : `${title} | FlowGuard Plumbing` },
     description,
     alternates: {
       canonical: `/ha/blog/${post.ha_slug}`,

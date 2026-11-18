@@ -8,6 +8,19 @@ export const metadata: Metadata = {
     "Check the live status of your plumbing service request, review itemized quotations, approve estimates, and message your assigned coordinator or technician.",
   alternates: { canonical: "/tracking" },
   robots: { index: false, follow: false },
+  openGraph: {
+    title: "Track Your Request | FlowGuard Plumbing Enterprises",
+    description:
+      "Check the live status of your plumbing service request, review itemized quotations, and message your assigned coordinator.",
+    url: "/tracking",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Track Your Request | FlowGuard Plumbing Enterprises",
+    description:
+      "Check the live status of your plumbing service request, review itemized quotations, and message your assigned coordinator.",
+  },
 };
 
 export default function TrackingPage() {

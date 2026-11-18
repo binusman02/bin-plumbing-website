@@ -7,6 +7,19 @@ export const metadata: Metadata = {
   description:
     "Terms of Service governing service requests, on-site inspections, quotation approvals, and plumbing coordination.",
   alternates: { canonical: "/terms" },
+  openGraph: {
+    title: "Terms of Service | FlowGuard Plumbing Enterprises",
+    description:
+      "Terms of Service governing service requests, on-site inspections, quotation approvals, and plumbing coordination.",
+    url: "/terms",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Terms of Service | FlowGuard Plumbing Enterprises",
+    description:
+      "Terms of Service governing service requests, on-site inspections, quotation approvals, and plumbing coordination.",
+  },
 };
 
 export default async function TermsPage() {

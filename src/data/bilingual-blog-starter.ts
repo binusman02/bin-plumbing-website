@@ -92,7 +92,7 @@ Idan kuna bukatar gyaran injin famfo a Kano, ku tura bukata ta shafin FlowGuard 
     ha_status: "published",
     featured_image: "/images/blog/water-pump-pressure-controller-kano.jpg",
     image_attribution: "FlowGuard Plumbing Enterprises field installation",
-    target_service_slug: "water-pump-installation-repair",
+    target_service_slug: "pump-installation-repairs",
     main_keyword: "pumping machine repair in Kano",
     supporting_keywords: [
       "water pump repair in Kano",
@@ -264,7 +264,7 @@ Ku nemi ma'aikacin FlowGuard Plumbing Enterprises a Kano domin duba injin ruwank
     ha_status: "published",
     featured_image: "/images/gallery/real-work-external-pipe-valve.jpg",
     image_attribution: "FlowGuard Plumbing Enterprises field work",
-    target_service_slug: "water-pump-installation-repair",
+    target_service_slug: "pump-installation-repairs",
     main_keyword: "water pump repair in Kano",
     supporting_keywords: [
       "water pump technician in Kano",
@@ -345,7 +345,7 @@ Kuna iya neman kwararren mai aikin famfo na FlowGuard Plumbing Enterprises a Kan
     ha_status: "published",
     featured_image: "/images/gallery/real-work-water-tank-fitting.jpg",
     image_attribution: "FlowGuard Plumbing Enterprises field work",
-    target_service_slug: "water-pump-installation-repair",
+    target_service_slug: "pump-installation-repairs",
     main_keyword: "water pump installation in Kano",
     supporting_keywords: [
       "submersible pump repair in Kano",
@@ -592,7 +592,7 @@ FlowGuard Plumbing Enterprises na girka tankin ruwa tare da gyaran bawul da butu
     ha_status: "published",
     featured_image: "/images/gallery/real-work-water-tank-fitting.jpg",
     image_attribution: "FlowGuard Plumbing Enterprises field work",
-    target_service_slug: "water-tank-installation",
+    target_service_slug: "water-storage-supply-systems",
     main_keyword: "water tank installation in Kano",
     supporting_keywords: [
       "plumbing maintenance in Kano",
@@ -763,7 +763,7 @@ Idan magudanar gidanku ta toshe, ku nemi FlowGuard Plumbing Enterprises a Kano d
     ha_status: "published",
     featured_image: "/images/blog/underground-drainage-chamber-kano.jpg",
     image_attribution: "FlowGuard Plumbing Enterprises field work",
-    target_service_slug: "drainage-unblocking",
+    target_service_slug: "drainage-blockage-issues",
     main_keyword: "blocked drainage repair in Kano",
     supporting_keywords: [
       "drainage installation in Kano",

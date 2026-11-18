@@ -6,7 +6,7 @@ import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace"
 import { ContactFormClient } from "./ContactFormClient";
 
 export const metadata: Metadata = {
-  title: "Contact FlowGuard Plumbing Enterprises in Kano",
+  title: "Contact Us in Kano",
   description:
     "Contact FlowGuard Plumbing Enterprises in Kano State for plumbing enquiries, service requests, quotations, and customer support.",
   alternates: { canonical: "/contact" },
@@ -16,6 +16,12 @@ export const metadata: Metadata = {
       "Speak with our coordination team in Kano for plumbing enquiries, quotations, and support.",
     url: "/contact",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Contact FlowGuard Plumbing Enterprises in Kano",
+    description:
+      "Speak with our coordination team in Kano for plumbing enquiries, quotations, and support.",
   },
 };
 

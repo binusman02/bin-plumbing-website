@@ -21,6 +21,21 @@ interface BlogIndexClientProps {
   engagementMap: BlogEngagementMap;
 }
 
+const HAUSA_CATEGORY_LABELS: Record<string, string> = {
+  "Water Tanks & Pumps": "Tanki da Injin Ruwa",
+  "Pipe & Leak Repairs": "Gyaran Bututu da Yoyo",
+  "Drainage & Unblocking": "Magudanar Ruwa",
+  "Bathroom & Toilets": "Bandaki da Kayan Wanka",
+  "New Builds & Pipework": "Sabon Gini da Bututu",
+  "Emergency Plumbing": "Aikin Famfo na Gaggawa",
+  "Plumbing Tips": "Shawarwarin Famfo",
+};
+
+function formatCategoryLabel(category: string, isHausa: boolean): string {
+  if (!isHausa) return category;
+  return HAUSA_CATEGORY_LABELS[category] || category;
+}
+
 function estimateReadMinutes(content: string): number {
   const words = content.trim().split(/\s+/).filter(Boolean).length;
   return Math.max(2, Math.round(words / 180));
@@ -120,7 +135,7 @@ export function BlogIndexClient({
                   : "border border-[#D4DCE6] bg-white text-[#2C3A4B] hover:border-[#F5B301]"
               }`}
             >
-              {cat}
+              {formatCategoryLabel(cat, isHausa)}
             </button>
           ))}
         </div>
@@ -162,7 +177,7 @@ export function BlogIndexClient({
                     {isHausa ? "Babban Labari" : "Featured Guide"}
                   </span>
                   <span className="rounded-full bg-[#F4F6F9] px-3 py-1 text-xs font-semibold text-[#0B1F3A]">
-                    {featuredPost.category}
+                    {formatCategoryLabel(featuredPost.category || "", isHausa)}
                   </span>
                   <span className="inline-flex items-center gap-1 text-xs text-[#5B6675]">
                     <Clock className="h-3.5 w-3.5" />
@@ -259,7 +274,11 @@ export function BlogIndexClient({
                   <div className="p-6 pb-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="inline-block rounded-full bg-[#F4F6F9] px-3 py-1 text-xs font-semibold text-[#0B1F3A]">
-                        {post.category || (isHausa ? "Aikin Famfo" : "Plumbing Guide")}
+                        {post.category
+                          ? formatCategoryLabel(post.category, isHausa)
+                          : isHausa
+                            ? "Aikin Famfo"
+                            : "Plumbing Guide"}
                       </span>
                       <span className="inline-flex items-center gap-1 text-xs text-[#5B6675]">
                         <Clock className="h-3.5 w-3.5" />

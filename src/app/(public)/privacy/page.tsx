@@ -7,6 +7,19 @@ export const metadata: Metadata = {
   description:
     "Privacy Policy for FlowGuard Plumbing Enterprises explaining how customer and technician request information is handled.",
   alternates: { canonical: "/privacy" },
+  openGraph: {
+    title: "Privacy Policy | FlowGuard Plumbing Enterprises",
+    description:
+      "Privacy Policy for FlowGuard Plumbing Enterprises explaining how customer and technician request information is handled.",
+    url: "/privacy",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Privacy Policy | FlowGuard Plumbing Enterprises",
+    description:
+      "Privacy Policy for FlowGuard Plumbing Enterprises explaining how customer and technician request information is handled.",
+  },
 };
 
 export default async function PrivacyPage() {

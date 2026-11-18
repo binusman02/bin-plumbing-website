@@ -17,11 +17,25 @@ export async function generateMetadata(): Promise<Metadata> {
     Boolean(settings.company_address?.trim()) &&
     (settings.active_coverage_locations?.length ?? 0) > 0;
 
+  const title = "Plumbing Service Areas in Kano";
+  const description =
+    "Active Kano service coverage areas for FlowGuard Plumbing Enterprises, matching our verified operating address and dispatch settings.";
+
   return {
-    title: "Service Areas",
-    description:
-      "Active service coverage areas for FlowGuard Plumbing Enterprises, matching our verified operating address and dispatch settings.",
+    title,
+    description,
     alternates: { canonical: "/areas" },
+    openGraph: {
+      title: `${title} | FlowGuard Plumbing Enterprises`,
+      description,
+      url: "/areas",
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${title} | FlowGuard Plumbing Enterprises`,
+      description,
+    },
     ...(isReady ? {} : { robots: { index: false, follow: true } }),
   };
 }

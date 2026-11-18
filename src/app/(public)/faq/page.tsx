@@ -6,7 +6,7 @@ import { getMarketplaceSettings } from "@/lib/marketplace";
 import { FaqAccordion, type FaqItem } from "@/components/public/FaqAccordion";
 
 export const metadata: Metadata = {
-  title: "Plumbing FAQs | FlowGuard Plumbing Enterprises Kano",
+  title: "Plumbing FAQs in Kano",
   description:
     "Answers to common questions about requesting a plumber in Kano, on-site inspection quotations, active coverage areas, and live request tracking.",
   alternates: { canonical: "/faq" },
@@ -16,6 +16,12 @@ export const metadata: Metadata = {
       "Answers to common questions about requesting a plumber, inspection quotes, and tracking in Kano.",
     url: "/faq",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Plumbing FAQs | FlowGuard Plumbing Enterprises Kano",
+    description:
+      "Answers to common questions about requesting a plumber, inspection quotes, and tracking in Kano.",
   },
 };
 

@@ -142,7 +142,7 @@ export default async function HomePage() {
               Reliable Plumbing Services, Coordinated Clearly.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-[#C9D3E0] sm:text-lg">
-              Book residential or commercial plumbing work with structured inspection, upfront quotation approval, and live request tracking from start to finish.
+              Book residential or commercial plumbing work across Kano State with structured inspection, upfront quotation approval, and live request tracking from start to finish.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">

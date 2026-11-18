@@ -158,6 +158,22 @@ export default async function AreaDetailPage({ params }: Props) {
                 );
               })}
             </div>
+            <div className="mt-6 flex flex-wrap gap-4 border-t border-[#E3E8EF] pt-5 text-sm font-semibold">
+              <Link
+                href="/services"
+                className="inline-flex items-center gap-1.5 text-[#0B1F3A] hover:text-[#E0A200]"
+              >
+                Explore all plumbing services
+                <ArrowRight className="h-4 w-4 text-[#F5B301]" />
+              </Link>
+              <Link
+                href="/en/blog"
+                className="inline-flex items-center gap-1.5 text-[#0B1F3A] hover:text-[#E0A200]"
+              >
+                Read Kano plumbing guides
+                <ArrowRight className="h-4 w-4 text-[#F5B301]" />
+              </Link>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-[#E3E8EF] bg-[#F4F6F9] p-6 lg:col-span-5">

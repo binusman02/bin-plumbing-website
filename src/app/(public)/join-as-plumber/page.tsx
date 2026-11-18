@@ -23,6 +23,19 @@ export const metadata: Metadata = {
   description:
     "Create a plumber account and apply to join the reviewed plumbing technician network at FlowGuard Plumbing Enterprises.",
   alternates: { canonical: "/join-as-plumber" },
+  openGraph: {
+    title: "Apply to Join as a Plumber | FlowGuard Plumbing Enterprises",
+    description:
+      "Apply to join the reviewed plumbing technician network at FlowGuard Plumbing Enterprises in Kano.",
+    url: "/join-as-plumber",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Apply to Join as a Plumber | FlowGuard Plumbing Enterprises",
+    description:
+      "Apply to join the reviewed plumbing technician network at FlowGuard Plumbing Enterprises in Kano.",
+  },
 };
 
 export default async function JoinAsPlumberPage() {
