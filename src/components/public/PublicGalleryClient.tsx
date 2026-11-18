@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Camera, MapPin, X, ZoomIn } from "lucide-react";
 import type { GalleryItemRecord } from "@/lib/marketplace";
+import { resolveSharpServiceImage } from "@/lib/service-images";
 
 interface PublicGalleryClientProps {
   items: GalleryItemRecord[];
@@ -94,10 +95,11 @@ export function PublicGalleryClient({ items }: PublicGalleryClientProps) {
               aria-label={`View ${item.title}`}
             >
               <Image
-                src={item.image_url}
+                src={resolveSharpServiceImage(item.image_url)}
                 alt={item.title}
                 fill
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 380px"
+                quality={85}
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 420px"
                 className="object-cover transition duration-300 group-hover:scale-105"
               />
               <span className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#07152B]/75 text-white opacity-0 transition group-hover:opacity-100">
@@ -140,7 +142,7 @@ export function PublicGalleryClient({ items }: PublicGalleryClientProps) {
             <div className="flex max-h-[75vh] items-center justify-center bg-[#07152B]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={lightboxItem.image_url}
+                src={resolveSharpServiceImage(lightboxItem.image_url)}
                 alt={lightboxItem.title}
                 className="max-h-[75vh] w-full object-contain"
               />

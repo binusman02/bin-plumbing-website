@@ -112,6 +112,26 @@ export function PortalShell({
     .map((p) => p.charAt(0).toUpperCase())
     .join("");
 
+  const overviewItem = navGroups[0]?.items[0] || bottomNavItems[0];
+  const overviewHref =
+    overviewItem?.href ||
+    (portalRole === "admin"
+      ? "/admin"
+      : portalRole === "plumber"
+        ? "/plumber"
+        : portalRole === "customer"
+          ? "/customer"
+          : "/");
+
+  const handleOverviewLogoClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    setTabletDrawerOpen(false);
+    setMoreSheetOpen(false);
+    if (overviewItem?.onClick) {
+      e.preventDefault();
+      overviewItem.onClick();
+    }
+  };
+
   const renderNavItem = (item: PortalNavItem, isCompact: boolean, closeDrawer?: () => void) => {
     const Icon = item.icon;
     const isActive = activeItemId === item.id;
@@ -222,11 +242,12 @@ export function PortalShell({
         {/* Brand Header */}
         <div className="flex h-14 shrink-0 items-center justify-center border-b border-white/10 px-2.5">
           <Link
-            href="/"
+            href={overviewHref}
+            onClick={handleOverviewLogoClick}
             className={`flex items-center gap-2.5 overflow-hidden ${
               collapsed ? "justify-center w-full" : "w-full px-1"
             }`}
-            title={portalTitle}
+            title={`${portalTitle} Overview`}
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white shadow-xs">
               <Image
@@ -350,7 +371,11 @@ export function PortalShell({
           />
           <aside className="relative z-10 flex w-[260px] flex-col bg-[#0B1F3A] text-white shadow-2xl">
             <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
-              <div className="flex items-center gap-2.5">
+              <Link
+                href={overviewHref}
+                onClick={handleOverviewLogoClick}
+                className="flex items-center gap-2.5"
+              >
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                   <Image
                     src="/images/logo/flowguard-icon.jpg"
@@ -361,7 +386,7 @@ export function PortalShell({
                   />
                 </div>
                 <span className="text-sm font-bold text-white">{portalTitle}</span>
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => setTabletDrawerOpen(false)}
@@ -404,8 +429,9 @@ export function PortalShell({
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-white/10 bg-[#0B1F3A] px-4 text-white shadow-xs md:px-6">
           <div className="flex min-w-0 items-center gap-2.5">
             <Link
-              href="/"
-              aria-label="FlowGuard Plumbing Enterprises"
+              href={overviewHref}
+              onClick={handleOverviewLogoClick}
+              aria-label={`${portalTitle} Overview`}
               className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white md:hidden"
             >
               <Image
@@ -629,7 +655,11 @@ export function PortalShell({
       {moreSheetOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0B1F3A] text-white md:hidden">
           <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
-            <div className="flex items-center gap-2.5">
+            <Link
+              href={overviewHref}
+              onClick={handleOverviewLogoClick}
+              className="flex items-center gap-2.5"
+            >
               <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
                 <Image
                   src="/images/logo/flowguard-icon.jpg"
@@ -642,7 +672,7 @@ export function PortalShell({
               <span className="font-heading text-base font-bold text-white">
                 {portalTitle}
               </span>
-            </div>
+            </Link>
             <button
               type="button"
               aria-label="Close menu"

@@ -9,6 +9,7 @@ import {
   getServiceCategories,
 } from "@/lib/marketplace";
 import { SITE_URL, buildBreadcrumbJsonLd } from "@/lib/seo";
+import { resolveSharpServiceImage } from "@/lib/service-images";
 
 export const instant = false;
 
@@ -86,7 +87,7 @@ export default async function ServiceDetailPage({ params }: Props) {
     service.description ||
     service.short_description ||
     "Professional inspection and transparent itemised quotation before work begins.";
-  const image = service.image || "/images/services/pipework-roughin.jpg";
+  const image = resolveSharpServiceImage(service.image, service.slug);
   const canonicalSlug = service.slug || service.id;
   const activeAreas = settings.active_coverage_locations || [];
   const phone = settings.company_phone;
@@ -217,6 +218,7 @@ export default async function ServiceDetailPage({ params }: Props) {
                 src={image}
                 alt={`${title} by ${settings.company_name || "FlowGuard Plumbing Enterprises"}`}
                 fill
+                quality={85}
                 sizes="(max-width: 1024px) 100vw, 50vw"
                 className="object-cover"
               />

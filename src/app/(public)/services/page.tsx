@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Phone } from "lucide-react";
 import { getAllGalleryItems, getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
+import { resolveSharpServiceImage } from "@/lib/service-images";
 import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
 
 export const metadata: Metadata = {
@@ -43,7 +44,7 @@ export default async function ServicesPage() {
         c.description ||
         c.short_description ||
         "Professional inspection and transparent quotation before work begins.",
-      image: c.image || "/images/services/pipework-roughin.jpg",
+      image: resolveSharpServiceImage(c.image, c.slug),
     }));
 
   const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng").replace(/\/+$/, "");
@@ -120,7 +121,8 @@ export default async function ServicesPage() {
                     src={service.image}
                     alt={`${service.title} service`}
                     fill
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                    quality={85}
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 420px"
                     className="object-cover"
                   />
                 </div>
