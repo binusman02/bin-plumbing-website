@@ -22,7 +22,7 @@ class SupabaseConfig {
     if (!isConfigured) return;
     await Supabase.initialize(
       url: url,
-      anonKey: anonKey,
+      publishableKey: anonKey,
     );
   }
 
