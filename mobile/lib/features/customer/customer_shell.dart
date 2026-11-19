@@ -325,11 +325,6 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                     color: FlowGuardTheme.navy,
                   ),
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  "Discover verified plumbing services in Kano or track your active requests.",
-                  style: TextStyle(fontSize: 13, color: FlowGuardTheme.mutedText),
-                ),
                 const SizedBox(height: 14),
                 ElevatedButton.icon(
                   onPressed: () => widget.onSelectCategory(),
@@ -352,50 +347,53 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                 color: FlowGuardTheme.navy,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             SizedBox(
-              height: 108,
+              height: 92,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: widget.categories.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
                 itemBuilder: (context, idx) {
                   final cat = widget.categories[idx];
                   return InkWell(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(16),
                     onTap: () => widget.onSelectCategory(cat.title),
-                    child: Container(
-                      width: 132,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: FlowGuardTheme.border),
-                      ),
+                    child: SizedBox(
+                      width: 74,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Container(
-                            width: 36,
-                            height: 36,
+                            width: 54,
+                            height: 54,
                             decoration: BoxDecoration(
-                              color: FlowGuardTheme.navy.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(10),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: FlowGuardTheme.border),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: FlowGuardTheme.navy.withValues(alpha: 0.05),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
                             ),
                             child: const Icon(
                               Icons.plumbing_rounded,
-                              size: 20,
+                              size: 24,
                               color: FlowGuardTheme.navy,
                             ),
                           ),
+                          const SizedBox(height: 6),
                           Text(
                             cat.title,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
                             style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                              height: 1.15,
+                              fontWeight: FontWeight.w600,
                               color: FlowGuardTheme.navy,
                             ),
                           ),
@@ -417,7 +415,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              height: 185,
+              height: 156,
               child: PageView.builder(
                 controller: _spotlightController,
                 onPageChanged: (i) => setState(() => _spotlightPage = i),
@@ -428,7 +426,11 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                     margin: const EdgeInsets.only(right: 10),
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: FlowGuardTheme.navy,
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [FlowGuardTheme.navy, FlowGuardTheme.navyDark],
+                      ),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Column(
@@ -438,33 +440,33 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              "FLOWGUARD SERVICE",
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: FlowGuardTheme.gold,
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: const Text(
+                                "FLOWGUARD",
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: FlowGuardTheme.gold,
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
                             Text(
                               cat.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 17,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              cat.shortDescription,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFFCBD5E1),
                               ),
                             ),
                           ],

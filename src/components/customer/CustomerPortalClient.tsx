@@ -837,14 +837,11 @@ export default function CustomerPortalClient({
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#F5B301]">
-                FlowGuard Customer
+                FlowGuard
               </p>
               <h2 className="text-lg font-bold text-[#0B1F3A] sm:text-xl">
                 Welcome, {currentCustomer.full_name}
               </h2>
-              <p className="text-xs text-slate-500 sm:text-sm">
-                Discover verified plumbing services in Kano or track your active requests.
-              </p>
             </div>
             <button
               type="button"

@@ -127,20 +127,15 @@ export function CustomerServiceDiscovery({
   return (
     <div className="space-y-5">
       {/* All Categories */}
-      <section className="space-y-2.5">
+      <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
-              All Categories
-            </h3>
-            <p className="text-xs text-slate-500">
-              Tap a service to start a plumbing request
-            </p>
-          </div>
+          <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
+            All Categories
+          </h3>
           <button
             type="button"
             onClick={() => setViewAllOpen(true)}
-            className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-bold text-[#0B1F3A] transition hover:bg-slate-100"
+            className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-bold text-[#0B1F3A] transition hover:bg-slate-100"
           >
             View All
             <ChevronRight className="h-3.5 w-3.5 text-[#F5B301]" />
@@ -155,7 +150,7 @@ export function CustomerServiceDiscovery({
           onPointerDown={() => {
             categoriesPausedUntilRef.current = Date.now() + 8000;
           }}
-          className="-mx-3.5 flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-3 md:gap-3 md:overflow-visible lg:grid-cols-5"
+          className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-5 md:gap-4 md:overflow-visible lg:grid-cols-9"
         >
           {categories.map((cat) => {
             const label = cat.title || cat.name || cat.slug;
@@ -165,12 +160,12 @@ export function CustomerServiceDiscovery({
                 key={cat.id || cat.slug}
                 type="button"
                 onClick={() => onSelectCategory(label)}
-                className="group flex w-[132px] shrink-0 snap-start flex-col items-start justify-between gap-2.5 rounded-2xl border border-slate-200/90 bg-white p-3.5 text-left shadow-sm transition hover:border-[#F5B301] hover:shadow-md active:scale-[0.98] md:w-auto"
+                className="group flex w-[76px] shrink-0 snap-start flex-col items-center gap-1.5 text-center transition active:scale-95 md:w-auto"
               >
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[#0B1F3A]/5 text-[#0B1F3A] transition group-hover:bg-[#F5B301]/20">
-                  <Icon className="h-5 w-5 text-[#0B1F3A]" />
+                <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200/90 bg-white text-[#0B1F3A] shadow-sm transition group-hover:border-[#F5B301] group-hover:bg-amber-50/40 group-hover:shadow-md">
+                  <Icon className="h-6 w-6 text-[#0B1F3A]" />
                 </span>
-                <span className="line-clamp-2 text-xs font-bold leading-snug text-[#0B1F3A]">
+                <span className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#0B1F3A]">
                   {label}
                 </span>
               </button>
@@ -180,16 +175,11 @@ export function CustomerServiceDiscovery({
       </section>
 
       {/* Featured Service Spotlight */}
-      <section className="space-y-2.5">
+      <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
-              Service Spotlight
-            </h3>
-            <p className="text-xs text-slate-500">
-              Verified FlowGuard plumbing services across Kano
-            </p>
-          </div>
+          <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
+            Service Spotlight
+          </h3>
         </div>
 
         <div
@@ -219,44 +209,38 @@ export function CustomerServiceDiscovery({
         >
           {spotlightCategories.map((cat) => {
             const label = cat.title || cat.name || cat.slug;
-            const summary = cat.short_description || cat.description;
             const imgSrc = resolveSharpServiceImage(cat.image, cat.slug);
             const imgAlt = resolveServiceImageAlt(cat.slug, label, cat.image_alt);
             return (
               <div
                 key={`spotlight-${cat.id || cat.slug}`}
-                className="group relative flex w-[280px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#0B1F3A] text-white shadow-sm sm:w-[300px] md:w-auto"
+                className="group relative h-48 w-[280px] shrink-0 snap-start overflow-hidden rounded-2xl bg-[#0B1F3A] text-white shadow-md sm:w-[300px] md:w-auto"
               >
-                <div className="relative h-36 w-full overflow-hidden bg-slate-900">
-                  <Image
-                    src={imgSrc}
-                    alt={imgAlt}
-                    fill
-                    sizes="(max-width: 768px) 280px, (max-width: 1024px) 50vw, 33vw"
-                    className="object-cover opacity-85 transition duration-300 group-hover:scale-105"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0B1F3A] via-[#0B1F3A]/45 to-transparent" />
-                  <span className="absolute left-3 top-3 rounded-full bg-white/95 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0B1F3A] shadow-sm">
-                    FlowGuard Service
+                <Image
+                  src={imgSrc}
+                  alt={imgAlt}
+                  fill
+                  sizes="(max-width: 768px) 280px, (max-width: 1024px) 50vw, 33vw"
+                  className="object-cover transition duration-500 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#07152B] via-[#0B1F3A]/45 to-black/15" />
+                <div className="relative z-10 flex h-full flex-col justify-between p-4">
+                  <span className="w-fit rounded-full bg-white/90 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0B1F3A] backdrop-blur-xs">
+                    FlowGuard
                   </span>
-                </div>
-                <div className="flex flex-1 flex-col justify-between gap-3 p-4">
-                  <div className="space-y-1">
-                    <h4 className="line-clamp-1 text-sm font-bold text-white">
+                  <div className="space-y-2.5">
+                    <h4 className="line-clamp-1 text-base font-bold text-white drop-shadow-xs">
                       {label}
                     </h4>
-                    <p className="line-clamp-2 text-xs leading-relaxed text-slate-200">
-                      {summary}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onSelectCategory(label)}
+                      className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-[#F5B301] px-3 text-xs font-bold text-[#07152B] shadow-sm transition hover:bg-[#e5a700] active:opacity-90"
+                    >
+                      Request This Service
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onSelectCategory(label)}
-                    className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-[#F5B301] px-3 text-xs font-bold text-[#07152B] transition hover:bg-[#e5a700] active:opacity-90"
-                  >
-                    Request This Service
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
                 </div>
               </div>
             );
@@ -321,10 +305,9 @@ export function CustomerServiceDiscovery({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2.5 overflow-y-auto p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:grid-cols-2">
+            <div className="grid grid-cols-3 gap-3 overflow-y-auto p-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
               {categories.map((cat) => {
                 const label = cat.title || cat.name || cat.slug;
-                const summary = cat.short_description || cat.description;
                 const Icon = getCategoryIcon(cat.icon_name || cat.slug);
                 return (
                   <button
@@ -334,17 +317,14 @@ export function CustomerServiceDiscovery({
                       setViewAllOpen(false);
                       onSelectCategory(label);
                     }}
-                    className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 text-left transition hover:border-[#F5B301] hover:bg-amber-50/30 active:scale-[0.99]"
+                    className="group flex flex-col items-center gap-2 rounded-2xl border border-slate-200/80 bg-white p-3 text-center transition hover:border-[#F5B301] hover:bg-amber-50/30 active:scale-95"
                   >
-                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0B1F3A]/5 text-[#0B1F3A]">
-                      <Icon className="h-5 w-5" />
+                    <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0B1F3A]/5 text-[#0B1F3A] transition group-hover:bg-[#F5B301]/20">
+                      <Icon className="h-6 w-6" />
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-[#0B1F3A]">{label}</p>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-500">
-                        {summary}
-                      </p>
-                    </div>
+                    <p className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#0B1F3A]">
+                      {label}
+                    </p>
                   </button>
                 );
               })}
