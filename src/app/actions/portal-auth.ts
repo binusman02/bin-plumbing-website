@@ -573,7 +573,38 @@ export async function loginPlumberWithPasswordAction(
       return { success: false, error: "Invalid sign-in details." };
     }
 
-    const role = getUserRole(data.user);
+    let role = getUserRole(data.user);
+    if (role !== "plumber") {
+      // Backfill app_metadata.role = "plumber" if this verified auth user is linked to a plumber account/profile
+      const adminSupabase = getServiceSupabase();
+      const userEmail = (data.user.email || "").toLowerCase().trim();
+      const [{ data: accByAuth }, { data: profByAuth }, { data: adminRow }] = await Promise.all([
+        adminSupabase
+          .from("plumber_accounts")
+          .select("id")
+          .or(`auth_user_id.eq.${data.user.id},email.eq.${userEmail}`)
+          .limit(1)
+          .maybeSingle(),
+        adminSupabase
+          .from("plumbers")
+          .select("id")
+          .eq("auth_user_id", data.user.id)
+          .limit(1)
+          .maybeSingle(),
+        adminSupabase
+          .from("admin_users")
+          .select("id")
+          .eq("auth_user_id", data.user.id)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (!adminRow && (accByAuth || profByAuth)) {
+        await setServerAppRole(data.user.id, "plumber");
+        role = "plumber";
+      }
+    }
+
     if (role !== "plumber") {
       await supabase.auth.signOut();
       return { success: false, error: "Invalid sign-in details." };
