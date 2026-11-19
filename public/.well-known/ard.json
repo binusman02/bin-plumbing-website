@@ -1,14 +1,14 @@
 {
   "specVersion": "0.91",
-  "publisher": "flowgarud.vercel.app",
+  "publisher": "flowguard-ng.vercel.app",
   "updatedAt": "2026-11-19T00:00:00Z",
   "entries": [
     {
       "@context": "https://agenticresourcediscovery.org/context/v1",
-      "identifier": "urn:air:flowgarud.vercel.app:web:request-plumber",
+      "identifier": "urn:air:flowguard-ng.vercel.app:web:request-plumber",
       "displayName": "FlowGuard Plumbing Service Request",
       "type": "text/html",
-      "url": "https://flowgarud.vercel.app/request",
+      "url": "https://flowguard-ng.vercel.app/request",
       "description": "Submit a residential or commercial plumbing service request in Kano State and receive a tracking reference number.",
       "representativeQueries": [
         "Request a plumber in Kano State",
@@ -22,10 +22,10 @@
     },
     {
       "@context": "https://agenticresourcediscovery.org/context/v1",
-      "identifier": "urn:air:flowgarud.vercel.app:web:track-request",
+      "identifier": "urn:air:flowguard-ng.vercel.app:web:track-request",
       "displayName": "FlowGuard Live Request Tracker",
       "type": "text/html",
-      "url": "https://flowgarud.vercel.app/tracking",
+      "url": "https://flowguard-ng.vercel.app/tracking",
       "description": "Track an active FlowGuard Plumbing service request using its reference number and customer phone number.",
       "representativeQueries": [
         "Track my FlowGuard Plumbing service request",
@@ -38,10 +38,10 @@
     },
     {
       "@context": "https://agenticresourcediscovery.org/context/v1",
-      "identifier": "urn:air:flowgarud.vercel.app:web:services",
+      "identifier": "urn:air:flowguard-ng.vercel.app:web:services",
       "displayName": "FlowGuard Plumbing Services Catalog",
       "type": "text/html",
-      "url": "https://flowgarud.vercel.app/services",
+      "url": "https://flowguard-ng.vercel.app/services",
       "description": "Browse plumbing services offered in Kano including pipe repairs, leak detection, water pump and tank installation, and drainage clearing.",
       "representativeQueries": [
         "What plumbing services does FlowGuard Plumbing offer in Kano",
@@ -53,10 +53,10 @@
     },
     {
       "@context": "https://agenticresourcediscovery.org/context/v1",
-      "identifier": "urn:air:flowgarud.vercel.app:web:service-areas",
+      "identifier": "urn:air:flowguard-ng.vercel.app:web:service-areas",
       "displayName": "FlowGuard Kano Service Coverage Areas",
       "type": "text/html",
-      "url": "https://flowgarud.vercel.app/areas",
+      "url": "https://flowguard-ng.vercel.app/areas",
       "description": "Check active plumbing service coverage areas across Kano State.",
       "representativeQueries": [
         "Which areas in Kano does FlowGuard Plumbing cover",

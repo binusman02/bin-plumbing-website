@@ -4,16 +4,16 @@
 
 ## Core Pages
 
-- [Home](https://flowgarud.vercel.app/): Overview of FlowGuard Plumbing services, 4-step workflow, FAQs, and verified customer reviews.
-- [Request a Plumber](https://flowgarud.vercel.app/request): Submit a service request in Kano and receive a tracking reference number.
-- [Track Request](https://flowgarud.vercel.app/tracking): Check live request status and technician updates using a reference number and phone number.
-- [Plumbing Services](https://flowgarud.vercel.app/services): Pipe installation and repairs, leak detection, drainage clearing, bathroom plumbing, water pumps, and overhead tanks.
-- [Kano Service Areas](https://flowgarud.vercel.app/areas): Active coverage locations across Kano State.
-- [Project Gallery](https://flowgarud.vercel.app/gallery): Published photos from completed plumbing jobs.
+- [Home](https://flowguard-ng.vercel.app/): Overview of FlowGuard Plumbing services, 4-step workflow, FAQs, and verified customer reviews.
+- [Request a Plumber](https://flowguard-ng.vercel.app/request): Submit a service request in Kano and receive a tracking reference number.
+- [Track Request](https://flowguard-ng.vercel.app/tracking): Check live request status and technician updates using a reference number and phone number.
+- [Plumbing Services](https://flowguard-ng.vercel.app/services): Pipe installation and repairs, leak detection, drainage clearing, bathroom plumbing, water pumps, and overhead tanks.
+- [Kano Service Areas](https://flowguard-ng.vercel.app/areas): Active coverage locations across Kano State.
+- [Project Gallery](https://flowguard-ng.vercel.app/gallery): Published photos from completed plumbing jobs.
 
 ## Guides & Support
 
-- [Plumbing Guides (English)](https://flowgarud.vercel.app/en/blog): Practical plumbing maintenance and troubleshooting guides for Kano homes and businesses.
-- [Plumbing Guides (Hausa)](https://flowgarud.vercel.app/ha/blog): Hausa-language plumbing guides (Jagorar gyaran famfo da famfunan ruwa a Kano).
-- [Frequently Asked Questions](https://flowgarud.vercel.app/faq): Answers about booking, inspection quotes, coverage areas, and job tracking.
-- [Contact Us](https://flowgarud.vercel.app/contact): Direct phone, WhatsApp, and enquiry form for FlowGuard Plumbing Enterprises.
+- [Plumbing Guides (English)](https://flowguard-ng.vercel.app/en/blog): Practical plumbing maintenance and troubleshooting guides for Kano homes and businesses.
+- [Plumbing Guides (Hausa)](https://flowguard-ng.vercel.app/ha/blog): Hausa-language plumbing guides (Jagorar gyaran famfo da famfunan ruwa a Kano).
+- [Frequently Asked Questions](https://flowguard-ng.vercel.app/faq): Answers about booking, inspection quotes, coverage areas, and job tracking.
+- [Contact Us](https://flowguard-ng.vercel.app/contact): Direct phone, WhatsApp, and enquiry form for FlowGuard Plumbing Enterprises.

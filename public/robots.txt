@@ -10,4 +10,4 @@ Disallow: /plumber
 Disallow: /tracking/
 Disallow: /tracking
 
-Sitemap: https://flowgarud.vercel.app/sitemap.xml
+Sitemap: https://flowguard-ng.vercel.app/sitemap.xml
