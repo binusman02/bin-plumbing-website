@@ -248,16 +248,16 @@ export default async function HomePage() {
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-3 pt-2">
                     <Link
                       href={`/services/${service.slug || service.id}`}
-                      className="text-sm font-semibold text-[#5B6675] underline-offset-4 hover:text-[#0B1F3A] hover:underline"
+                      className="inline-flex min-h-[44px] items-center text-sm font-semibold text-[#5B6675] underline-offset-4 hover:text-[#0B1F3A] hover:underline"
                     >
                       View details
                       <span className="sr-only"> for {service.title || service.name}</span>
                     </Link>
                     <Link
-                      href={`/request?service=${encodeURIComponent(service.title)}`}
-                      className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:text-[#E0A200]"
+                      href={`/request?service=${encodeURIComponent(service.title || service.name || service.slug)}`}
+                      className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold text-[#0B1F3A] transition-colors hover:text-[#E0A200]"
                     >
-                      Request this service
+                      Request This Service
                       <span className="sr-only"> — {service.title || service.name}</span>
                       <ArrowRight className="h-4 w-4 text-[#F5B301]" />
                     </Link>

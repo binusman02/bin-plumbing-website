@@ -160,9 +160,9 @@ export function CustomerServiceDiscovery({
                   <button
                     type="button"
                     onClick={() => onSelectCategory(label)}
-                    className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-[#F5B301] px-3 text-xs font-bold text-[#07152B] transition hover:bg-[#e5a700] active:opacity-90"
+                    className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-[#F5B301] px-3 text-xs font-bold text-[#07152B] transition hover:bg-[#e5a700] active:opacity-90"
                   >
-                    Request {label}
+                    Request This Service
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
