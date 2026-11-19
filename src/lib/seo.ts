@@ -4,11 +4,11 @@ export const PRIMARY_MARKET = "Kano State, Nigeria";
 
 /**
  * Single configurable production base URL.
- * Defaults to https://flowguard.com.ng so canonicals, sitemaps,
+ * Defaults to https://flowgarud.vercel.app so canonicals, sitemaps,
  * Open Graph URLs, and structured data never split across domains.
  */
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://flowgarud.vercel.app"
 ).replace(/\/+$/, "");
 
 export function canonicalUrl(path = "/"): string {

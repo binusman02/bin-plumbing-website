@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ArrowRight,
@@ -58,12 +58,71 @@ export function CustomerServiceDiscovery({
   onSelectCategory,
 }: CustomerServiceDiscoveryProps) {
   const [viewAllOpen, setViewAllOpen] = useState(false);
+  const [spotlightIndex, setSpotlightIndex] = useState(0);
+  const categoriesTrackRef = useRef<HTMLDivElement | null>(null);
+  const spotlightTrackRef = useRef<HTMLDivElement | null>(null);
+  const categoriesPausedUntilRef = useRef<number>(0);
+  const spotlightPausedUntilRef = useRef<number>(0);
+
+  const spotlightCategories = categories.slice(0, 5);
+  const categoriesCount = categories.length;
+  const spotlightCount = spotlightCategories.length;
+
+  useEffect(() => {
+    if (categoriesCount <= 1 && spotlightCount <= 1) return;
+    if (typeof window === "undefined") return;
+
+    const advanceTrack = (
+      track: HTMLDivElement | null,
+      pausedUntil: number,
+      onIndexChange?: (idx: number) => void
+    ) => {
+      if (!track || window.innerWidth >= 768) return;
+      if (Date.now() < pausedUntil) return;
+      if (track.scrollWidth <= track.clientWidth + 8) return;
+
+      const children = Array.from(track.children) as HTMLElement[];
+      if (children.length <= 1) return;
+
+      const currentLeft = track.scrollLeft;
+      let currentIndex = 0;
+      let minDist = Infinity;
+      children.forEach((child, idx) => {
+        const dist = Math.abs(child.offsetLeft - currentLeft);
+        if (dist < minDist) {
+          minDist = dist;
+          currentIndex = idx;
+        }
+      });
+
+      const atEnd =
+        track.scrollLeft + track.clientWidth >= track.scrollWidth - 16;
+      const nextIndex = atEnd ? 0 : (currentIndex + 1) % children.length;
+      const targetChild = children[nextIndex];
+      if (!targetChild) return;
+
+      track.scrollTo({
+        left: nextIndex === 0 ? 0 : targetChild.offsetLeft - 14,
+        behavior: "smooth",
+      });
+      onIndexChange?.(nextIndex);
+    };
+
+    const timer = window.setInterval(() => {
+      advanceTrack(categoriesTrackRef.current, categoriesPausedUntilRef.current);
+      advanceTrack(
+        spotlightTrackRef.current,
+        spotlightPausedUntilRef.current,
+        setSpotlightIndex
+      );
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [categoriesCount, spotlightCount]);
 
   if (categories.length === 0) {
     return null;
   }
-
-  const spotlightCategories = categories.slice(0, 5);
 
   return (
     <div className="space-y-5">
@@ -88,7 +147,16 @@ export function CustomerServiceDiscovery({
           </button>
         </div>
 
-        <div className="-mx-3.5 flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-3 md:gap-3 md:overflow-visible lg:grid-cols-5">
+        <div
+          ref={categoriesTrackRef}
+          onTouchStart={() => {
+            categoriesPausedUntilRef.current = Date.now() + 8000;
+          }}
+          onPointerDown={() => {
+            categoriesPausedUntilRef.current = Date.now() + 8000;
+          }}
+          className="-mx-3.5 flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-3 md:gap-3 md:overflow-visible lg:grid-cols-5"
+        >
           {categories.map((cat) => {
             const label = cat.title || cat.name || cat.slug;
             const Icon = getCategoryIcon(cat.icon_name || cat.slug);
@@ -124,7 +192,31 @@ export function CustomerServiceDiscovery({
           </div>
         </div>
 
-        <div className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-2 lg:grid-cols-3 md:overflow-visible">
+        <div
+          ref={spotlightTrackRef}
+          onTouchStart={() => {
+            spotlightPausedUntilRef.current = Date.now() + 8000;
+          }}
+          onPointerDown={() => {
+            spotlightPausedUntilRef.current = Date.now() + 8000;
+          }}
+          onScroll={() => {
+            const track = spotlightTrackRef.current;
+            if (!track) return;
+            const children = Array.from(track.children) as HTMLElement[];
+            let nearest = 0;
+            let minDist = Infinity;
+            children.forEach((child, idx) => {
+              const dist = Math.abs(child.offsetLeft - track.scrollLeft);
+              if (dist < minDist) {
+                minDist = dist;
+                nearest = idx;
+              }
+            });
+            setSpotlightIndex(nearest);
+          }}
+          className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-2 lg:grid-cols-3 md:overflow-visible"
+        >
           {spotlightCategories.map((cat) => {
             const label = cat.title || cat.name || cat.slug;
             const summary = cat.short_description || cat.description;
@@ -170,6 +262,34 @@ export function CustomerServiceDiscovery({
             );
           })}
         </div>
+        {spotlightCategories.length > 1 && (
+          <div className="flex items-center justify-center gap-1.5 pt-1 md:hidden">
+            {spotlightCategories.map((cat, idx) => (
+              <button
+                key={`dot-${cat.id || cat.slug}`}
+                type="button"
+                aria-label={`Show featured service ${idx + 1}`}
+                onClick={() => {
+                  const track = spotlightTrackRef.current;
+                  const target = track?.children[idx] as HTMLElement | undefined;
+                  if (track && target) {
+                    spotlightPausedUntilRef.current = Date.now() + 8000;
+                    track.scrollTo({
+                      left: idx === 0 ? 0 : target.offsetLeft - 14,
+                      behavior: "smooth",
+                    });
+                    setSpotlightIndex(idx);
+                  }
+                }}
+                className={`h-1.5 rounded-full transition-all ${
+                  spotlightIndex === idx
+                    ? "w-5 bg-[#0B1F3A]"
+                    : "w-1.5 bg-slate-300"
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* View All Categories Sheet */}

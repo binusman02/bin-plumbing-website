@@ -43,8 +43,8 @@ export default async function PrivacyPage() {
 
       <section className="py-14 md:py-20">
         <div className="mx-auto max-w-[900px] px-4 sm:px-6 lg:px-8">
-          <div className="mb-8 rounded-xl border border-[#F5B301]/50 bg-[#F4F6F9] p-4 text-sm font-medium text-[#0B1F3A]">
-            Notice: Draft pending professional legal review.
+          <div className="mb-8 rounded-xl border border-slate-200 bg-[#F4F6F9] px-4 py-3 text-sm text-[#0B1F3A]">
+            <span className="font-semibold">Effective Legal Notice:</span> FlowGuard Plumbing Enterprises{settings.rc_number ? ` (RC: ${settings.rc_number})` : ""} — Customer &amp; Portal Privacy Policy.
           </div>
 
           <div className="space-y-8 text-base leading-relaxed text-[#5B6675]">
@@ -53,7 +53,7 @@ export default async function PrivacyPage() {
                 1. Information We Collect
               </h2>
               <p className="mt-3">
-                When you submit a plumbing service request, contact enquiry, or plumber application on our website, we collect the information you provide such as your name, phone number, email address (if provided), service area, property address, and description of the plumbing issue.
+                When you submit a plumbing service request, contact enquiry, customer portal account registration, or technician application on our website, we collect the information you provide such as your name, phone number, email address (if provided), service area, property address, optional GPS coordinates pinned for dispatch accuracy, and description or photos of the plumbing issue.
               </p>
             </section>
 
@@ -62,7 +62,7 @@ export default async function PrivacyPage() {
                 2. How We Use Information
               </h2>
               <p className="mt-3">
-                We use your information strictly to coordinate service requests, assign a reviewed plumber, deliver inspection quotations, provide live status updates, and respond to enquiries.
+                We use your information strictly to coordinate plumbing service requests, assign a reviewed technician, deliver itemised inspection quotations, provide live status and arrival updates, process payment receipt verification, and respond to support enquiries.
               </p>
             </section>
 
@@ -71,16 +71,16 @@ export default async function PrivacyPage() {
                 3. Sharing Within Service Coordination
               </h2>
               <p className="mt-3">
-                Relevant job details (such as your contact name, phone number, and service location) are shared only with the coordinator and assigned technician handling your request. We do not sell customer data to third parties.
+                Relevant job details (such as your contact name, phone number, and service location) are shared only with authorized coordinators and the assigned technician handling your active request. Live technician GPS tracking is restricted to active assigned jobs and stops automatically once the job is completed. We never sell or rent customer data to third parties.
               </p>
             </section>
 
             <section>
               <h2 className="font-heading text-2xl font-bold text-[#0B1F3A]">
-                4. Data Access & Questions
+                4. Data Retention, Access &amp; Questions
               </h2>
               <p className="mt-3">
-                To request a correction or removal of your contact details, or to ask questions about this policy, please contact us:
+                We retain service and quotation records only as long as necessary for service history, warranty support, and business compliance. To request a correction or removal of your contact details, or to ask questions about this policy, please contact us:
               </p>
               <ul className="mt-3 space-y-1 text-[#1B2430]">
                 {settings.company_email && (

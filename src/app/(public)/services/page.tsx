@@ -48,7 +48,7 @@ export default async function ServicesPage() {
       imageAlt: resolveServiceImageAlt(c.slug, c.title || c.name, c.image_alt),
     }));
 
-  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://flowguard.com.ng").replace(/\/+$/, "");
+  const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://flowgarud.vercel.app").replace(/\/+$/, "");
 
   const servicesJsonLd = {
     "@context": "https://schema.org",

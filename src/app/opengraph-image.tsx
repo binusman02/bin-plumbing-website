@@ -72,7 +72,7 @@ export default function OpenGraphImage() {
           }}
         >
           <span>Residential & Commercial Plumbing</span>
-          <span style={{ color: "#F5B301", fontWeight: 700 }}>flowguard.com.ng</span>
+          <span style={{ color: "#F5B301", fontWeight: 700 }}>flowgarud.vercel.app</span>
         </div>
       </div>
     ),

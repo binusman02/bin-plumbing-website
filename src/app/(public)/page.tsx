@@ -2,11 +2,12 @@
 import { cacheLife, cacheTag } from "next/cache";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Phone, ShieldCheck, Star } from "lucide-react";
+import { ArrowRight, CheckCircle2, Phone, ShieldCheck } from "lucide-react";
 import { getAllGalleryItems, getApprovedReviews, getMarketplaceSettings } from "@/lib/marketplace";
 import { resolveServiceImageAlt, resolveSharpServiceImage } from "@/lib/service-images";
 import { FaqAccordion, type FaqItem } from "@/components/public/FaqAccordion";
 import { PublicGalleryClient } from "@/components/public/PublicGalleryClient";
+import { ReviewsSlider } from "@/components/public/ReviewsSlider";
 
 export const metadata: Metadata = {
   title: {
@@ -435,31 +436,7 @@ export default async function HomePage() {
                 Verified Customer Reviews
               </h2>
             </div>
-            <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-3">
-              {approvedReviews.slice(0, 6).map((rev) => (
-                <article
-                  key={rev.id}
-                  className="flex flex-col justify-between rounded-xl border border-[#E3E8EF] bg-white p-6"
-                >
-                  <div>
-                    <div className="flex items-center gap-1 text-[#F5B301]">
-                      {Array.from({ length: rev.rating }).map((_, idx) => (
-                        <Star key={idx} className="h-4 w-4 fill-[#F5B301]" />
-                      ))}
-                    </div>
-                    <p className="mt-3 text-sm leading-relaxed text-[#4B5B70]">
-                      &ldquo;{rev.comment}&rdquo;
-                    </p>
-                  </div>
-                  <div className="mt-4 border-t border-slate-100 pt-3 text-xs">
-                    <p className="font-bold text-[#0B1F3A]">{rev.customer_name}</p>
-                    <p className="text-[#5B6675]">
-                      {[rev.service_category, rev.area].filter(Boolean).join(" • ")}
-                    </p>
-                  </div>
-                </article>
-              ))}
-            </div>
+            <ReviewsSlider reviews={approvedReviews.slice(0, 12)} />
           </div>
         </section>
       )}

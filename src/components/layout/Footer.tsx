@@ -169,7 +169,7 @@ export default function Footer({ settings }: FooterProps) {
         </div>
 
         {/* Thin line before copyright row */}
-        <div className="pt-8 border-t border-white/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-[#C9D3E0] lg:pr-44">
+        <div className="pt-8 border-t border-white/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-[#C9D3E0] md:pr-44">
           <p>
             © <CurrentYear fallback={2026} /> {companyName}. All rights reserved.
             {rcNumber ? ` RC: ${rcNumber}.` : ""}
@@ -177,24 +177,12 @@ export default function Footer({ settings }: FooterProps) {
 
           <div className="flex flex-wrap items-center gap-4">
             <Link href="/privacy" className="hover:text-[#F5B301] transition-colors">
-              Privacy Policy (Draft)
+              Privacy Policy
             </Link>
-            <span>•</span>
+            <span aria-hidden="true">•</span>
             <Link href="/terms" className="hover:text-[#F5B301] transition-colors">
-              Terms & Conditions (Draft)
+              Terms &amp; Conditions
             </Link>
-            <span>•</span>
-            <span>
-              Template reference & visual assets:{" "}
-              <a
-                href="https://htmlcodex.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-white hover:text-[#F5B301] underline transition-colors"
-              >
-                HTML Codex (CC-BY 4.0)
-              </a>
-            </span>
           </div>
         </div>
       </div>
