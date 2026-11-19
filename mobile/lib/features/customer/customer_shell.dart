@@ -350,9 +350,11 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             const SizedBox(height: 12),
             SizedBox(
               height: 92,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: widget.categories.length,
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: widget.categories.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 12),
                 itemBuilder: (context, idx) {
                   final cat = widget.categories[idx];
@@ -402,6 +404,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                     ),
                   );
                 },
+                ),
               ),
             ),
             const SizedBox(height: 20),

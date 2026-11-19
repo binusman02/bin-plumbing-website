@@ -150,7 +150,8 @@ export function CustomerServiceDiscovery({
           onPointerDown={() => {
             categoriesPausedUntilRef.current = Date.now() + 8000;
           }}
-          className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-5 md:gap-4 md:overflow-visible lg:grid-cols-9"
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 md:grid md:grid-cols-5 md:gap-4 md:overflow-visible lg:grid-cols-9"
         >
           {categories.map((cat) => {
             const label = cat.title || cat.name || cat.slug;
@@ -205,7 +206,8 @@ export function CustomerServiceDiscovery({
             });
             setSpotlightIndex(nearest);
           }}
-          className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:px-0 md:grid md:grid-cols-2 lg:grid-cols-3 md:overflow-visible"
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          className="-mx-3.5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3.5 pb-1 [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 md:grid md:grid-cols-2 lg:grid-cols-3 md:overflow-visible"
         >
           {spotlightCategories.map((cat) => {
             const label = cat.title || cat.name || cat.slug;
