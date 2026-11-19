@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:url_launcher/url_launcher.dart";
+import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/customer/customer_shell.dart";
 import "package:flowguard_plumbing/features/plumber/plumber_shell.dart";
@@ -95,6 +96,24 @@ class _SignInScreenState extends State<SignInScreen> {
       if (mounted) {
         setState(() => _loading = false);
       }
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+    try {
+      await GoogleAuthHelper.signInWithGoogle();
+    } on AuthException catch (err) {
+      if (mounted) setState(() => _errorMessage = err.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _errorMessage = "Google sign-in failed. Please try again.");
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -211,6 +230,19 @@ class _SignInScreenState extends State<SignInScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Text("Sign In"),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: _loading ? null : _signInWithGoogle,
+                      icon: const Icon(Icons.g_mobiledata_rounded, size: 24),
+                      label: const Text("Continue with Google"),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                        foregroundColor: FlowGuardTheme.navy,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextButton(

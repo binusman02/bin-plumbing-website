@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:intl/intl.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
+import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
@@ -133,6 +134,16 @@ class _CustomerRequestDetailSheetState
               widget.request.description,
               style: const TextStyle(fontSize: 13, color: Color(0xFF334155)),
             ),
+            if (widget.request.customerLat != null &&
+                widget.request.customerLng != null) ...[
+              const SizedBox(height: 14),
+              FlowGuardGoogleMap(
+                height: 190,
+                customerLat: widget.request.customerLat,
+                customerLng: widget.request.customerLng,
+                plumberLabel: widget.request.assignedTechnician,
+              ),
+            ],
             if (widget.request.assignedTechnician != null) ...[
               const SizedBox(height: 14),
               Container(

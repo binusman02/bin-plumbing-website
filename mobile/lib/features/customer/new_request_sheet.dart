@@ -2,6 +2,7 @@ import "dart:math";
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
+import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
@@ -231,6 +232,18 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                     ? "GPS Pinned (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})"
                     : "Pin My Current GPS Location",
               ),
+            ),
+            const SizedBox(height: 10),
+            FlowGuardGoogleMap(
+              height: 180,
+              customerLat: _lat,
+              customerLng: _lng,
+              onPickLocation: (lat, lng) {
+                setState(() {
+                  _lat = lat;
+                  _lng = lng;
+                });
+              },
             ),
             const SizedBox(height: 12),
             TextField(
