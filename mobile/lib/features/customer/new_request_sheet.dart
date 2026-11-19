@@ -1,6 +1,7 @@
 import "dart:math";
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
+import "package:image_picker/image_picker.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
@@ -10,6 +11,7 @@ class NewRequestSheet extends StatefulWidget {
   final String customerId;
   final String customerName;
   final String customerPhone;
+  final String? savedAddress;
   final List<ServiceCategoryItem> categories;
   final String? initialCategory;
   final VoidCallback onCreated;
@@ -19,6 +21,7 @@ class NewRequestSheet extends StatefulWidget {
     required this.customerId,
     required this.customerName,
     required this.customerPhone,
+    this.savedAddress,
     required this.categories,
     this.initialCategory,
     required this.onCreated,
@@ -29,11 +32,13 @@ class NewRequestSheet extends StatefulWidget {
 }
 
 class _NewRequestSheetState extends State<NewRequestSheet> {
+  int _step = 0;
   late String _selectedCategory;
   String _priority = "standard";
   String _propertyType = "Residential";
-  final _addressController = TextEditingController();
+  late final TextEditingController _addressController;
   final _descriptionController = TextEditingController();
+  final List<XFile> _photos = [];
   double? _lat;
   double? _lng;
   bool _locating = false;
@@ -47,6 +52,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
         ? widget.categories.first.title
         : "Pipe Installation & Repairs";
     _selectedCategory = widget.initialCategory ?? first;
+    _addressController = TextEditingController(text: widget.savedAddress ?? "");
   }
 
   @override
@@ -85,22 +91,34 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
     }
   }
 
-  Future<void> _submit() async {
-    final address = _addressController.text.trim();
-    final desc = _descriptionController.text.trim();
-    if (address.isEmpty || desc.isEmpty) {
-      setState(() => _error = "Enter your Kano address and describe the issue.");
+  Future<void> _addPhoto(ImageSource source) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source, imageQuality: 75);
+    if (picked != null && mounted) {
+      setState(() => _photos.add(picked));
+    }
+  }
+
+  void _nextStep() {
+    setState(() => _error = null);
+    if (_step == 0 && _descriptionController.text.trim().isEmpty) {
+      setState(() => _error = "Please describe the plumbing issue.");
       return;
     }
+    if (_step == 1 && _addressController.text.trim().isEmpty) {
+      setState(() => _error = "Please enter or confirm your address in Kano.");
+      return;
+    }
+    setState(() => _step += 1);
+  }
 
+  Future<void> _submit() async {
     setState(() {
       _submitting = true;
       _error = null;
     });
-
     try {
-      final ticketNum =
-          "FG-${100000 + Random().nextInt(900000)}";
+      final ticketNum = "FG-${100000 + Random().nextInt(900000)}";
       await SupabaseConfig.client.from("service_requests").insert({
         "ticket_number": ticketNum,
         "customer_id": widget.customerId,
@@ -109,8 +127,8 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
         "problem_category": _selectedCategory,
         "property_type": _propertyType,
         "priority": _priority,
-        "address_in_kano": address,
-        "description": desc,
+        "address_in_kano": _addressController.text.trim(),
+        "description": _descriptionController.text.trim(),
         "status": "new",
         if (_lat != null) "customer_lat": _lat,
         if (_lng != null) "customer_lng": _lng,
@@ -135,10 +153,12 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
       options.insert(0, _selectedCategory);
     }
 
+    const stepLabels = ["1. Details", "2. Location", "3. Confirm"];
+
     return Padding(
       padding: EdgeInsets.fromLTRB(
         20,
-        8,
+        4,
         20,
         MediaQuery.of(context).viewInsets.bottom + 24,
       ),
@@ -148,111 +168,195 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              "Request This Service",
+              "New Plumbing Request",
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
                 color: FlowGuardTheme.navy,
               ),
             ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: _selectedCategory,
-              decoration: const InputDecoration(labelText: "Service Category"),
-              items: options
-                  .map((o) => DropdownMenuItem(value: o, child: Text(o)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) setState(() => _selectedCategory = v);
-              },
-            ),
             const SizedBox(height: 12),
             Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _priority,
-                    decoration: const InputDecoration(labelText: "Priority"),
-                    items: const [
-                      DropdownMenuItem(value: "standard", child: Text("Standard")),
-                      DropdownMenuItem(value: "urgent", child: Text("Urgent")),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => _priority = v);
-                    },
+              children: List.generate(3, (idx) {
+                final active = idx <= _step;
+                return Expanded(
+                  child: Container(
+                    margin: EdgeInsets.only(right: idx < 2 ? 6 : 0),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: active ? FlowGuardTheme.navy : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      stepLabels[idx],
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: active ? Colors.white : FlowGuardTheme.mutedText,
+                      ),
+                    ),
                   ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            if (_step == 0) ...[
+              DropdownButtonFormField<String>(
+                initialValue: _selectedCategory,
+                decoration: const InputDecoration(labelText: "Plumbing Category"),
+                items: options
+                    .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setState(() => _selectedCategory = v);
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _priority,
+                      decoration: const InputDecoration(labelText: "Priority"),
+                      items: const [
+                        DropdownMenuItem(value: "standard", child: Text("Standard")),
+                        DropdownMenuItem(value: "urgent", child: Text("Urgent")),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setState(() => _priority = v);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _propertyType,
+                      decoration: const InputDecoration(labelText: "Property"),
+                      items: const [
+                        DropdownMenuItem(value: "Residential", child: Text("Residential")),
+                        DropdownMenuItem(value: "Commercial", child: Text("Commercial")),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setState(() => _propertyType = v);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _descriptionController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: "Problem Description",
+                  hintText: "Briefly describe what needs repair or installation",
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _propertyType,
-                    decoration: const InputDecoration(labelText: "Property"),
-                    items: const [
-                      DropdownMenuItem(
-                        value: "Residential",
-                        child: Text("Residential"),
+              ),
+            ] else if (_step == 1) ...[
+              TextField(
+                controller: _addressController,
+                decoration: const InputDecoration(
+                  labelText: "Address in Kano",
+                  hintText: "e.g., Hotoro, Nassarawa, Tarauni",
+                ),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _locating ? null : _captureGps,
+                icon: _locating
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        _lat != null
+                            ? Icons.check_circle_outline
+                            : Icons.my_location_rounded,
+                        color: _lat != null ? Colors.green : FlowGuardTheme.navy,
                       ),
-                      DropdownMenuItem(
-                        value: "Commercial",
-                        child: Text("Commercial"),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => _propertyType = v);
-                    },
+                label: Text(
+                  _lat != null
+                      ? "GPS Pinned (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})"
+                      : "Use Current GPS Location",
+                ),
+              ),
+              const SizedBox(height: 10),
+              FlowGuardGoogleMap(
+                height: 200,
+                customerLat: _lat,
+                customerLng: _lng,
+                onPickLocation: (lat, lng) {
+                  setState(() {
+                    _lat = lat;
+                    _lng = lng;
+                  });
+                },
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _addPhoto(ImageSource.camera),
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: const Text("Camera"),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _addPhoto(ImageSource.gallery),
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text("Gallery"),
+                    ),
+                  ),
+                ],
+              ),
+              if (_photos.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  "${_photos.length} photo(s) ready",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF065F46),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _addressController,
-              decoration: const InputDecoration(
-                labelText: "Address in Kano",
-                hintText: "e.g., Hotoro, Nassarawa, Tarauni",
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _locating ? null : _captureGps,
-              icon: _locating
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      _lat != null
-                          ? Icons.check_circle_outline
-                          : Icons.my_location_rounded,
-                      color: _lat != null ? Colors.green : FlowGuardTheme.navy,
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: FlowGuardTheme.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: FlowGuardTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "$_selectedCategory ($_priority • $_propertyType)",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: FlowGuardTheme.navy,
+                      ),
                     ),
-              label: Text(
-                _lat != null
-                    ? "GPS Pinned (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})"
-                    : "Pin My Current GPS Location",
+                    const SizedBox(height: 4),
+                    Text(_addressController.text.trim()),
+                    const SizedBox(height: 4),
+                    Text(
+                      _descriptionController.text.trim(),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: FlowGuardTheme.mutedText,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            FlowGuardGoogleMap(
-              height: 180,
-              customerLat: _lat,
-              customerLng: _lng,
-              onPickLocation: (lat, lng) {
-                setState(() {
-                  _lat = lat;
-                  _lng = lng;
-                });
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _descriptionController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: "Describe the Plumbing Issue",
-              ),
-            ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(
@@ -265,15 +369,34 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
               ),
             ],
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _submitting ? null : _submit,
-              child: _submitting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text("Submit Plumbing Request"),
+            Row(
+              children: [
+                if (_step > 0) ...[
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _submitting ? null : () => setState(() => _step -= 1),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      child: const Text("Back"),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: _submitting ? null : (_step < 2 ? _nextStep : _submit),
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(_step < 2 ? "Continue" : "Submit Request"),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

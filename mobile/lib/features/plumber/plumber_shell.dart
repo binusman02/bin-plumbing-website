@@ -1,8 +1,10 @@
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
+import "package:intl/intl.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
-import "package:url_launcher/url_launcher.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
+import "package:flowguard_plumbing/features/plumber/plumber_job_detail_page.dart";
+import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
 import "package:flowguard_plumbing/features/shared/ticket_chat_view.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -18,12 +20,19 @@ class PlumberShell extends StatefulWidget {
 
 class _PlumberShellState extends State<PlumberShell> {
   int _tabIndex = 0;
+  String _jobFilter = "all"; // all | active | completed
   bool _loading = true;
   bool _isAvailable = false;
   String _gpsStatus = "GPS off";
   String _plumberName = "Technician";
   String? _plumberId;
+  String? _plumberPhone;
+  String _verificationStatus = "approved";
+  double _rating = 5.0;
+  double _verifiedEarnings = 0;
   List<ServiceRequestItem> _jobs = [];
+  Map<String, String> _tripStates = {};
+  List<Map<String, dynamic>> _earningsLedger = [];
 
   @override
   void initState() {
@@ -37,7 +46,9 @@ class _PlumberShellState extends State<PlumberShell> {
       final client = SupabaseConfig.client;
       final plumberRows = await client
           .from("plumbers")
-          .select("id, full_name, is_available")
+          .select(
+            "id, full_name, phone, is_available, verification_status, rating",
+          )
           .eq("auth_user_id", widget.user.id)
           .limit(1);
 
@@ -45,24 +56,69 @@ class _PlumberShellState extends State<PlumberShell> {
         final row = plumberRows.first;
         _plumberId = row["id"]?.toString();
         _plumberName = row["full_name"]?.toString() ?? "Technician";
+        _plumberPhone = row["phone"]?.toString();
         _isAvailable = row["is_available"] == true;
+        _verificationStatus =
+            row["verification_status"]?.toString() ?? "approved";
+        final parsedRating = (row["rating"] as num?)?.toDouble();
+        if (parsedRating != null && parsedRating > 0) {
+          _rating = parsedRating;
+        }
       }
 
       final jobList = <ServiceRequestItem>[];
+      final tripMap = <String, String>{};
+      final ledger = <Map<String, dynamic>>[];
+      double earningsTotal = 0;
+
       if (_plumberId != null) {
         final rows = await client
             .from("service_requests")
             .select()
             .eq("assigned_plumber_id", _plumberId!)
             .order("created_at", ascending: false);
+
         for (final row in rows) {
-          jobList.add(ServiceRequestItem.fromJson(row));
+          final item = ServiceRequestItem.fromJson(row);
+          jobList.add(item);
+          final history = row["history"];
+          tripMap[item.id] = _deriveTripState(
+            history is List ? history : const [],
+          );
+        }
+
+        final quoteRows = await client
+            .from("quotations")
+            .select(
+              "ticket_number, total_amount, plumber_payable, customer_approval_status, created_at",
+            )
+            .eq("plumber_id", _plumberId!)
+            .order("created_at", ascending: false)
+            .limit(40);
+
+        for (final q in quoteRows) {
+          final payable = (q["plumber_payable"] as num?)?.toDouble() ??
+              (q["total_amount"] as num?)?.toDouble() ??
+              0;
+          final approved = q["customer_approval_status"] == "approved";
+          if (approved) {
+            earningsTotal += payable;
+          }
+          ledger.add({
+            "ticket": (q["ticket_number"] ?? "").toString(),
+            "amount": payable,
+            "approved": approved,
+            "created_at": (q["created_at"] ?? "").toString(),
+          });
         }
       }
 
       if (mounted) {
         setState(() {
           _jobs = jobList;
+          _tripStates = tripMap;
+          _earningsLedger = ledger;
+          _verifiedEarnings = earningsTotal;
           _loading = false;
         });
       }
@@ -74,12 +130,28 @@ class _PlumberShellState extends State<PlumberShell> {
     }
   }
 
+  String _deriveTripState(List<dynamic> history) {
+    for (int i = history.length - 1; i >= 0; i--) {
+      final item = history[i];
+      if (item is Map) {
+        final action = (item["action"] ?? item["event"] ?? "").toString();
+        if (action == "arrived") return "arrived";
+        if (action == "trip_started") return "on_the_way";
+        if (action == "trip_cancelled") return "idle";
+      }
+    }
+    return "idle";
+  }
+
   Future<void> _checkGpsStatus() async {
     if (!_isAvailable && _jobs.every((j) => !j.isActive)) {
       if (mounted) setState(() => _gpsStatus = "GPS off");
       return;
     }
-    final permission = await Geolocator.checkPermission();
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
       if (mounted) setState(() => _gpsStatus = "Permission required");
@@ -104,103 +176,118 @@ class _PlumberShellState extends State<PlumberShell> {
     await _checkGpsStatus();
   }
 
-  Future<void> _updateJobStatus(ServiceRequestItem job, String nextStatus) async {
-    await SupabaseConfig.client
-        .from("service_requests")
-        .update({"status": nextStatus})
-        .eq("id", job.id);
-    await _loadPlumberData();
-  }
-
-  void _openJobSheet(ServiceRequestItem job) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              "${job.ticketNumber} • ${job.problemCategory}",
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: FlowGuardTheme.navy,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(job.addressInKano),
-            const SizedBox(height: 8),
-            Text(
-              job.description,
-              style: const TextStyle(fontSize: 13, color: FlowGuardTheme.mutedText),
-            ),
-            const SizedBox(height: 16),
-            if (job.customerPhone != null && job.customerPhone!.isNotEmpty)
-              OutlinedButton.icon(
-                onPressed: () {
-                  launchUrl(Uri.parse("tel:${job.customerPhone}"));
-                },
-                icon: const Icon(Icons.phone_outlined),
-                label: Text("Call ${job.customerName ?? 'Customer'}"),
-              ),
-            if (job.customerLat != null && job.customerLng != null) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () {
-                  launchUrl(
-                    Uri.parse(
-                      "https://www.google.com/maps/dir/?api=1&destination=${job.customerLat},${job.customerLng}",
-                    ),
-                    mode: LaunchMode.externalApplication,
-                  );
-                },
-                icon: const Icon(Icons.navigation_outlined),
-                label: const Text("Navigate in Google Maps"),
-              ),
-            ],
-            if (job.status == "scheduled" || job.status == "approved") ...[
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _updateJobStatus(job, "in_progress");
-                },
-                child: const Text("Start Work"),
-              ),
-            ] else if (job.status == "in_progress") ...[
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _updateJobStatus(job, "work_completed");
-                },
-                child: const Text("Mark Work Complete"),
-              ),
-            ],
-          ],
+  void _openJobDetail(ServiceRequestItem job) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlumberJobDetailPage(
+          job: job,
+          plumberId: _plumberId ?? "",
+          plumberName: _plumberName,
+          onUpdated: _loadPlumberData,
+          onOpenChat: () => setState(() => _tabIndex = 2),
         ),
       ),
     );
   }
 
+  void _handleNotificationLink(String? link) {
+    if (link == null || link.isEmpty) return;
+    if (link.contains("chat") || link.contains("message")) {
+      setState(() => _tabIndex = 2);
+      return;
+    }
+    final matchingJob = _jobs.where((j) => link.contains(j.ticketNumber)).firstOrNull;
+    if (matchingJob != null) {
+      _openJobDetail(matchingJob);
+      return;
+    }
+    setState(() => _tabIndex = 1);
+  }
+
+  _DynamicCta _resolveDynamicCta(ServiceRequestItem? activeJob) {
+    if (!_isAvailable && activeJob == null) {
+      return _DynamicCta(
+        title: "You are currently Off Duty",
+        subtitle: "Go On Duty so Kano dispatch can assign nearby plumbing jobs.",
+        buttonLabel: "Go On Duty",
+        onTap: _toggleDuty,
+      );
+    }
+    if (activeJob == null) {
+      return _DynamicCta(
+        title: "Waiting for Jobs",
+        subtitle: "You are On Duty. New assignments will appear here immediately.",
+        buttonLabel: "Refresh Dispatch",
+        onTap: _loadPlumberData,
+        secondaryStyle: true,
+      );
+    }
+
+    final tripState = _tripStates[activeJob.id] ?? "idle";
+    String label = "Open Active Job";
+    String title = "${activeJob.ticketNumber} • ${activeJob.problemCategory}";
+    String subtitle = activeJob.addressInKano;
+
+    if (activeJob.status == "new" || activeJob.status == "pending") {
+      label = "Review Assignment";
+      subtitle = "New job assigned at ${activeJob.addressInKano}";
+    } else if (tripState == "on_the_way") {
+      label = "Arrived at Property";
+      subtitle = "Live trip in progress to ${activeJob.addressInKano}";
+    } else if (activeJob.status == "scheduled" && tripState == "idle") {
+      label = "Start Trip";
+      subtitle = "Begin navigation & live GPS tracking to customer";
+    } else if (tripState == "arrived" && activeJob.status != "quoted") {
+      label = "Prepare Quotation";
+      subtitle = "Arrived on site — submit itemised labour & materials";
+    } else if (activeJob.status == "approved") {
+      label = "Start Work";
+      subtitle = "Customer approved quotation — ready for repair";
+    } else if (activeJob.status == "in_progress") {
+      label = "Mark Work Complete";
+      subtitle = "Upload completion photos & close repair";
+    } else if (activeJob.status == "quoted") {
+      label = "View Submitted Quote";
+      subtitle = "Waiting for customer approval";
+    } else if (activeJob.status == "work_completed") {
+      label = "View Job Status";
+      subtitle = "Awaiting payment verification";
+    }
+
+    return _DynamicCta(
+      title: title,
+      subtitle: subtitle,
+      buttonLabel: label,
+      onTap: () => _openJobDetail(activeJob),
+    );
+  }
+
+  Future<void> _signOut() async {
+    await SupabaseConfig.client.auth.signOut();
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeJob = _jobs.where((j) => j.isActive).firstOrNull;
+    final assignedCount = _jobs.where((j) => j.isActive).length;
     final completedCount = _jobs.where((j) => j.status == "completed").length;
+    final naira = NumberFormat("#,##0");
+    final cta = _resolveDynamicCta(activeJob);
+
+    final filteredJobs = _jobs.where((j) {
+      if (_jobFilter == "active") return j.isActive;
+      if (_jobFilter == "completed") return j.status == "completed";
+      return true;
+    }).toList();
 
     final pages = [
+      // 1. HOME TAB
       RefreshIndicator(
         onRefresh: _loadPlumberData,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
           children: [
+            // Duty & GPS Status Card
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -214,146 +301,342 @@ class _PlumberShellState extends State<PlumberShell> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _gpsStatus,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: FlowGuardTheme.navy,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Hello, $_plumberName",
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Icon(
+                                _gpsStatus == "Location active"
+                                    ? Icons.gps_fixed_rounded
+                                    : Icons.gps_not_fixed_rounded,
+                                size: 14,
+                                color: _gpsStatus == "Location active"
+                                    ? const Color(0xFF059669)
+                                    : FlowGuardTheme.mutedText,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                _gpsStatus,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: FlowGuardTheme.mutedText,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _isAvailable
-                              ? const Color(0xFFD1FAE5)
-                              : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          _isAvailable ? "ON DUTY" : "OFF DUTY",
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
+                      InkWell(
+                        onTap: _toggleDuty,
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
                             color: _isAvailable
-                                ? const Color(0xFF065F46)
-                                : const Color(0xFF475569),
+                                ? const Color(0xFFD1FAE5)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            _isAvailable ? "ON DUTY" : "OFF DUTY",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: _isAvailable
+                                  ? const Color(0xFF065F46)
+                                  : const Color(0xFF475569),
+                            ),
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: _toggleDuty,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isAvailable
-                          ? const Color(0xFFECFDF5)
-                          : FlowGuardTheme.gold,
-                      foregroundColor: _isAvailable
-                          ? const Color(0xFF065F46)
-                          : FlowGuardTheme.navyDark,
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // Single Dynamic Contextual Next Action Card
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: FlowGuardTheme.navy,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "NEXT ACTION",
+                    style: TextStyle(
+                      color: FlowGuardTheme.gold,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
                     ),
-                    child: Text(_isAvailable ? "Go Off Duty" : "Go On Duty"),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    cta.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    cta.subtitle,
+                    style: const TextStyle(
+                      color: Color(0xFFCBD5E1),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: cta.secondaryStyle
+                        ? OutlinedButton(
+                            onPressed: cta.onTap,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Color(0xFF475569)),
+                            ),
+                            child: Text(cta.buttonLabel),
+                          )
+                        : ElevatedButton(
+                            onPressed: cta.onTap,
+                            child: Text(cta.buttonLabel),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // 4 Compact KPI Tiles (Secondary to active work)
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1.95,
+              children: [
+                _StatTile(label: "Assigned Jobs", value: "$assignedCount"),
+                _StatTile(label: "Completed Jobs", value: "$completedCount"),
+                _StatTile(
+                  label: "Verified Earnings",
+                  value: "₦${naira.format(_verifiedEarnings)}",
+                ),
+                _StatTile(
+                  label: "Rating",
+                  value: "${_rating.toStringAsFixed(1)} ★",
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 18),
+            const Text(
+              "Assigned Jobs",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_jobs.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    "No jobs assigned yet.",
+                    style: TextStyle(color: FlowGuardTheme.mutedText),
+                  ),
+                ),
+              )
+            else
+              ..._jobs.take(5).map((job) => _jobTile(job)),
+          ],
+        ),
+      ),
+
+      // 2. JOBS TAB
+      Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(
+              children: [
+                _filterChip("All", "all"),
+                const SizedBox(width: 8),
+                _filterChip("Active", "active"),
+                const SizedBox(width: 8),
+                _filterChip("Completed", "completed"),
+              ],
+            ),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadPlumberData,
+              child: filteredJobs.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 90),
+                        Center(
+                          child: Text(
+                            "No jobs in this filter.",
+                            style: TextStyle(color: FlowGuardTheme.mutedText),
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filteredJobs.length,
+                      itemBuilder: (_, idx) => _jobTile(filteredJobs[idx]),
+                    ),
+            ),
+          ),
+        ],
+      ),
+
+      // 3. MESSAGES TAB
+      TicketChatView(
+        tickets: _jobs,
+        senderRole: "plumber",
+        senderName: _plumberName,
+        senderId: _plumberId ?? "",
+      ),
+
+      // 4. EARNINGS TAB
+      RefreshIndicator(
+        onRefresh: _loadPlumberData,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: FlowGuardTheme.navy,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "VERIFIED EARNINGS",
+                    style: TextStyle(
+                      color: FlowGuardTheme.gold,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "₦${naira.format(_verifiedEarnings)}",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "$completedCount completed jobs • $_verificationStatus technician",
+                    style: const TextStyle(
+                      color: Color(0xFFCBD5E1),
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              childAspectRatio: 1.75,
-              children: [
-                _StatTile(label: "Assigned Jobs", value: "${_jobs.length}"),
-                _StatTile(label: "Completed", value: "$completedCount"),
-              ],
+            const Text(
+              "Quotation & Payout Ledger",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
             ),
-            const SizedBox(height: 16),
-            if (_loading)
-              const Center(child: CircularProgressIndicator())
-            else if (activeJob == null)
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: FlowGuardTheme.border),
-                ),
-                child: Column(
-                  children: [
-                    const Icon(
-                      Icons.location_on_outlined,
-                      size: 36,
-                      color: FlowGuardTheme.gold,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "No Active Job",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: FlowGuardTheme.navy,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _isAvailable
-                          ? "You are On Duty. New assignments will appear here."
-                          : "Switch to On Duty above to receive assignments.",
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: FlowGuardTheme.mutedText,
-                      ),
-                    ),
-                  ],
+            const SizedBox(height: 8),
+            if (_earningsLedger.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    "No quotations or payouts recorded yet.",
+                    style: TextStyle(color: FlowGuardTheme.mutedText),
+                  ),
                 ),
               )
             else
-              InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => _openJobSheet(activeJob),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
+              ..._earningsLedger.map(
+                (row) => Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: FlowGuardTheme.gold),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: FlowGuardTheme.border),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            row["ticket"] as String,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            (row["approved"] as bool)
+                                ? "Approved"
+                                : "Pending approval",
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: FlowGuardTheme.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
                       Text(
-                        "Active Job • ${activeJob.ticketNumber}",
+                        "₦${naira.format(row["amount"] as double)}",
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           color: FlowGuardTheme.navy,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(activeJob.addressInKano),
-                      if (activeJob.customerLat != null &&
-                          activeJob.customerLng != null) ...[
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            launchUrl(
-                              Uri.parse(
-                                "https://www.google.com/maps/dir/?api=1&destination=${activeJob.customerLat},${activeJob.customerLng}",
-                              ),
-                              mode: LaunchMode.externalApplication,
-                            );
-                          },
-                          icon: const Icon(Icons.navigation_outlined),
-                          label: const Text("Navigate to Property"),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -361,63 +644,92 @@ class _PlumberShellState extends State<PlumberShell> {
           ],
         ),
       ),
-      ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: _jobs.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (context, idx) {
-          final job = _jobs[idx];
-          return ListTile(
-            onTap: () => _openJobSheet(job),
-            tileColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: FlowGuardTheme.border),
-            ),
-            title: Text(
-              "${job.ticketNumber} • ${job.problemCategory}",
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                color: FlowGuardTheme.navy,
-              ),
-            ),
-            subtitle: Text(job.addressInKano),
-            trailing: const Icon(Icons.chevron_right_rounded),
-          );
-        },
-      ),
-      TicketChatView(
-        tickets: _jobs,
-        senderRole: "plumber",
-        senderName: _plumberName,
-      ),
+
+      // 5. PROFILE TAB
       ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _StatTile(label: "Completed Jobs", value: "$completedCount"),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: FlowGuardTheme.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 26,
+                      backgroundColor: FlowGuardTheme.navy,
+                      child: Text(
+                        _plumberName.isNotEmpty
+                            ? _plumberName[0].toUpperCase()
+                            : "T",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _plumberName,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _plumberPhone ?? widget.user.email ?? "",
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: FlowGuardTheme.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD1FAE5),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    "Status: ${_verificationStatus.toUpperCase()} TECHNICIAN",
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF065F46),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            onPressed: _signOut,
+            icon: const Icon(Icons.logout_rounded),
+            label: const Text("Sign Out"),
+          ),
         ],
-      ),
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              _plumberName,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                color: FlowGuardTheme.navy,
-              ),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: () => SupabaseConfig.client.auth.signOut(),
-              icon: const Icon(Icons.logout_rounded),
-              label: const Text("Sign Out"),
-            ),
-          ],
-        ),
       ),
     ];
 
@@ -429,8 +741,8 @@ class _PlumberShellState extends State<PlumberShell> {
             ClipOval(
               child: Image.asset(
                 "assets/images/flowguard-icon.jpg",
-                width: 32,
-                height: 32,
+                width: 38,
+                height: 38,
                 fit: BoxFit.cover,
               ),
             ),
@@ -445,6 +757,12 @@ class _PlumberShellState extends State<PlumberShell> {
             ),
           ],
         ),
+        actions: [
+          NotificationsButton(
+            role: "plumber",
+            onNavigateLink: _handleNotificationLink,
+          ),
+        ],
       ),
       body: pages[_tabIndex],
       bottomNavigationBar: NavigationBar(
@@ -469,6 +787,115 @@ class _PlumberShellState extends State<PlumberShell> {
       ),
     );
   }
+
+  Widget _filterChip(String label, String key) {
+    final selected = _jobFilter == key;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => setState(() => _jobFilter = key),
+      selectedColor: FlowGuardTheme.navy,
+      labelStyle: TextStyle(
+        color: selected ? Colors.white : FlowGuardTheme.navy,
+        fontWeight: FontWeight.w700,
+        fontSize: 12,
+      ),
+    );
+  }
+
+  Widget _jobTile(ServiceRequestItem job) {
+    final badge = StatusBadgeMeta.fromStatus(job.status);
+    return InkWell(
+      onTap: () => _openJobDetail(job),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: FlowGuardTheme.border),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        job.ticketNumber,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.navy,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badge.background,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          badge.label,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: badge.foreground,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    job.problemCategory,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: FlowGuardTheme.navy,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    job.addressInKano,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: FlowGuardTheme.mutedText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: FlowGuardTheme.mutedText),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DynamicCta {
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final VoidCallback onTap;
+  final bool secondaryStyle;
+
+  const _DynamicCta({
+    required this.title,
+    required this.subtitle,
+    required this.buttonLabel,
+    required this.onTap,
+    this.secondaryStyle = false,
+  });
 }
 
 class _StatTile extends StatelessWidget {
@@ -480,7 +907,7 @@ class _StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -498,11 +925,11 @@ class _StatTile extends StatelessWidget {
               color: FlowGuardTheme.mutedText,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
           Text(
             value,
             style: const TextStyle(
-              fontSize: 20,
+              fontSize: 18,
               fontWeight: FontWeight.w800,
               color: FlowGuardTheme.navy,
             ),

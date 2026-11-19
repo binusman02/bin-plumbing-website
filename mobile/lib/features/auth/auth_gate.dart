@@ -1,6 +1,8 @@
 import "package:flutter/material.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:url_launcher/url_launcher.dart";
+import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/app_flavor.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/customer/customer_shell.dart";
@@ -26,20 +28,177 @@ class AuthGate extends StatelessWidget {
           return const SignInScreen();
         }
 
-        final role =
-            (session.user.appMetadata["role"] ?? "customer").toString();
-
-        if (role == "plumber") {
-          return PlumberShell(user: session.user);
-        }
-
-        if (role == "admin") {
-          return _AdminWebRedirectScreen(email: session.user.email ?? "");
-        }
-
-        return CustomerShell(user: session.user);
+        return _RoleValidatedPortal(user: session.user);
       },
     );
+  }
+}
+
+class _RoleValidatedPortal extends StatefulWidget {
+  final User user;
+
+  const _RoleValidatedPortal({required this.user});
+
+  @override
+  State<_RoleValidatedPortal> createState() => _RoleValidatedPortalState();
+}
+
+class _RoleValidatedPortalState extends State<_RoleValidatedPortal> {
+  bool _checking = true;
+  bool _authorized = false;
+  String? _statusMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _validateAccess();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RoleValidatedPortal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.user.id != widget.user.id) {
+      _validateAccess();
+    }
+  }
+
+  Future<void> _validateAccess() async {
+    setState(() {
+      _checking = true;
+      _authorized = false;
+      _statusMessage = null;
+    });
+
+    final role = (widget.user.appMetadata["role"] ?? "customer").toString();
+
+    if (AppFlavorConfig.isTechnician) {
+      if (role != "plumber") {
+        setState(() {
+          _checking = false;
+          _statusMessage =
+              "This account is not approved as a FlowGuard Technician.";
+        });
+        return;
+      }
+
+      try {
+        final rows = await SupabaseConfig.client
+            .from("plumbers")
+            .select("verification_status")
+            .eq("auth_user_id", widget.user.id)
+            .limit(1);
+        final status = rows.isNotEmpty
+            ? (rows.first["verification_status"] ?? "pending_review").toString()
+            : "pending_review";
+        if (status != "approved") {
+          setState(() {
+            _checking = false;
+            _statusMessage =
+                "Your technician application status is '$status'. Access unlocks once approved by an administrator.";
+          });
+          return;
+        }
+      } catch (_) {
+        setState(() {
+          _checking = false;
+          _statusMessage = "Unable to verify technician approval status.";
+        });
+        return;
+      }
+    } else {
+      if (role != "customer") {
+        setState(() {
+          _checking = false;
+          _statusMessage = role == "plumber"
+              ? "Please use the FlowGuard Technician app for plumber accounts."
+              : "Please use the Admin Web Portal for administrator accounts.";
+        });
+        return;
+      }
+    }
+
+    final token = GoogleServicesBootstrap.fcmToken;
+    if (token != null && token.isNotEmpty) {
+      FlowGuardApiClient.registerDeviceToken(
+        fcmToken: token,
+        appFlavor: AppFlavorConfig.isTechnician ? "technician" : "customer",
+      ).catchError((_) {});
+    }
+
+    if (mounted) {
+      setState(() {
+        _checking = false;
+        _authorized = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!_authorized) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.verified_user_outlined,
+                      size: 52,
+                      color: FlowGuardTheme.navy,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      AppFlavorConfig.isTechnician
+                          ? "Technician Access Required"
+                          : "Customer App Access",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                        color: FlowGuardTheme.navy,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _statusMessage ?? "Access denied for this account.",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: FlowGuardTheme.mutedText),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: () async {
+                        final token = GoogleServicesBootstrap.fcmToken;
+                        if (token != null) {
+                          await FlowGuardApiClient.deactivateDeviceToken(token)
+                              .catchError((_) {});
+                        }
+                        await SupabaseConfig.client.auth.signOut();
+                      },
+                      child: const Text("Sign Out & Switch Account"),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return AppFlavorConfig.isTechnician
+        ? PlumberShell(user: widget.user)
+        : CustomerShell(user: widget.user);
   }
 }
 
@@ -51,51 +210,110 @@ class SignInScreen extends StatefulWidget {
 }
 
 class _SignInScreenState extends State<SignInScreen> {
-  final _emailController = TextEditingController();
+  final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
   bool _obscurePassword = true;
   bool _loading = false;
+  bool _createAccountMode = false;
   String? _errorMessage;
+  String? _infoMessage;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _identifierController.dispose();
     _passwordController.dispose();
+    _nameController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
-  Future<void> _signIn() async {
-    final identifier = _emailController.text.trim();
+  Future<void> _submit() async {
+    final identifier = _identifierController.text.trim();
     final password = _passwordController.text;
     if (identifier.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = "Enter your email/phone and password.");
+      setState(() => _errorMessage = "Enter your phone/email and password.");
       return;
     }
 
     setState(() {
       _loading = true;
       _errorMessage = null;
+      _infoMessage = null;
     });
 
     try {
+      if (_createAccountMode && AppFlavorConfig.isCustomer) {
+        final fullName = _nameController.text.trim();
+        final phone = _phoneController.text.trim();
+        if (fullName.length < 2 || phone.length < 10) {
+          setState(() => _errorMessage = "Enter your full name and phone number.");
+          return;
+        }
+        await SupabaseConfig.client.auth.signUp(
+          email: identifier.toLowerCase(),
+          password: password,
+          data: {"full_name": fullName, "phone": phone},
+        );
+        if (mounted) {
+          setState(() {
+            _infoMessage =
+                "Account created. Check your email to confirm if required, or sign in.";
+            _createAccountMode = false;
+          });
+        }
+        return;
+      }
+
+      final resolvedEmail = await FlowGuardApiClient.resolveLoginIdentifier(
+        identifier: identifier,
+        expectedRole: AppFlavorConfig.expectedRole,
+      );
+
       await SupabaseConfig.client.auth.signInWithPassword(
-        email: identifier,
+        email: resolvedEmail,
         password: password,
       );
     } on AuthException catch (err) {
-      if (mounted) {
-        setState(() => _errorMessage = err.message);
-      }
-    } catch (_) {
+      if (mounted) setState(() => _errorMessage = err.message);
+    } catch (err) {
       if (mounted) {
         setState(
-          () => _errorMessage = "Unable to sign in right now. Please try again.",
+          () => _errorMessage = err.toString().replaceFirst("Exception: ", ""),
         );
       }
     } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final raw = _identifierController.text.trim();
+    if (raw.isEmpty) {
+      setState(() => _errorMessage = "Enter your email or phone first.");
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+      _infoMessage = null;
+    });
+    try {
+      final email = await FlowGuardApiClient.resolveLoginIdentifier(
+        identifier: raw,
+        expectedRole: AppFlavorConfig.expectedRole,
+      );
+      await SupabaseConfig.client.auth.resetPasswordForEmail(email);
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() => _infoMessage = "Password reset link sent to $email.");
       }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _infoMessage = "If an account exists, a reset link was sent.");
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -103,6 +321,7 @@ class _SignInScreenState extends State<SignInScreen> {
     setState(() {
       _loading = true;
       _errorMessage = null;
+      _infoMessage = null;
     });
     try {
       await GoogleAuthHelper.signInWithGoogle();
@@ -124,7 +343,7 @@ class _SignInScreenState extends State<SignInScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Container(
@@ -148,41 +367,69 @@ class _SignInScreenState extends State<SignInScreen> {
                       child: ClipOval(
                         child: Image.asset(
                           "assets/images/flowguard-icon.jpg",
-                          width: 72,
-                          height: 72,
+                          width: 74,
+                          height: 74,
                           fit: BoxFit.cover,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      "FlowGuard Plumbing",
+                    const SizedBox(height: 14),
+                    Text(
+                      AppFlavorConfig.appTitle,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
                         color: FlowGuardTheme.navy,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      "Sign in to your Customer or Technician account",
+                    Text(
+                      AppFlavorConfig.isTechnician
+                          ? "Sign in with your approved technician account"
+                          : (_createAccountMode
+                              ? "Create your customer account"
+                              : "Sign in with phone number or email"),
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
                         color: FlowGuardTheme.mutedText,
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 22),
+                    if (_createAccountMode && AppFlavorConfig.isCustomer) ...[
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: "Full Name",
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: "Phone Number",
+                          hintText: "0806...",
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     TextField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: "Email Address",
-                        hintText: "you@example.com",
+                      controller: _identifierController,
+                      keyboardType: _createAccountMode
+                          ? TextInputType.emailAddress
+                          : TextInputType.text,
+                      decoration: InputDecoration(
+                        labelText: _createAccountMode
+                            ? "Email Address"
+                            : "Phone Number or Email",
+                        hintText: _createAccountMode
+                            ? "you@example.com"
+                            : "0806... or you@example.com",
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
@@ -202,9 +449,26 @@ class _SignInScreenState extends State<SignInScreen> {
                         ),
                       ),
                     ),
+                    if (!_createAccountMode)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _loading ? null : _forgotPassword,
+                          child: const Text(
+                            "Forgot Password?",
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 14),
                     if (_errorMessage != null) ...[
-                      const SizedBox(height: 12),
                       Container(
+                        margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFEE2E2),
@@ -220,110 +484,113 @@ class _SignInScreenState extends State<SignInScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 20),
+                    if (_infoMessage != null) ...[
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD1FAE5),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _infoMessage!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF065F46),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                     ElevatedButton(
-                      onPressed: _loading ? null : _signIn,
+                      onPressed: _loading ? null : _submit,
                       child: _loading
                           ? const SizedBox(
                               height: 20,
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text("Sign In"),
+                          : Text(_createAccountMode ? "Create Account" : "Sign In"),
                     ),
-                    const SizedBox(height: 10),
-                    OutlinedButton.icon(
+                    const SizedBox(height: 12),
+                    OutlinedButton(
                       onPressed: _loading ? null : _signInWithGoogle,
-                      icon: const Icon(Icons.g_mobiledata_rounded, size: 24),
-                      label: const Text("Continue with Google"),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
-                        foregroundColor: FlowGuardTheme.navy,
+                        side: const BorderSide(color: FlowGuardTheme.border),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextButton(
-                      onPressed: () {
-                        launchUrl(
-                          Uri.parse("${SupabaseConfig.webBaseUrl}/request"),
-                          mode: LaunchMode.externalApplication,
-                        );
-                      },
-                      child: const Text(
-                        "Submit a Guest Request on Web",
-                        style: TextStyle(
-                          color: FlowGuardTheme.navy,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 22,
+                            height: 22,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              "G",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                                color: Color(0xFF4285F4),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text(
+                            "Continue with Google",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    if (AppFlavorConfig.isCustomer)
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _createAccountMode = !_createAccountMode;
+                            _errorMessage = null;
+                            _infoMessage = null;
+                          });
+                        },
+                        child: Text(
+                          _createAccountMode
+                              ? "Already have an account? Sign In"
+                              : "New customer? Create an account",
+                          style: const TextStyle(
+                            color: FlowGuardTheme.navy,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      )
+                    else
+                      TextButton(
+                        onPressed: () {
+                          launchUrl(
+                            Uri.parse("${SupabaseConfig.webBaseUrl}/join-as-plumber"),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                        child: const Text(
+                          "Apply as a Plumber on Web",
+                          style: TextStyle(
+                            color: FlowGuardTheme.navy,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AdminWebRedirectScreen extends StatelessWidget {
-  final String email;
-
-  const _AdminWebRedirectScreen({required this.email});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.admin_panel_settings_outlined,
-                    size: 56,
-                    color: FlowGuardTheme.navy,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "Admin Operations Portal",
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: FlowGuardTheme.navy,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Signed in as $email. Full admin dispatch & financial tools run on your web dashboard.",
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: FlowGuardTheme.mutedText),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () {
-                      launchUrl(
-                        Uri.parse("${SupabaseConfig.webBaseUrl}/admin"),
-                        mode: LaunchMode.externalApplication,
-                      );
-                    },
-                    child: const Text("Open Admin Web Portal"),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () => SupabaseConfig.client.auth.signOut(),
-                    child: const Text("Sign Out"),
-                  ),
-                ],
               ),
             ),
           ),

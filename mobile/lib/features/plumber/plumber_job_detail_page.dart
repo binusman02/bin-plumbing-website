@@ -1,0 +1,1069 @@
+import "dart:async";
+import "package:flutter/material.dart";
+import "package:geolocator/geolocator.dart";
+import "package:google_maps_flutter/google_maps_flutter.dart";
+import "package:image_picker/image_picker.dart";
+import "package:intl/intl.dart";
+import "package:url_launcher/url_launcher.dart";
+import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/supabase_config.dart";
+import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
+import "package:flowguard_plumbing/models/flowguard_models.dart";
+import "package:flowguard_plumbing/theme/app_theme.dart";
+
+class PlumberJobDetailPage extends StatefulWidget {
+  final ServiceRequestItem job;
+  final String plumberId;
+  final String plumberName;
+  final VoidCallback onUpdated;
+  final VoidCallback onOpenChat;
+
+  const PlumberJobDetailPage({
+    super.key,
+    required this.job,
+    required this.plumberId,
+    required this.plumberName,
+    required this.onUpdated,
+    required this.onOpenChat,
+  });
+
+  @override
+  State<PlumberJobDetailPage> createState() => _PlumberJobDetailPageState();
+}
+
+class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
+  late ServiceRequestItem _job;
+  QuotationData? _quote;
+  bool _loading = true;
+  bool _busy = false;
+  String _tripState = "idle"; // idle | on_the_way | arrived
+  double? _plumberLat;
+  double? _plumberLng;
+  List<LatLng> _routePoints = [];
+  String _gpsMessage = "GPS standby";
+  bool _gpsError = false;
+  StreamSubscription<Position>? _gpsSub;
+  List<dynamic> _history = [];
+  final List<String> _uploadedPhotoNames = [];
+
+  final _labourCtrl = TextEditingController(text: "15000");
+  final _materialsCtrl = TextEditingController(text: "0");
+  final _transportCtrl = TextEditingController(text: "2500");
+  final _otherCtrl = TextEditingController(text: "0");
+  final _notesCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _job = widget.job;
+    _loadJobDetails();
+  }
+
+  @override
+  void dispose() {
+    _gpsSub?.cancel();
+    _labourCtrl.dispose();
+    _materialsCtrl.dispose();
+    _transportCtrl.dispose();
+    _otherCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadJobDetails() async {
+    setState(() => _loading = true);
+    try {
+      final client = SupabaseConfig.client;
+      final reqRow = await client
+          .from("service_requests")
+          .select()
+          .eq("id", _job.id)
+          .maybeSingle();
+
+      if (reqRow != null) {
+        _job = ServiceRequestItem.fromJson(reqRow);
+        final rawHistory = reqRow["history"];
+        _history = rawHistory is List ? List<dynamic>.from(rawHistory) : [];
+        _tripState = _deriveTripState(_history);
+      }
+
+      final quoteRows = await client
+          .from("quotations")
+          .select()
+          .eq("ticket_number", _job.ticketNumber)
+          .order("created_at", ascending: false)
+          .limit(1);
+
+      QuotationData? loadedQuote;
+      if (quoteRows.isNotEmpty) {
+        loadedQuote = QuotationData.fromJson(quoteRows.first);
+      }
+
+      final snap = await FlowGuardApiClient.fetchTrackingSnapshot(
+        viewerRole: "plumber",
+        ticket: _job.ticketNumber,
+      );
+      final plumberMap = snap?["plumber"] as Map<String, dynamic>?;
+      final routeRaw = snap?["routePoints"] as List?;
+
+      if (mounted) {
+        setState(() {
+          _quote = loadedQuote;
+          _plumberLat = (plumberMap?["lat"] as num?)?.toDouble();
+          _plumberLng = (plumberMap?["lng"] as num?)?.toDouble();
+          if (routeRaw != null) {
+            _routePoints = routeRaw
+                .whereType<Map>()
+                .map(
+                  (p) => LatLng(
+                    (p["lat"] as num).toDouble(),
+                    (p["lng"] as num).toDouble(),
+                  ),
+                )
+                .toList();
+          }
+          _loading = false;
+        });
+      }
+
+      if (_tripState == "on_the_way" && _job.isActive) {
+        await _startGpsStream();
+      } else {
+        await _stopGpsStream(disableSharing: false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _deriveTripState(List<dynamic> history) {
+    for (int i = history.length - 1; i >= 0; i--) {
+      final item = history[i];
+      if (item is Map) {
+        final action = (item["action"] ?? item["event"] ?? "").toString();
+        if (action == "arrived") return "arrived";
+        if (action == "trip_started") return "on_the_way";
+        if (action == "trip_cancelled") return "idle";
+      }
+    }
+    return "idle";
+  }
+
+  Future<bool> _ensureLocationPermission() async {
+    final enabled = await Geolocator.isLocationServiceEnabled();
+    if (!enabled) {
+      if (mounted) {
+        setState(() {
+          _gpsError = true;
+          _gpsMessage = "Device GPS is turned off. Enable Location to track.";
+        });
+      }
+      return false;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        setState(() {
+          _gpsError = true;
+          _gpsMessage = "Location permission denied. Grant access in Settings.";
+        });
+      }
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _startGpsStream() async {
+    final ok = await _ensureLocationPermission();
+    if (!ok) return;
+
+    await _gpsSub?.cancel();
+    if (mounted) {
+      setState(() {
+        _gpsError = false;
+        _gpsMessage = "Live GPS streaming to customer & dispatch";
+      });
+    }
+
+    try {
+      final initial = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      await _pushLocation(initial);
+    } catch (_) {}
+
+    _gpsSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 15,
+      ),
+    ).listen(
+      (pos) => _pushLocation(pos),
+      onError: (_) {
+        if (mounted) {
+          setState(() {
+            _gpsError = true;
+            _gpsMessage = "GPS signal lost — retrying automatically";
+          });
+        }
+      },
+    );
+  }
+
+  Future<void> _stopGpsStream({bool disableSharing = true}) async {
+    await _gpsSub?.cancel();
+    _gpsSub = null;
+    if (disableSharing) {
+      try {
+        await SupabaseConfig.client.from("plumber_live_locations").upsert({
+          "plumber_id": widget.plumberId,
+          "sharing_enabled": false,
+          "updated_at": DateTime.now().toUtc().toIso8601String(),
+        }, onConflict: "plumber_id");
+      } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {
+        _gpsError = false;
+        _gpsMessage = _tripState == "arrived"
+            ? "Arrived — live trip tracking stopped"
+            : "GPS standby";
+      });
+    }
+  }
+
+  Future<void> _pushLocation(Position pos) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    if (mounted) {
+      setState(() {
+        _plumberLat = pos.latitude;
+        _plumberLng = pos.longitude;
+        _gpsError = false;
+        _gpsMessage =
+            "Live GPS active (${pos.accuracy.round()}m accuracy)";
+      });
+    }
+    try {
+      final client = SupabaseConfig.client;
+      await client.from("plumber_live_locations").upsert({
+        "plumber_id": widget.plumberId,
+        "latitude": pos.latitude,
+        "longitude": pos.longitude,
+        "accuracy_m": pos.accuracy,
+        "heading": pos.heading,
+        "speed": pos.speed,
+        "location_timestamp": nowIso,
+        "last_seen_at": nowIso,
+        "sharing_enabled": true,
+        "updated_at": nowIso,
+      }, onConflict: "plumber_id");
+
+      await client.from("plumbers").update({
+        "current_lat": pos.latitude,
+        "current_lng": pos.longitude,
+        "location_updated_at": nowIso,
+      }).eq("id", widget.plumberId);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _gpsError = true;
+          _gpsMessage = "Offline — GPS update queued for retry";
+        });
+      }
+    }
+  }
+
+  Future<void> _appendHistoryAndUpdate({
+    required String action,
+    String? nextStatus,
+  }) async {
+    setState(() => _busy = true);
+    try {
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+      final updatedHistory = [
+        ..._history,
+        {
+          "action": action,
+          "timestamp": nowIso,
+          "actor": widget.plumberName,
+          "role": "plumber",
+        },
+      ];
+      final payload = <String, dynamic>{
+        "history": updatedHistory,
+        if (nextStatus != null) "status": nextStatus,
+      };
+      await SupabaseConfig.client
+          .from("service_requests")
+          .update(payload)
+          .eq("id", _job.id);
+
+      await _loadJobDetails();
+      widget.onUpdated();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Update failed: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _handleStartTrip() async {
+    final ok = await _ensureLocationPermission();
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_gpsMessage)),
+        );
+      }
+      return;
+    }
+    await _appendHistoryAndUpdate(
+      action: "trip_started",
+      nextStatus: _job.status == "new" || _job.status == "pending"
+          ? "scheduled"
+          : null,
+    );
+    await _startGpsStream();
+  }
+
+  Future<void> _handleArrived() async {
+    await _stopGpsStream(disableSharing: true);
+    await _appendHistoryAndUpdate(action: "arrived");
+  }
+
+  double _parseNum(TextEditingController c) =>
+      double.tryParse(c.text.trim().replaceAll(",", "")) ?? 0;
+
+  double get _quoteTotal =>
+      _parseNum(_labourCtrl) +
+      _parseNum(_materialsCtrl) +
+      _parseNum(_transportCtrl) +
+      _parseNum(_otherCtrl);
+
+  Future<void> _submitQuotation() async {
+    if (_quoteTotal <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter at least one charge above ₦0.")),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final labour = _parseNum(_labourCtrl);
+      final materials = _parseNum(_materialsCtrl);
+      final transport = _parseNum(_transportCtrl);
+      final other = _parseNum(_otherCtrl);
+      final total = labour + materials + transport + other;
+
+      await SupabaseConfig.client.from("quotations").insert({
+        "request_id": _job.id,
+        "ticket_number": _job.ticketNumber,
+        "plumber_id": widget.plumberId,
+        "plumber_name": widget.plumberName,
+        "labour_charge": labour,
+        "materials_cost": materials,
+        "transport_charge": transport,
+        "other_charges": other,
+        "total_amount": total,
+        "customer_approval_status": "pending",
+        "admin_approved": false,
+        "notes": _notesCtrl.text.trim(),
+      });
+
+      await _appendHistoryAndUpdate(
+        action: "quotation_submitted",
+        nextStatus: "quoted",
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Quotation submitted for customer & admin review."),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not submit quote: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _uploadJobPhoto(ImageSource source) async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 78,
+        maxWidth: 1400,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final ext = picked.name.split(".").last.toLowerCase();
+      final storagePath =
+          "jobs/${_job.ticketNumber}/${DateTime.now().millisecondsSinceEpoch}.$ext";
+      await SupabaseConfig.client.storage
+          .from("request-photos")
+          .uploadBinary(storagePath, bytes);
+      if (mounted) {
+        setState(() => _uploadedPhotoNames.add(picked.name));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Uploaded ${picked.name}")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Photo upload failed: $e")),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final badge = StatusBadgeMeta.fromStatus(_job.status);
+    final naira = NumberFormat("#,##0");
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_job.ticketNumber),
+        actions: [
+          IconButton(
+            tooltip: "Refresh job",
+            onPressed: _loadJobDetails,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadJobDetails,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
+                children: [
+                  // Header Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: FlowGuardTheme.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _job.problemCategory,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: FlowGuardTheme.navy,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: badge.background,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                badge.label,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: badge.foreground,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.person_outline,
+                              size: 16,
+                              color: FlowGuardTheme.mutedText,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _job.customerName ?? "Customer",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: FlowGuardTheme.navy,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _job.priority == "urgent"
+                                    ? const Color(0xFFFEE2E2)
+                                    : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                _job.priority.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: _job.priority == "urgent"
+                                      ? const Color(0xFF991B1B)
+                                      : FlowGuardTheme.mutedText,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.location_on_outlined,
+                              size: 16,
+                              color: FlowGuardTheme.mutedText,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                _job.addressInKano,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: FlowGuardTheme.mutedText,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _job.description,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            height: 1.45,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            if (_job.customerPhone != null &&
+                                _job.customerPhone!.isNotEmpty)
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () => launchUrl(
+                                    Uri.parse("tel:${_job.customerPhone}"),
+                                  ),
+                                  icon: const Icon(Icons.phone_outlined, size: 18),
+                                  label: const Text("Call Customer"),
+                                ),
+                              ),
+                            if (_job.customerPhone != null &&
+                                _job.customerPhone!.isNotEmpty)
+                              const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  widget.onOpenChat();
+                                },
+                                icon: const Icon(
+                                  Icons.chat_bubble_outline,
+                                  size: 18,
+                                ),
+                                label: const Text("Chat"),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Embedded In-App Map & GPS Status (No external Google Maps redirect!)
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: FlowGuardTheme.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              "Property & Route Map",
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: FlowGuardTheme.navy,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _gpsError
+                                    ? const Color(0xFFFEE2E2)
+                                    : _tripState == "on_the_way"
+                                        ? const Color(0xFFD1FAE5)
+                                        : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                _tripState == "on_the_way"
+                                    ? "ON THE WAY"
+                                    : _tripState == "arrived"
+                                        ? "ARRIVED"
+                                        : "STANDBY",
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: _gpsError
+                                      ? const Color(0xFF991B1B)
+                                      : _tripState == "on_the_way"
+                                          ? const Color(0xFF065F46)
+                                          : FlowGuardTheme.navy,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _gpsMessage,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _gpsError
+                                ? const Color(0xFFB91C1C)
+                                : FlowGuardTheme.mutedText,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        FlowGuardGoogleMap(
+                          customerLat: _job.customerLat,
+                          customerLng: _job.customerLng,
+                          plumberLat: _plumberLat,
+                          plumberLng: _plumberLng,
+                          plumberLabel: widget.plumberName,
+                          routePoints: _routePoints,
+                          height: 240,
+                          allowFullscreen: true,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Contextual Next Action Section
+                  _buildDynamicWorkflowCard(naira),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildDynamicWorkflowCard(NumberFormat naira) {
+    if (_job.status == "completed" || _job.status == "cancelled") {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFECFDF5),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFA7F3D0)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_rounded, color: Color(0xFF059669)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _job.status == "completed"
+                    ? "Job closed and verified. Earnings reflected in your Earnings tab."
+                    : "This service request was cancelled.",
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF065F46),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_job.status == "new" || _job.status == "pending") {
+      return _actionCard(
+        title: "New Job Assignment",
+        subtitle:
+            "Review the customer's address and issue above, then accept to schedule.",
+        buttonLabel: "Accept Assignment",
+        onPressed: _busy
+            ? null
+            : () => _appendHistoryAndUpdate(
+                  action: "assignment_accepted",
+                  nextStatus: "scheduled",
+                ),
+      );
+    }
+
+    if (_job.status == "scheduled" && _tripState == "idle") {
+      return _actionCard(
+        title: "Ready to Travel",
+        subtitle:
+            "Start your trip to share live GPS tracking with the customer until arrival.",
+        buttonLabel: "Start Trip",
+        onPressed: _busy ? null : _handleStartTrip,
+      );
+    }
+
+    if (_tripState == "on_the_way") {
+      return _actionCard(
+        title: "En Route to Property",
+        subtitle:
+            "Your live location is visible to the customer. Tap below once you arrive on site.",
+        buttonLabel: "Arrived at Property",
+        onPressed: _busy ? null : _handleArrived,
+      );
+    }
+
+    if ((_tripState == "arrived" || _job.status == "scheduled") &&
+        _quote == null) {
+      return _buildQuotationBuilder(naira);
+    }
+
+    if (_job.status == "quoted" && _quote != null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: FlowGuardTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Quotation Submitted",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Total: ₦${naira.format(_quote!.totalAmount)} • Approval: ${_quote!.approvalStatus.toUpperCase()}",
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              "Waiting for customer approval before starting repair work.",
+              style: TextStyle(fontSize: 12, color: FlowGuardTheme.mutedText),
+            ),
+            if (_quote!.approvalStatus == "approved") ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _appendHistoryAndUpdate(
+                            action: "work_started",
+                            nextStatus: "in_progress",
+                          ),
+                  child: const Text("Start Work"),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    if (_job.status == "approved") {
+      return _actionCard(
+        title: "Quotation Approved",
+        subtitle:
+            "Customer approved the quotation. Begin the plumbing repair now.",
+        buttonLabel: "Start Work",
+        onPressed: _busy
+            ? null
+            : () => _appendHistoryAndUpdate(
+                  action: "work_started",
+                  nextStatus: "in_progress",
+                ),
+      );
+    }
+
+    if (_job.status == "in_progress") {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: FlowGuardTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Work in Progress",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              "Upload before/after photos of the completed repair, then mark work complete.",
+              style: TextStyle(fontSize: 12, color: FlowGuardTheme.mutedText),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _uploadJobPhoto(ImageSource.camera),
+                    icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                    label: const Text("Camera"),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _uploadJobPhoto(ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_outlined, size: 18),
+                    label: const Text("Gallery"),
+                  ),
+                ),
+              ],
+            ),
+            if (_uploadedPhotoNames.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                "${_uploadedPhotoNames.length} photo(s) uploaded",
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF059669),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _busy
+                    ? null
+                    : () => _appendHistoryAndUpdate(
+                          action: "work_completed",
+                          nextStatus: "work_completed",
+                        ),
+                child: const Text("Mark Work Complete"),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: FlowGuardTheme.border),
+      ),
+      child: const Text(
+        "Work marked complete. Awaiting payment verification and final closure.",
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: FlowGuardTheme.navy,
+        ),
+      ),
+    );
+  }
+
+  Widget _actionCard({
+    required String title,
+    required String subtitle,
+    required String buttonLabel,
+    required VoidCallback? onPressed,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: FlowGuardTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: FlowGuardTheme.navy,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 12, color: FlowGuardTheme.mutedText),
+          ),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            onPressed: onPressed,
+            child: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(buttonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuotationBuilder(NumberFormat naira) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: FlowGuardTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            "Prepare Itemised Quotation (₦)",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: FlowGuardTheme.navy,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Inspect the property and enter transparent labour and materials costs.",
+            style: TextStyle(fontSize: 12, color: FlowGuardTheme.mutedText),
+          ),
+          const SizedBox(height: 12),
+          _numField("Labour Charge (₦)", _labourCtrl),
+          const SizedBox(height: 10),
+          _numField("Materials Cost (₦)", _materialsCtrl),
+          const SizedBox(height: 10),
+          _numField("Transport Charge (₦)", _transportCtrl),
+          const SizedBox(height: 10),
+          _numField("Other Charges (₦)", _otherCtrl),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _notesCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: "Inspection Notes / Parts Breakdown",
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: FlowGuardTheme.surface,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Quotation Total",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                Text(
+                  "₦${naira.format(_quoteTotal)}",
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            onPressed: _busy ? null : _submitQuotation,
+            child: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text("Submit Quotation"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _numField(String label, TextEditingController controller) {
+    return TextField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      onChanged: (_) => setState(() {}),
+      decoration: InputDecoration(labelText: label),
+    );
+  }
+}

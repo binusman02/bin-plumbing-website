@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getVerifiedAppRole } from "@/lib/auth-role";
@@ -48,9 +48,21 @@ export async function resolvePortalActor(
 
   try {
     const supabase = await createClient();
-    const {
+    let {
       data: { user },
     } = await supabase.auth.getUser();
+
+    if (!user) {
+      const headerStore = await headers();
+      const authHeader = headerStore.get("authorization") || "";
+      if (authHeader.toLowerCase().startsWith("bearer ")) {
+        const bearerToken = authHeader.slice(7).trim();
+        if (bearerToken) {
+          const { data: tokenData } = await adminSupabase.auth.getUser(bearerToken);
+          user = tokenData.user ?? null;
+        }
+      }
+    }
 
     if (user) {
       // 1. Admin check via admin_users table

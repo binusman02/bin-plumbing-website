@@ -32,6 +32,20 @@ android {
             (project.findProperty("GOOGLE_MAPS_API_KEY") as String?) ?: ""
     }
 
+    flavorDimensions += "app"
+    productFlavors {
+        create("customer") {
+            dimension = "app"
+            applicationId = "com.flowguard.plumbing.customer"
+            resValue("string", "app_name", "FlowGuard Plumbing")
+        }
+        create("technician") {
+            dimension = "app"
+            applicationId = "com.flowguard.plumbing.technician"
+            resValue("string", "app_name", "FlowGuard Technician")
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

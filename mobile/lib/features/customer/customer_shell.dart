@@ -1,11 +1,13 @@
-import "dart:async";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
+import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/core/service_assets.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
-import "package:flowguard_plumbing/features/customer/customer_request_detail_sheet.dart";
+import "package:flowguard_plumbing/features/customer/customer_request_detail_page.dart";
 import "package:flowguard_plumbing/features/customer/new_request_sheet.dart";
+import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
 import "package:flowguard_plumbing/features/shared/ticket_chat_view.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -28,6 +30,7 @@ class _CustomerShellState extends State<CustomerShell> {
   String _customerId = "";
   String _customerName = "Customer";
   String _customerPhone = "";
+  String? _savedAddress;
 
   @override
   void initState() {
@@ -39,31 +42,34 @@ class _CustomerShellState extends State<CustomerShell> {
     setState(() => _loading = true);
     try {
       final client = SupabaseConfig.client;
-      final settingsRows = await client
-          .from("marketplace_settings")
-          .select("service_categories, bank_name, bank_account_name, bank_account_number")
-          .limit(1);
 
-      final parsedCategories = <ServiceCategoryItem>[];
+      final catRows = await client
+          .from("service_categories")
+          .select("*")
+          .eq("is_active", true)
+          .order("sort_order", ascending: true);
+
+      final parsedCategories = catRows
+          .where((r) => r["visible"] != false && r["active"] != false)
+          .map((r) => ServiceCategoryItem.fromJson(r))
+          .toList();
+
+      final settingRow = await client
+          .from("settings")
+          .select("value")
+          .eq("key", "marketplace_settings")
+          .maybeSingle();
+
       BankDetailsData? bank;
-      if (settingsRows.isNotEmpty) {
-        final settings = settingsRows.first;
-        bank = BankDetailsData.fromSettings(settings);
-        final raw = settings["service_categories"];
-        if (raw is List) {
-          for (final entry in raw) {
-            if (entry is Map<String, dynamic> &&
-                entry["active"] != false &&
-                entry["visible"] != false) {
-              parsedCategories.add(ServiceCategoryItem.fromJson(entry));
-            }
-          }
-        }
+      if (settingRow != null && settingRow["value"] is Map<String, dynamic>) {
+        bank = BankDetailsData.fromSettingsValue(
+          settingRow["value"] as Map<String, dynamic>,
+        );
       }
 
       final customerRows = await client
           .from("customers")
-          .select("id, full_name, phone")
+          .select("id, full_name, phone, address")
           .eq("auth_user_id", widget.user.id)
           .limit(1);
 
@@ -71,11 +77,13 @@ class _CustomerShellState extends State<CustomerShell> {
       String displayName =
           widget.user.userMetadata?["full_name"]?.toString() ?? "Customer";
       String phone = widget.user.phone ?? "";
+      String? savedAddr;
       if (customerRows.isNotEmpty) {
         customerId = customerRows.first["id"]?.toString() ?? "";
         displayName =
             customerRows.first["full_name"]?.toString() ?? displayName;
         phone = customerRows.first["phone"]?.toString() ?? phone;
+        savedAddr = customerRows.first["address"]?.toString();
       }
 
       final reqList = <ServiceRequestItem>[];
@@ -98,13 +106,12 @@ class _CustomerShellState extends State<CustomerShell> {
           _customerId = customerId;
           _customerName = displayName;
           _customerPhone = phone;
+          _savedAddress = savedAddr;
           _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -121,6 +128,7 @@ class _CustomerShellState extends State<CustomerShell> {
         customerId: _customerId,
         customerName: _customerName,
         customerPhone: _customerPhone,
+        savedAddress: _savedAddress,
         categories: _categories,
         initialCategory: initialCategory,
         onCreated: _loadCustomerData,
@@ -128,19 +136,98 @@ class _CustomerShellState extends State<CustomerShell> {
     );
   }
 
-  void _openRequestDetail(ServiceRequestItem req) {
+  void _openAllCategoriesSheet() {
     showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
       showDragHandle: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (_) => CustomerRequestDetailSheet(
-        request: req,
-        bankDetails: _bankDetails,
-        onUpdated: _loadCustomerData,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "All Categories",
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: GridView.builder(
+                shrinkWrap: true,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.92,
+                ),
+                itemCount: _categories.length,
+                itemBuilder: (_, idx) {
+                  final cat = _categories[idx];
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _openNewRequestSheet(cat.title);
+                    },
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: FlowGuardTheme.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: FlowGuardTheme.border),
+                          ),
+                          child: Icon(
+                            ServiceAssetHelper.resolveCategoryIcon(
+                              cat.iconName.isNotEmpty ? cat.iconName : cat.title,
+                            ),
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          cat.title,
+                          maxLines: 2,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openRequestDetail(ServiceRequestItem req) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CustomerRequestDetailPage(
+          request: req,
+          bankDetails: _bankDetails,
+          onUpdated: _loadCustomerData,
+          onOpenChat: () => setState(() => _tabIndex = 2),
+        ),
       ),
     );
   }
@@ -155,6 +242,7 @@ class _CustomerShellState extends State<CustomerShell> {
         requests: _requests,
         onRefresh: _loadCustomerData,
         onSelectCategory: _openNewRequestSheet,
+        onViewAllCategories: _openAllCategoriesSheet,
         onOpenRequest: _openRequestDetail,
         onViewAllRequests: () => setState(() => _tabIndex = 1),
       ),
@@ -167,12 +255,14 @@ class _CustomerShellState extends State<CustomerShell> {
         tickets: _requests,
         senderRole: "customer",
         senderName: _customerName,
+        senderId: _customerId,
       ),
       _CustomerPaymentsTab(bankDetails: _bankDetails),
       _CustomerProfileTab(
         name: _customerName,
         email: widget.user.email ?? "",
         phone: _customerPhone,
+        address: _savedAddress,
       ),
     ];
 
@@ -184,16 +274,16 @@ class _CustomerShellState extends State<CustomerShell> {
             ClipOval(
               child: Image.asset(
                 "assets/images/flowguard-icon.jpg",
-                width: 32,
-                height: 32,
+                width: 38,
+                height: 38,
                 fit: BoxFit.cover,
               ),
             ),
             const SizedBox(width: 10),
             const Text(
-              "FlowGuard Plumbing",
+              "FlowGuard",
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 17,
                 fontWeight: FontWeight.w800,
                 color: FlowGuardTheme.navy,
               ),
@@ -201,11 +291,17 @@ class _CustomerShellState extends State<CustomerShell> {
           ],
         ),
         actions: [
-          IconButton(
-            onPressed: _loadCustomerData,
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: "Refresh",
+          NotificationsButton(
+            role: "customer",
+            onNavigateLink: (link) {
+              if (link != null && link.contains("messages")) {
+                setState(() => _tabIndex = 2);
+              } else {
+                setState(() => _tabIndex = 1);
+              }
+            },
           ),
+          const SizedBox(width: 6),
         ],
       ),
       body: pages[_tabIndex],
@@ -236,13 +332,14 @@ class _CustomerShellState extends State<CustomerShell> {
   }
 }
 
-class _CustomerHomeTab extends StatefulWidget {
+class _CustomerHomeTab extends StatelessWidget {
   final String customerName;
   final bool loading;
   final List<ServiceCategoryItem> categories;
   final List<ServiceRequestItem> requests;
   final Future<void> Function() onRefresh;
   final void Function([String?]) onSelectCategory;
+  final VoidCallback onViewAllCategories;
   final void Function(ServiceRequestItem) onOpenRequest;
   final VoidCallback onViewAllRequests;
 
@@ -253,53 +350,24 @@ class _CustomerHomeTab extends StatefulWidget {
     required this.requests,
     required this.onRefresh,
     required this.onSelectCategory,
+    required this.onViewAllCategories,
     required this.onOpenRequest,
     required this.onViewAllRequests,
   });
 
   @override
-  State<_CustomerHomeTab> createState() => _CustomerHomeTabState();
-}
-
-class _CustomerHomeTabState extends State<_CustomerHomeTab> {
-  final PageController _spotlightController = PageController(viewportFraction: 0.88);
-  Timer? _autoSlideTimer;
-  int _spotlightPage = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _autoSlideTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      final count = widget.categories.take(5).length;
-      if (!mounted || count <= 1 || !_spotlightController.hasClients) return;
-      final next = (_spotlightPage + 1) % count;
-      _spotlightController.animateToPage(
-        next,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
-  @override
-  void dispose() {
-    _autoSlideTimer?.cancel();
-    _spotlightController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final activeRequests = widget.requests.where((r) => r.isActive).toList();
-    final spotlight = widget.categories.take(5).toList();
+    final activeRequests = requests.where((r) => r.isActive).toList();
+    final recentRequests = requests.take(3).toList();
+    final spotlight = categories.take(5).toList();
 
     return RefreshIndicator(
-      onRefresh: widget.onRefresh,
+      onRefresh: onRefresh,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
@@ -308,105 +376,100 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  "FLOWGUARD CUSTOMER",
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                    color: FlowGuardTheme.gold,
-                  ),
-                ),
-                const SizedBox(height: 4),
                 Text(
-                  "Welcome, ${widget.customerName}",
+                  "Welcome, $customerName",
                   style: const TextStyle(
-                    fontSize: 19,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                     color: FlowGuardTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 14),
                 ElevatedButton.icon(
-                  onPressed: () => widget.onSelectCategory(),
+                  onPressed: () => onSelectCategory(),
                   icon: const Icon(Icons.add),
                   label: const Text("New Plumbing Request"),
                 ),
               ],
             ),
           ),
-          if (widget.loading) ...[
-            const SizedBox(height: 24),
+          if (loading) ...[
+            const SizedBox(height: 28),
             const Center(child: CircularProgressIndicator()),
-          ] else if (widget.categories.isNotEmpty) ...[
+          ] else if (categories.isNotEmpty) ...[
             const SizedBox(height: 20),
-            const Text(
-              "All Categories",
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                color: FlowGuardTheme.navy,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "All Categories",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                TextButton(
+                  onPressed: onViewAllCategories,
+                  child: const Text("View All >"),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             SizedBox(
               height: 92,
               child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                behavior: ScrollConfiguration.of(context)
+                    .copyWith(scrollbars: false),
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  itemCount: widget.categories.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, idx) {
-                  final cat = widget.categories[idx];
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => widget.onSelectCategory(cat.title),
-                    child: SizedBox(
-                      width: 74,
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 54,
-                            height: 54,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: FlowGuardTheme.border),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: FlowGuardTheme.navy.withValues(alpha: 0.05),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: Icon(
-                              ServiceAssetHelper.resolveCategoryIcon(
-                                cat.iconName.isNotEmpty ? cat.iconName : cat.title,
+                  itemCount: categories.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, idx) {
+                    final cat = categories[idx];
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => onSelectCategory(cat.title),
+                      child: SizedBox(
+                        width: 74,
+                        child: Column(
+                          children: [
+                            Container(
+                              width: 54,
+                              height: 54,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: FlowGuardTheme.border),
                               ),
-                              size: 24,
-                              color: FlowGuardTheme.navy,
+                              child: Icon(
+                                ServiceAssetHelper.resolveCategoryIcon(
+                                  cat.iconName.isNotEmpty
+                                      ? cat.iconName
+                                      : cat.title,
+                                ),
+                                size: 24,
+                                color: FlowGuardTheme.navy,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            cat.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              height: 1.15,
-                              fontWeight: FontWeight.w600,
-                              color: FlowGuardTheme.navy,
+                            const SizedBox(height: 6),
+                            Text(
+                              cat.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                height: 1.15,
+                                fontWeight: FontWeight.w600,
+                                color: FlowGuardTheme.navy,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
                 ),
               ),
             ),
@@ -423,8 +486,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             SizedBox(
               height: 186,
               child: PageView.builder(
-                controller: _spotlightController,
-                onPageChanged: (i) => setState(() => _spotlightPage = i),
+                controller: PageController(viewportFraction: 0.88),
                 itemCount: spotlight.length,
                 itemBuilder: (context, idx) {
                   final cat = spotlight[idx];
@@ -441,17 +503,14 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.asset(
-                          assetPath,
-                          fit: BoxFit.cover,
-                        ),
+                        Image.asset(assetPath, fit: BoxFit.cover),
                         Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withValues(alpha: 0.15),
+                                Colors.black.withValues(alpha: 0.12),
                                 FlowGuardTheme.navy.withValues(alpha: 0.55),
                                 FlowGuardTheme.navyDark.withValues(alpha: 0.96),
                               ],
@@ -498,7 +557,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                                   const SizedBox(height: 10),
                                   ElevatedButton(
                                     onPressed: () =>
-                                        widget.onSelectCategory(cat.title),
+                                        onSelectCategory(cat.title),
                                     child: const Text("Request This Service"),
                                   ),
                                 ],
@@ -519,7 +578,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  "Active Service Request",
+                  "Active Request",
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
@@ -527,16 +586,38 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                   ),
                 ),
                 TextButton(
-                  onPressed: widget.onViewAllRequests,
+                  onPressed: onViewAllRequests,
                   child: const Text("View All"),
                 ),
               ],
             ),
             InkWell(
               borderRadius: BorderRadius.circular(18),
-              onTap: () => widget.onOpenRequest(activeRequests.first),
+              onTap: () => onOpenRequest(activeRequests.first),
               child: _RequestSummaryCard(request: activeRequests.first),
             ),
+          ],
+          if (recentRequests.length > 1) ...[
+            const SizedBox(height: 18),
+            const Text(
+              "Recent Requests",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...recentRequests.skip(activeRequests.isNotEmpty ? 1 : 0).map(
+                  (req) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(18),
+                      onTap: () => onOpenRequest(req),
+                      child: _RequestSummaryCard(request: req),
+                    ),
+                  ),
+                ),
           ],
         ],
       ),
@@ -544,7 +625,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
   }
 }
 
-class _CustomerRequestsTab extends StatelessWidget {
+class _CustomerRequestsTab extends StatefulWidget {
   final List<ServiceRequestItem> requests;
   final VoidCallback onNewRequest;
   final void Function(ServiceRequestItem) onOpenRequest;
@@ -556,47 +637,97 @@ class _CustomerRequestsTab extends StatelessWidget {
   });
 
   @override
+  State<_CustomerRequestsTab> createState() => _CustomerRequestsTabState();
+}
+
+class _CustomerRequestsTabState extends State<_CustomerRequestsTab> {
+  String _filter = "All";
+
+  @override
   Widget build(BuildContext context) {
-    if (requests.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.assignment_outlined, size: 48, color: FlowGuardTheme.mutedText),
-              const SizedBox(height: 12),
-              const Text(
-                "No Service Requests Yet",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: FlowGuardTheme.navy,
+    final filtered = widget.requests.where((r) {
+      if (_filter == "Active") return r.isActive;
+      if (_filter == "Needs Action") {
+        return r.status == "awaiting_final_payment" ||
+            r.status == "work_completed" ||
+            r.status == "scheduled";
+      }
+      if (_filter == "Completed") return r.status == "completed";
+      return true;
+    }).toList();
+
+    const filters = ["All", "Active", "Needs Action", "Completed"];
+
+    return Column(
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+          child: Row(
+            children: filters.map((f) {
+              final selected = _filter == f;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(f),
+                  selected: selected,
+                  onSelected: (_) => setState(() => _filter = f),
+                  selectedColor: FlowGuardTheme.navy,
+                  labelStyle: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : FlowGuardTheme.navy,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: onNewRequest,
-                child: const Text("Request This Service"),
-              ),
-            ],
+              );
+            }).toList(),
           ),
         ),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: requests.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, idx) {
-        final req = requests[idx];
-        return InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => onOpenRequest(req),
-          child: _RequestSummaryCard(request: req),
-        );
-      },
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.assignment_outlined,
+                          size: 48,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "No $_filter Requests",
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: widget.onNewRequest,
+                          child: const Text("New Plumbing Request"),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, idx) {
+                    final req = filtered[idx];
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(18),
+                      onTap: () => widget.onOpenRequest(req),
+                      child: _RequestSummaryCard(request: req),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
@@ -695,7 +826,7 @@ class _CustomerPaymentsTab extends StatelessWidget {
                   color: FlowGuardTheme.navy,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               if (bankDetails?.isConfigured == true) ...[
                 Text("Bank: ${bankDetails!.bankName}"),
                 Text("Account Name: ${bankDetails!.accountName}"),
@@ -741,11 +872,13 @@ class _CustomerProfileTab extends StatelessWidget {
   final String name;
   final String email;
   final String phone;
+  final String? address;
 
   const _CustomerProfileTab({
     required this.name,
     required this.email,
     required this.phone,
+    this.address,
   });
 
   @override
@@ -772,22 +905,45 @@ class _CustomerProfileTab extends StatelessWidget {
                 ),
               ),
               if (phone.isNotEmpty) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   phone,
-                  style: const TextStyle(fontSize: 13, color: FlowGuardTheme.mutedText),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: FlowGuardTheme.mutedText,
+                  ),
                 ),
               ],
               if (email.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
                   email,
-                  style: const TextStyle(fontSize: 13, color: FlowGuardTheme.mutedText),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: FlowGuardTheme.mutedText,
+                  ),
+                ),
+              ],
+              if (address != null && address!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  address!,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: FlowGuardTheme.mutedText,
+                  ),
                 ),
               ],
               const SizedBox(height: 18),
               OutlinedButton.icon(
-                onPressed: () => SupabaseConfig.client.auth.signOut(),
+                onPressed: () async {
+                  final token = GoogleServicesBootstrap.fcmToken;
+                  if (token != null) {
+                    await FlowGuardApiClient.deactivateDeviceToken(token)
+                        .catchError((_) {});
+                  }
+                  await SupabaseConfig.client.auth.signOut();
+                },
                 icon: const Icon(Icons.logout_rounded),
                 label: const Text("Sign Out"),
                 style: OutlinedButton.styleFrom(

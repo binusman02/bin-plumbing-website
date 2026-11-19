@@ -24,7 +24,8 @@ class ServiceCategoryItem {
       id: (json["id"] ?? slug).toString(),
       slug: slug,
       title: title,
-      shortDescription: (json["short_description"] ?? json["description"] ?? "").toString(),
+      shortDescription:
+          (json["short_description"] ?? json["description"] ?? "").toString(),
       image: (json["image"] ?? "").toString(),
       iconName: (json["icon_name"] ?? slug).toString(),
     );
@@ -40,6 +41,7 @@ class ServiceRequestItem {
   final String description;
   final String status;
   final String priority;
+  final String? assignedPlumberId;
   final String? assignedTechnician;
   final String? customerName;
   final String? customerPhone;
@@ -56,6 +58,7 @@ class ServiceRequestItem {
     required this.description,
     required this.status,
     required this.priority,
+    this.assignedPlumberId,
     this.assignedTechnician,
     this.customerName,
     this.customerPhone,
@@ -74,6 +77,7 @@ class ServiceRequestItem {
       description: (json["description"] ?? "").toString(),
       status: (json["status"] ?? "new").toString(),
       priority: (json["priority"] ?? "standard").toString(),
+      assignedPlumberId: json["assigned_plumber_id"]?.toString(),
       assignedTechnician: json["assigned_technician"]?.toString(),
       customerName: json["customer_name"]?.toString(),
       customerPhone: json["customer_phone"]?.toString(),
@@ -89,33 +93,43 @@ class ServiceRequestItem {
 class QuotationData {
   final String id;
   final String ticketNumber;
-  final double labourCost;
+  final double labourCharge;
   final double materialsCost;
+  final double transportCharge;
+  final double otherCharges;
   final double totalAmount;
-  final String status;
+  final String approvalStatus;
   final String? notes;
 
   const QuotationData({
     required this.id,
     required this.ticketNumber,
-    required this.labourCost,
+    required this.labourCharge,
     required this.materialsCost,
+    required this.transportCharge,
+    required this.otherCharges,
     required this.totalAmount,
-    required this.status,
+    required this.approvalStatus,
     this.notes,
   });
 
   factory QuotationData.fromJson(Map<String, dynamic> json) {
-    final labour = (json["labour_cost"] as num?)?.toDouble() ?? 0;
+    final labour = (json["labour_charge"] as num?)?.toDouble() ?? 0;
     final materials = (json["materials_cost"] as num?)?.toDouble() ?? 0;
-    final total = (json["total_amount"] as num?)?.toDouble() ?? (labour + materials);
+    final transport = (json["transport_charge"] as num?)?.toDouble() ?? 0;
+    final other = (json["other_charges"] as num?)?.toDouble() ?? 0;
+    final total = (json["total_amount"] as num?)?.toDouble() ??
+        (labour + materials + transport + other);
     return QuotationData(
       id: (json["id"] ?? "").toString(),
       ticketNumber: (json["ticket_number"] ?? "").toString(),
-      labourCost: labour,
+      labourCharge: labour,
       materialsCost: materials,
+      transportCharge: transport,
+      otherCharges: other,
       totalAmount: total,
-      status: (json["status"] ?? "pending_customer").toString(),
+      approvalStatus:
+          (json["customer_approval_status"] ?? "pending").toString(),
       notes: json["notes"]?.toString(),
     );
   }
@@ -150,6 +164,35 @@ class JobMessageItem {
   }
 }
 
+class NotificationItem {
+  final String id;
+  final String title;
+  final String body;
+  final String? link;
+  final bool isRead;
+  final String createdAt;
+
+  const NotificationItem({
+    required this.id,
+    required this.title,
+    required this.body,
+    this.link,
+    required this.isRead,
+    required this.createdAt,
+  });
+
+  factory NotificationItem.fromJson(Map<String, dynamic> json) {
+    return NotificationItem(
+      id: (json["id"] ?? "").toString(),
+      title: (json["title"] ?? "Notification").toString(),
+      body: (json["body"] ?? json["message"] ?? "").toString(),
+      link: json["link"]?.toString(),
+      isRead: json["is_read"] == true || json["read"] == true,
+      createdAt: (json["created_at"] ?? "").toString(),
+    );
+  }
+}
+
 class BankDetailsData {
   final String bankName;
   final String accountName;
@@ -161,10 +204,12 @@ class BankDetailsData {
     required this.accountNumber,
   });
 
-  factory BankDetailsData.fromSettings(Map<String, dynamic> row) {
+  factory BankDetailsData.fromSettingsValue(Map<String, dynamic> row) {
     return BankDetailsData(
       bankName: (row["bank_name"] ?? "").toString(),
-      accountName: (row["bank_account_name"] ?? "FlowGuard Plumbing Enterprises").toString(),
+      accountName:
+          (row["bank_account_name"] ?? "FlowGuard Plumbing Enterprises")
+              .toString(),
       accountNumber: (row["bank_account_number"] ?? "").toString(),
     );
   }
@@ -206,8 +251,9 @@ class StatusBadgeMeta {
         );
       case "scheduled":
       case "approved":
+      case "qualified":
         return const StatusBadgeMeta(
-          label: "Scheduled",
+          label: "Assigned",
           background: Color(0xFFE0E7FF),
           foreground: Color(0xFF3730A3),
         );

@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:image_picker/image_picker.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -7,12 +8,14 @@ class TicketChatView extends StatefulWidget {
   final List<ServiceRequestItem> tickets;
   final String senderRole;
   final String senderName;
+  final String senderId;
 
   const TicketChatView({
     super.key,
     required this.tickets,
     required this.senderRole,
     required this.senderName,
+    required this.senderId,
   });
 
   @override
@@ -47,9 +50,10 @@ class _TicketChatViewState extends State<TicketChatView> {
     setState(() => _loading = true);
     try {
       final rows = await SupabaseConfig.client
-          .from("job_messages")
+          .from("messages")
           .select()
           .eq("ticket_number", ticket)
+          .eq("is_internal", false)
           .order("created_at", ascending: true);
       if (mounted) {
         setState(() {
@@ -62,24 +66,44 @@ class _TicketChatViewState extends State<TicketChatView> {
     }
   }
 
-  Future<void> _sendMessage() async {
+  Future<void> _sendMessage({String? overrideText}) async {
     final ticket = _selectedTicket;
-    final text = _messageController.text.trim();
+    final text = (overrideText ?? _messageController.text).trim();
     if (ticket == null || text.isEmpty || _sending) return;
+
+    final req = widget.tickets
+        .where((t) => t.ticketNumber == ticket)
+        .firstOrNull;
+    final recipientRole =
+        widget.senderRole == "customer" ? "plumber" : "customer";
 
     setState(() => _sending = true);
     try {
-      await SupabaseConfig.client.from("job_messages").insert({
+      await SupabaseConfig.client.from("messages").insert({
+        if (req != null) "request_id": req.id,
         "ticket_number": ticket,
         "sender_role": widget.senderRole,
         "sender_name": widget.senderName,
+        "sender_id": widget.senderId,
+        "recipient_role": recipientRole,
         "message": text,
+        "is_internal": false,
       });
-      _messageController.clear();
+      if (overrideText == null) _messageController.clear();
       await _loadMessages();
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  Future<void> _pickPhoto() async {
+    final picker = ImagePicker();
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 75,
+    );
+    if (file == null) return;
+    await _sendMessage(overrideText: "[Photo attached: ${file.name}]");
   }
 
   @override
@@ -134,53 +158,58 @@ class _TicketChatViewState extends State<TicketChatView> {
                         style: TextStyle(color: FlowGuardTheme.mutedText),
                       ),
                     )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, idx) {
-                        final msg = _messages[idx];
-                        final isMe = msg.senderRole == widget.senderRole;
-                        return Align(
-                          alignment: isMe
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(12),
-                            constraints: const BoxConstraints(maxWidth: 290),
-                            decoration: BoxDecoration(
-                              color: isMe ? FlowGuardTheme.navy : Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              border: isMe
-                                  ? null
-                                  : Border.all(color: FlowGuardTheme.border),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  msg.senderName,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: isMe
-                                        ? FlowGuardTheme.gold
-                                        : FlowGuardTheme.mutedText,
+                  : RefreshIndicator(
+                      onRefresh: _loadMessages,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _messages.length,
+                        itemBuilder: (context, idx) {
+                          final msg = _messages[idx];
+                          final isMe = msg.senderRole == widget.senderRole;
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.all(12),
+                              constraints: const BoxConstraints(maxWidth: 290),
+                              decoration: BoxDecoration(
+                                color: isMe ? FlowGuardTheme.navy : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: isMe
+                                    ? null
+                                    : Border.all(color: FlowGuardTheme.border),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    msg.senderName,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: isMe
+                                          ? FlowGuardTheme.gold
+                                          : FlowGuardTheme.mutedText,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  msg.message,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: isMe ? Colors.white : FlowGuardTheme.navy,
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    msg.message,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isMe
+                                          ? Colors.white
+                                          : FlowGuardTheme.navy,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
         ),
         SafeArea(
@@ -193,6 +222,11 @@ class _TicketChatViewState extends State<TicketChatView> {
             ),
             child: Row(
               children: [
+                IconButton(
+                  onPressed: _sending ? null : _pickPhoto,
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  tooltip: "Attach Photo",
+                ),
                 Expanded(
                   child: TextField(
                     controller: _messageController,
@@ -209,7 +243,7 @@ class _TicketChatViewState extends State<TicketChatView> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  onPressed: _sending ? null : _sendMessage,
+                  onPressed: _sending ? null : () => _sendMessage(),
                   style: IconButton.styleFrom(
                     backgroundColor: FlowGuardTheme.navy,
                     foregroundColor: FlowGuardTheme.gold,
