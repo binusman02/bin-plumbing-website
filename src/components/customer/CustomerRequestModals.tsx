@@ -13,6 +13,7 @@ import { calculateDistanceKm, formatDistance } from "@/lib/geo";
 import type {
   PaymentRecord,
   RequestStatus,
+  ServiceCategorySetting,
   ServiceRequestRecord,
   StructuredQuotation,
 } from "@/lib/marketplace";
@@ -483,6 +484,7 @@ export function CustomerRequestDrawer({
 
 interface CustomerNewRequestModalProps {
   open: boolean;
+  serviceCategories?: ServiceCategorySetting[];
   newCategory: string;
   setNewCategory: (v: string) => void;
   newPriority: "standard" | "urgent";
@@ -502,6 +504,7 @@ interface CustomerNewRequestModalProps {
 
 export function CustomerNewRequestModal({
   open,
+  serviceCategories = [],
   newCategory,
   setNewCategory,
   newPriority,
@@ -568,12 +571,24 @@ export function CustomerNewRequestModal({
               <ClassicSelect
                 value={newCategory}
                 onChange={setNewCategory}
-                options={[
-                  { value: "Pipework & Leaks", label: "Pipework & Leaks" },
-                  { value: "Water Tanks & Pumps", label: "Water Tanks & Pumps" },
-                  { value: "Bathroom & Kitchen", label: "Bathroom & Kitchen" },
-                  { value: "Drainage & Blockages", label: "Drainage & Blockages" },
-                ]}
+                options={(() => {
+                  const baseOptions =
+                    serviceCategories.length > 0
+                      ? serviceCategories.map((cat) => {
+                          const label = cat.title || cat.name || cat.slug;
+                          return { value: label, label };
+                        })
+                      : [
+                          { value: "Pipework & Leaks", label: "Pipework & Leaks" },
+                          { value: "Water Tanks & Pumps", label: "Water Tanks & Pumps" },
+                          { value: "Bathroom & Kitchen", label: "Bathroom & Kitchen" },
+                          { value: "Drainage & Blockages", label: "Drainage & Blockages" },
+                        ];
+                  if (newCategory && !baseOptions.some((opt) => opt.value === newCategory)) {
+                    return [{ value: newCategory, label: newCategory }, ...baseOptions];
+                  }
+                  return baseOptions;
+                })()}
               />
             </div>
             <div>

@@ -13,7 +13,6 @@ import {
   X,
   ChevronRight,
 } from "lucide-react";
-import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
 import { Avatar } from "@/components/ui/Avatar";
 import { NotificationDrawer } from "@/components/ui/NotificationDrawer";
 import { InstallAppButton } from "@/components/portal/InstallAppButton";
@@ -561,7 +560,6 @@ export function PortalShell({
 
         {/* Main Workspace */}
         <main className="mx-auto w-full max-w-[1640px] flex-1 px-3.5 py-3.5 pb-24 sm:px-5 md:p-5 md:pb-8 lg:px-6 lg:py-5">
-          <PwaInstallPrompt />
           {children}
         </main>
       </div>
@@ -651,100 +649,120 @@ export function PortalShell({
         </div>
       </nav>
 
-      {/* 4. FULL-SCREEN "MORE" SHEET ON PHONE */}
+      {/* 4. NATIVE BOTTOM "MORE" SHEET ON PHONE */}
       {moreSheetOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-[#0B1F3A] text-white md:hidden">
-          <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
-            <Link
-              href={overviewHref}
-              onClick={handleOverviewLogoClick}
-              className="flex items-center gap-2.5"
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
-                <Image
-                  src="/images/logo/flowguard-icon.jpg"
-                  alt="FlowGuard Plumbing"
-                  width={32}
-                  height={32}
-                  className="h-full w-full scale-[1.08] object-cover"
-                />
-              </div>
-              <span className="font-heading text-base font-bold text-white">
-                {portalTitle}
-              </span>
-            </Link>
-            <button
-              type="button"
-              aria-label="Close menu"
-              onClick={() => setMoreSheetOpen(false)}
-              className="flex h-11 w-11 items-center justify-center rounded-[10px] bg-white/10 text-white"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-slate-900/50 backdrop-blur-[1px] md:hidden"
+          onClick={() => setMoreSheetOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full flex-col rounded-t-3xl bg-[#F8FAFC] text-[#0B1F3A] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-slate-300" />
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3.5 rounded-t-3xl">
+              <Link
+                href={overviewHref}
+                onClick={handleOverviewLogoClick}
+                className="flex items-center gap-2.5"
+              >
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#F5B301] bg-white">
+                  <Image
+                    src="/images/logo/flowguard-icon.jpg"
+                    alt="FlowGuard Plumbing"
+                    width={32}
+                    height={32}
+                    className="h-full w-full scale-[1.08] object-cover"
+                  />
+                </div>
+                <div>
+                  <span className="block font-heading text-sm font-bold text-[#0B1F3A]">
+                    {portalTitle}
+                  </span>
+                  <span className="block text-[11px] text-slate-500">
+                    All sections & tools
+                  </span>
+                </div>
+              </Link>
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={() => setMoreSheetOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-5 space-y-6">
-            {navGroups.map((group) => (
-              <div key={group.label} className="space-y-2">
-                <p className="px-2 text-xs font-semibold uppercase tracking-wider text-[#F5B301]">
-                  {group.label}
-                </p>
-                <div className="divide-y divide-white/10 rounded-[12px] border border-white/10 bg-[#07152B]/60">
-                  {group.items.map((item) => {
-                    const Icon = item.icon;
-                    const rowClass =
-                      "flex min-h-[52px] w-full items-center justify-between px-4 text-base font-medium text-white";
-                    if (item.href) {
+            <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+              {navGroups.map((group) => (
+                <div key={group.label} className="space-y-1.5">
+                  <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    {group.label}
+                  </p>
+                  <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    {group.items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeItemId === item.id;
+                      const rowClass = `flex min-h-[48px] w-full items-center justify-between px-3.5 text-sm font-semibold transition ${
+                        isActive ? "bg-amber-50/70 text-[#0B1F3A]" : "text-[#0B1F3A] hover:bg-slate-50"
+                      }`;
+                      if (item.href) {
+                        return (
+                          <Link
+                            key={item.id}
+                            href={item.href}
+                            onClick={() => setMoreSheetOpen(false)}
+                            className={rowClass}
+                          >
+                            <span className="flex items-center gap-3">
+                              <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#0B1F3A]/5 text-[#0B1F3A]">
+                                <Icon className="h-4 w-4" />
+                              </span>
+                              <span>{item.label}</span>
+                            </span>
+                            <ChevronRight className="h-4 w-4 text-slate-400" />
+                          </Link>
+                        );
+                      }
                       return (
-                        <Link
+                        <button
                           key={item.id}
-                          href={item.href}
-                          onClick={() => setMoreSheetOpen(false)}
+                          type="button"
+                          onClick={() => {
+                            setMoreSheetOpen(false);
+                            item.onClick?.();
+                          }}
                           className={rowClass}
                         >
                           <span className="flex items-center gap-3">
-                            <Icon className="h-5 w-5 text-[#F5B301]" />
+                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#0B1F3A]/5 text-[#0B1F3A]">
+                              <Icon className="h-4 w-4" />
+                            </span>
                             <span>{item.label}</span>
                           </span>
-                          <ChevronRight className="h-4 w-4 text-[#C9D3E0]" />
-                        </Link>
+                          <ChevronRight className="h-4 w-4 text-slate-400" />
+                        </button>
                       );
-                    }
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          setMoreSheetOpen(false);
-                          item.onClick?.();
-                        }}
-                        className={rowClass}
-                      >
-                        <span className="flex items-center gap-3">
-                          <Icon className="h-5 w-5 text-[#F5B301]" />
-                          <span>{item.label}</span>
-                        </span>
-                        <ChevronRight className="h-4 w-4 text-[#C9D3E0]" />
-                      </button>
-                    );
-                  })}
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
 
-          <div className="border-t border-white/10 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-            <button
-              type="button"
-              onClick={() => {
-                setMoreSheetOpen(false);
-                onSignOut();
-              }}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-[8px] bg-[#F5B301] text-base font-bold text-[#0B1F3A]"
-            >
-              <LogOut className="h-5 w-5" />
-              <span>Sign out</span>
-            </button>
+            <div className="border-t border-slate-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreSheetOpen(false);
+                  onSignOut();
+                }}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] text-sm font-bold text-white transition hover:bg-[#132f57]"
+              >
+                <LogOut className="h-4 w-4 text-[#F5B301]" />
+                <span>Sign out</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

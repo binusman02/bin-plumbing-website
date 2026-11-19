@@ -6,6 +6,7 @@ import { getVerifiedAppRole } from "@/lib/auth-role";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import {
   getMarketplaceSettings,
+  getServiceCategories,
   getMessagesForAuthorizedTicket,
   mapMessageRow,
   mapPaymentRow,
@@ -30,7 +31,10 @@ export const metadata = {
 
 export default async function CustomerPortalPage() {
   await connection();
-  const settings = await getMarketplaceSettings();
+  const [settings, serviceCategories] = await Promise.all([
+    getMarketplaceSettings(),
+    getServiceCategories(true),
+  ]);
   const supabase = await createClient();
   const {
     data: { user },
@@ -190,6 +194,7 @@ export default async function CustomerPortalPage() {
       plumberAvatars={plumberAvatars}
       plumberLocations={plumberLocations}
       activeLocations={settings.active_coverage_locations || []}
+      serviceCategories={serviceCategories}
       bankDetails={{
         bankName: settings.bank_name,
         bankAccountName: settings.bank_account_name,

@@ -837,33 +837,40 @@ export default function PlumberPortalClient({
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-xs font-bold text-[#0B1F3A]">
                       {locationSharing.phase === "active"
-                        ? "Location Sharing Active"
+                        ? "Location active"
                         : locationSharing.phase === "starting"
-                        ? "Starting GPS..."
+                        ? "GPS connecting"
                         : locationSharing.phase === "permission_denied"
-                        ? "Location Permission Required"
+                        ? "Permission required"
                         : locationSharing.phase === "weak_signal"
-                        ? "GPS Signal Weak"
+                        ? "Weak GPS signal"
                         : locationSharing.phase === "offline"
-                        ? "Connection Lost"
-                        : locationSharing.phase === "update_failed"
-                        ? "Location Update Failed"
-                        : locationSharing.phase === "gps_timeout"
-                        ? "GPS Signal Timed Out"
-                        : locationSharing.phase === "gps_unavailable"
-                        ? "GPS Signal Unavailable"
+                        ? "Connection lost"
+                        : locationSharing.phase === "update_failed" ||
+                          locationSharing.phase === "gps_timeout" ||
+                          locationSharing.phase === "gps_unavailable"
+                        ? "Location unavailable"
                         : locationSharing.phase === "not_allowed"
-                        ? "Approval Required to Share"
-                        : "Live GPS Sharing Off"}
+                        ? "Approval required"
+                        : "GPS off"}
                     </p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                        isAvailable
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {isAvailable ? "On Duty" : "Off Duty"}
+                    </span>
                     {locationSharing.accuracyM != null && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                         {describeAccuracy(locationSharing.accuracyM).label}
                       </span>
                     )}
                     {locationSharing.lastConfirmedAtMs != null && (
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        Last Successful Update:{" "}
+                      <span className="hidden rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 sm:inline-flex">
+                        Last update:{" "}
                         {formatAgo(
                           Math.max(
                             0,
@@ -876,53 +883,45 @@ export default function PlumberPortalClient({
                   <p className="text-[11px] text-slate-600">
                     {locationSharing.message ||
                       (hasActiveFieldJob
-                        ? "Location is being shared with the customer assigned to your active job and authorized administrators until completion."
+                        ? "Location is shared with your assigned customer and dispatch until job completion."
                         : isAvailable
-                        ? "Your live location is shared with authorized dispatch administrators while On Duty."
-                        : "Turn on Go On Duty or have an active job to share your live location.")}
+                        ? "Your live location is shared with dispatch while On Duty."
+                        : "Switch On Duty or accept an assigned job to share your live location.")}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                {shouldShareGps && (
+              <div className="flex w-full items-center gap-2 sm:w-auto">
+                {shouldShareGps && locationSharing.phase !== "active" && (
                   <button
                     type="button"
                     disabled={locationSharing.retrying}
                     onClick={locationSharing.retry}
-                    className={`relative z-10 inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition disabled:cursor-wait disabled:opacity-70 ${
-                      locationSharing.phase === "active"
-                        ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                        : "bg-[#0B1F3A] text-white hover:bg-[#132f57]"
-                    }`}
+                    className="relative z-10 inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white transition hover:bg-[#132f57] disabled:cursor-wait disabled:opacity-70 sm:flex-none"
                   >
                     {locationSharing.retrying ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <MapPin className="h-3.5 w-3.5" />
                     )}
-                    {locationSharing.retrying
-                      ? "Checking GPS..."
-                      : locationSharing.phase === "active"
-                      ? "Sync GPS Now"
-                      : "Retry GPS"}
+                    {locationSharing.retrying ? "Checking GPS..." : "Retry GPS"}
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={handleToggleAvailability}
                   disabled={busyAction === "availability"}
-                  className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition ${
+                  className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition sm:flex-none ${
                     isAvailable
-                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                      : "border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      ? "border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                      : "bg-[#F5B301] text-[#07152B] hover:bg-[#e5a700]"
                   }`}
                 >
                   {busyAction === "availability" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {isAvailable ? "Go Off Duty (On Duty)" : "Go On Duty"}
+                  {isAvailable ? "Go Off Duty" : "Go On Duty"}
                 </button>
               </div>
             </div>
-            <p className="mt-2 border-t border-slate-100 pt-2 text-[10px] leading-relaxed text-slate-400">
+            <p className="mt-2 hidden border-t border-slate-100 pt-2 text-[10px] leading-relaxed text-slate-400 sm:block">
               Privacy &amp; Device Notice: GPS coordinates are only collected while this portal is open in the foreground and you are On Duty or assigned an active job, and stop when Off Duty with no active job. Browser tracking pauses if the browser is closed or suspended by your phone.
             </p>
           </div>
@@ -962,7 +961,29 @@ export default function PlumberPortalClient({
             </div>
           </div>
 
-          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          {!activeOverviewJob ? (
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0B1F3A]/5 text-[#0B1F3A]">
+                <MapPin className="h-5 w-5 text-[#F5B301]" />
+              </div>
+              <h3 className="mt-3 text-sm font-bold text-[#0B1F3A] sm:text-base">
+                No Active Job
+              </h3>
+              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+                {isAvailable
+                  ? "You are On Duty. When dispatch assigns a job to you, live navigation and customer details will appear here."
+                  : "You are currently Off Duty. Switch to On Duty above to receive new job assignments."}
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab("jobs")}
+                className="mt-4 inline-flex h-9 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-xs font-bold text-[#0B1F3A] transition hover:bg-slate-50"
+              >
+                View My Jobs
+              </button>
+            </section>
+          ) : (
+          <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-xl sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-[#0B1F3A]">
@@ -1301,19 +1322,13 @@ export default function PlumberPortalClient({
                       )}
                     </div>
                   </>
-                ) : (
-                  <div className="space-y-2 py-4 text-center">
-                    <p className="text-sm font-bold text-[#0B1F3A]">No Active Job Assigned</p>
-                    <p className="text-xs text-slate-500">
-                      Your live GPS pin is shown on the map while you are On Duty. When a job is assigned, the customer&apos;s property pin and road route will appear right here.
-                    </p>
-                  </div>
-                )}
+                ) : null}
               </div>
             </div>
           </section>
+          )}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-xl sm:p-5">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-base font-bold text-[#0B1F3A]">Recent Assigned Jobs</h3>
               <button

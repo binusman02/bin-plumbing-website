@@ -145,11 +145,43 @@ export function DashboardClient({
     });
   }, [approvedPlumbers, onlinePlumberIds, availabilityMap]);
 
+  const [showAllMobileMetrics, setShowAllMobileMetrics] = useState(false);
+
   const onlineCount = useMemo(() => {
     const onlineSet = new Set(onlinePlumberIds);
     return approvedPlumbers.filter((p) => onlineSet.has(p.id)).length;
   }, [approvedPlumbers, onlinePlumberIds]);
   const offlineCount = Math.max(0, approvedPlumbers.length - onlineCount);
+  const mobilePriorityCards = [
+    {
+      label: "New Requests",
+      value: String(metrics.newRequestsCount),
+      sub: `${metrics.totalRequests} total`,
+      href: "/admin/requests",
+      icon: Briefcase,
+    },
+    {
+      label: "Active Jobs",
+      value: String(metrics.activeJobsCount),
+      sub: `${metrics.assignedJobsCount} assigned`,
+      href: "/admin/requests",
+      icon: CheckCircle2,
+    },
+    {
+      label: "Online Plumbers",
+      value: String(onlineCount),
+      sub: `${approvedPlumbers.length} approved`,
+      href: "/admin/plumbers",
+      icon: HardHat,
+    },
+    {
+      label: "Outstanding",
+      value: formatNGN(metrics.outstandingPayments),
+      sub: `${unverifiedPaymentsCount} unverified`,
+      href: "/admin/financials",
+      icon: CreditCard,
+    },
+  ];
   const primaryCards = [
     {
       label: "New Requests",
@@ -205,7 +237,7 @@ export function DashboardClient({
   const totalCategoryCount = categoryBreakdown.reduce((acc, item) => acc + item.count, 0);
 
   return (
-    <div className="space-y-6 pb-20 lg:pb-6">
+    <div className="space-y-5 lg:space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -277,8 +309,48 @@ export function DashboardClient({
         </div>
       )}
 
-      {/* Primary Stat Cards (max 6) */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-6">
+      {/* Mobile Priority Stat Cards (4 metrics + expandable toggle) */}
+      <div className="space-y-2.5 sm:hidden">
+        <div className="grid grid-cols-2 gap-2.5">
+          {mobilePriorityCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <Link
+                key={`mobile-${card.label}`}
+                href={card.href}
+                className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm transition active:scale-[0.99]"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider leading-snug text-slate-500">
+                    {card.label}
+                  </span>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#0B1F3A]/5 text-[#0B1F3A]">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <p className="truncate text-lg font-bold text-[#0B1F3A]">{card.value}</p>
+                  <p className="truncate text-[11px] text-slate-500">{card.sub}</p>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAllMobileMetrics((v) => !v)}
+          className="flex h-9 w-full items-center justify-center rounded-xl border border-slate-200 bg-white text-xs font-bold text-[#0B1F3A] shadow-xs transition hover:bg-slate-50"
+        >
+          {showAllMobileMetrics ? "Hide Extra Metrics" : "More Metrics"}
+        </button>
+      </div>
+
+      {/* Primary Stat Cards (Desktop always visible; Mobile when expanded) */}
+      <div
+        className={`${
+          showAllMobileMetrics ? "grid" : "hidden sm:grid"
+        } grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-6`}
+      >
         {primaryCards.map((card) => {
           const Icon = card.icon;
           return (
@@ -307,7 +379,11 @@ export function DashboardClient({
       </div>
 
       {/* Secondary Counts Strip */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div
+        className={`${
+          showAllMobileMetrics ? "grid" : "hidden sm:grid"
+        } grid-cols-2 gap-3 sm:grid-cols-4`}
+      >
         {secondaryMetrics.map((item) => (
           <div
             key={item.label}

@@ -273,7 +273,7 @@ export function AdminLayoutShell({
 
   const bottomNavItems: PortalNavItem[] = [
     { id: "overview", label: "Home", shortLabel: "Home", href: "/admin", icon: LayoutDashboard },
-    { id: "requests", label: "Requests", shortLabel: "Pipelines", href: "/admin/requests", icon: ClipboardList },
+    { id: "requests", label: "Requests", shortLabel: "Requests", href: "/admin/requests", icon: ClipboardList },
     { id: "customers", label: "Customers", shortLabel: "Contacts", href: "/admin/customers", icon: Users },
     { id: "plumbers", label: "Plumbers", shortLabel: "Plumbers", href: "/admin/plumbers", icon: Wrench },
     { id: "more", label: "More", shortLabel: "More", icon: MoreHorizontal },

@@ -44,6 +44,7 @@ import {
   CustomerNewRequestModal,
   CustomerRequestDrawer,
 } from "@/components/customer/CustomerRequestModals";
+import { CustomerServiceDiscovery } from "@/components/customer/CustomerServiceDiscovery";
 import { PortalShell, type PortalNavGroup } from "@/components/portal/PortalShell";
 import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import { QuotationPreviewModal, type QuotationPreviewData } from "@/components/portal/QuotationPreviewModal";
@@ -67,6 +68,7 @@ import type {
   CustomerProfile,
   JobMessage,
   PaymentRecord,
+  ServiceCategorySetting,
   ServiceRequestRecord,
   StructuredQuotation,
 } from "@/lib/marketplace";
@@ -81,6 +83,7 @@ interface CustomerPortalClientProps {
   plumberAvatars?: Record<string, string>;
   plumberLocations?: Record<string, { lat: number; lng: number; updatedAt?: string }>;
   activeLocations?: string[];
+  serviceCategories?: ServiceCategorySetting[];
   bankDetails?: BankDetailsInfo;
 }
 
@@ -96,6 +99,7 @@ export default function CustomerPortalClient({
   plumberAvatars,
   plumberLocations,
   activeLocations = [],
+  serviceCategories = [],
   bankDetails,
 }: CustomerPortalClientProps) {
   const router = useRouter();
@@ -829,19 +833,32 @@ export default function CustomerPortalClient({
       )}
 
       {activeTab === "home" && (
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-5 sm:space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
             <div>
-              <h2 className="text-xl font-bold text-[#0B1F3A]">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#F5B301]">
+                FlowGuard Customer
+              </p>
+              <h2 className="text-lg font-bold text-[#0B1F3A] sm:text-xl">
                 Welcome, {currentCustomer.full_name}
               </h2>
-              <p className="text-sm text-slate-500">
-                Track active plumbing requests, review quotations, and message your assigned technician.
+              <p className="text-xs text-slate-500 sm:text-sm">
+                Discover verified plumbing services in Kano or track your active requests.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => setShowNewRequestModal(true)}
+              onClick={() => {
+                if (
+                  serviceCategories.length > 0 &&
+                  !serviceCategories.some((c) => (c.title || c.name || c.slug) === newCategory)
+                ) {
+                  setNewCategory(
+                    serviceCategories[0].title || serviceCategories[0].name || serviceCategories[0].slug
+                  );
+                }
+                setShowNewRequestModal(true);
+              }}
               className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] active:opacity-90 sm:w-auto"
             >
               <Plus className="h-4 w-4" />
@@ -872,57 +889,47 @@ export default function CustomerPortalClient({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Total Requests
-              </p>
-              <p className="mt-2 text-2xl font-bold text-[#0B1F3A]">{myRequests.length}</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Quotes Awaiting Approval
-              </p>
-              <p className="mt-2 text-2xl font-bold text-[#0B1F3A]">
-                {pendingQuotations.length}
-              </p>
-            </div>
-            <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Completed Jobs
-              </p>
-              <p className="mt-2 text-2xl font-bold text-[#0B1F3A]">
-                {myRequests.filter((r) => r.status === "completed").length}
-              </p>
-            </div>
-          </div>
+          <CustomerServiceDiscovery
+            categories={serviceCategories}
+            onSelectCategory={(categoryTitle) => {
+              setNewCategory(categoryTitle);
+              setShowNewRequestModal(true);
+            }}
+          />
 
-          <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div>
-                <h3 className="flex items-center gap-2 text-base font-bold text-[#0B1F3A]">
-                  <MapPin className="h-4 w-4 text-[#F5B301]" />
-                  Live Service Map
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {activeMapRequest
-                    ? `${activeMapRequest.ticket_number} • ${activeMapRequest.address_in_kano}`
-                    : "No active job in progress. Submit a request to track your plumber live."}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {activeTrackingRequests.length > 1 && (
-                  <ClassicSelect
-                    value={activeMapRequest?.id || ""}
-                    onChange={(val) => {
-                      setOverviewMapRequestId(val);
-                      setFocusMarkerId(null);
-                    }}
-                    options={activeTrackingRequests.map((r) => ({
-                      value: r.id,
-                      label: `${r.ticket_number} (${r.problem_category || r.property_type})`,
-                    }))}
-                    ariaLabel="Select active request to track"
+          {activeMapRequest && (
+            <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-xl sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-[#0B1F3A] sm:text-base">
+                    <MapPin className="h-4 w-4 text-[#F5B301]" />
+                    Active Service Request
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {activeMapRequest.ticket_number} • {activeMapRequest.address_in_kano}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRequest(activeMapRequest)}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3 text-xs font-bold text-white transition hover:bg-[#132f57]"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-[#F5B301]" />
+                    Track & View
+                  </button>
+                  {activeTrackingRequests.length > 1 && (
+                    <ClassicSelect
+                      value={activeMapRequest?.id || ""}
+                      onChange={(val) => {
+                        setOverviewMapRequestId(val);
+                        setFocusMarkerId(null);
+                      }}
+                      options={activeTrackingRequests.map((r) => ({
+                        value: r.id,
+                        label: `${r.ticket_number} (${r.problem_category || r.property_type})`,
+                      }))}
+                      ariaLabel="Select active request to track"
                   />
                 )}
 
@@ -1272,17 +1279,97 @@ export default function CustomerPortalClient({
                       </button>
                     </div>
                   </>
-                ) : (
-                  <div className="space-y-2 py-4 text-center">
-                    <p className="text-sm font-bold text-[#0B1F3A]">No Active Job to Track</p>
-                    <p className="text-xs text-slate-500">
-                      When you submit a new plumbing request, your property pin and live plumber tracking will appear right here.
-                    </p>
-                  </div>
-                )}
+                ) : null}
               </div>
             </div>
           </section>
+          )}
+
+          {myRequests.length > 0 && (
+            <section className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
+                    Recent Requests
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Tap any request to view full details, quotes, and progress
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("requests")}
+                  className="text-xs font-bold text-[#0B1F3A] hover:underline"
+                >
+                  View All ({myRequests.length})
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
+                {myRequests.slice(0, 3).map((req) => {
+                  const statusMeta = getStatusMeta(req.status);
+                  return (
+                    <button
+                      key={req.id}
+                      type="button"
+                      onClick={() => setSelectedRequest(req)}
+                      className="flex flex-col justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-sm transition hover:border-[#F5B301] active:scale-[0.99]"
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="font-mono text-xs font-bold text-[#0B1F3A]">
+                          {req.ticket_number}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusMeta.className}`}
+                        >
+                          {statusMeta.label}
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="line-clamp-1 text-xs font-bold text-[#0B1F3A]">
+                          {req.problem_category || req.property_type}
+                        </p>
+                        <p className="line-clamp-1 text-[11px] text-slate-500">
+                          {req.address_in_kano}
+                        </p>
+                      </div>
+                      <p className="text-[11px] font-medium text-slate-500">
+                        {req.assigned_technician
+                          ? `Plumber: ${req.assigned_technician}`
+                          : "Technician assignment pending"}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-xl sm:p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
+                Active Requests
+              </p>
+              <p className="mt-1.5 text-xl font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
+                {activeTrackingRequests.length}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-xl sm:p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
+                Quotes Awaiting
+              </p>
+              <p className="mt-1.5 text-xl font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
+                {pendingQuotations.length}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-xl sm:p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
+                Completed Jobs
+              </p>
+              <p className="mt-1.5 text-xl font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
+                {myRequests.filter((r) => r.status === "completed").length}
+              </p>
+            </div>
+          </div>
 
           {awaitingPaymentRequests.length > 0 && (
             <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/70 p-5">
@@ -1786,6 +1873,7 @@ export default function CustomerPortalClient({
 
       <CustomerNewRequestModal
         open={showNewRequestModal}
+        serviceCategories={serviceCategories}
         newCategory={newCategory}
         setNewCategory={setNewCategory}
         newPriority={newPriority}
