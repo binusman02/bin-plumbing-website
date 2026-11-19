@@ -37,10 +37,6 @@ export type PortalActor =
       isApproved?: boolean;
     };
 
-function normalizeDigits(v: string): string {
-  return (v || "").replace(/\D/g, "").slice(-10);
-}
-
 /**
  * Resolves the verified server-side actor for Admin, Customer, or Plumber.
  * Never trusts client-supplied IDs or roles.
