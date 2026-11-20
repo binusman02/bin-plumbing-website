@@ -1,5 +1,8 @@
+import "dart:async";
+import "package:firebase_messaging/firebase_messaging.dart";
 import "package:flutter/material.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
@@ -19,11 +22,44 @@ class NotificationsButton extends StatefulWidget {
 
 class _NotificationsButtonState extends State<NotificationsButton> {
   int _unreadCount = 0;
+  Timer? _pollTimer;
+  StreamSubscription<RemoteMessage>? _fcmSub;
 
   @override
   void initState() {
     super.initState();
     _refreshCount();
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _refreshCount(),
+    );
+    if (GoogleServicesBootstrap.firebaseReady) {
+      _fcmSub = FirebaseMessaging.onMessage.listen((msg) {
+        _refreshCount();
+        final title = msg.notification?.title;
+        final body = msg.notification?.body;
+        if (mounted && title != null && title.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                body != null && body.isNotEmpty ? "$title: $body" : title,
+              ),
+              action: SnackBarAction(
+                label: "View",
+                onPressed: _openCentre,
+              ),
+            ),
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _fcmSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _refreshCount() async {

@@ -4,6 +4,7 @@ import {
   parseNotificationDestination,
 } from "@/lib/notification-navigation";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+import { dispatchFcmPush } from "@/lib/fcm-push";
 
 export interface NotificationRecord {
   id: string;
@@ -74,6 +75,16 @@ export async function createNotification(input: {
       // Ignore dedupe conflicts or pre-migration missing table silently
       return null;
     }
+
+    // Fire-and-forget FCM push notification to registered mobile devices
+    void dispatchFcmPush({
+      recipientRole: input.recipientRole,
+      recipientId: input.recipientId,
+      title: input.title,
+      body: input.body || "",
+      destination: input.destination,
+      type: input.type,
+    });
 
     return data as NotificationRecord;
   } catch {
