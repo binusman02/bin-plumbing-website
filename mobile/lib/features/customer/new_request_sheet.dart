@@ -2,6 +2,7 @@ import "dart:math";
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 import "package:image_picker/image_picker.dart";
+import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
@@ -119,7 +120,9 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
     });
     try {
       final ticketNum = "FG-${100000 + Random().nextInt(900000)}";
-      await SupabaseConfig.client.from("service_requests").insert({
+      final addr = _addressController.text.trim();
+      final desc = _descriptionController.text.trim();
+      final basePayload = <String, dynamic>{
         "ticket_number": ticketNum,
         "customer_id": widget.customerId,
         "customer_name": widget.customerName,
@@ -127,19 +130,40 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
         "problem_category": _selectedCategory,
         "property_type": _propertyType,
         "priority": _priority,
-        "address_in_kano": _addressController.text.trim(),
-        "description": _descriptionController.text.trim(),
+        "address": addr,
+        "issue_description": desc,
         "status": "new",
         if (_lat != null) "customer_lat": _lat,
         if (_lng != null) "customer_lng": _lng,
-      });
+      };
+      try {
+        await SupabaseConfig.client.from("service_requests").insert(basePayload);
+      } on PostgrestException catch (pgErr) {
+        if (pgErr.message.contains("'address'") ||
+            pgErr.message.contains("'issue_description'")) {
+          final legacyPayload = Map<String, dynamic>.from(basePayload)
+            ..remove("address")
+            ..remove("issue_description")
+            ..["address_in_kano"] = addr
+            ..["description"] = desc;
+          await SupabaseConfig.client
+              .from("service_requests")
+              .insert(legacyPayload);
+        } else {
+          rethrow;
+        }
+      }
       if (mounted) {
         Navigator.pop(context);
         widget.onCreated();
       }
-    } catch (_) {
+    } on PostgrestException catch (e) {
       if (mounted) {
-        setState(() => _error = "Could not submit request. Please try again.");
+        setState(() => _error = "Could not submit request: ${e.message}");
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = "Could not submit request: $e");
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
