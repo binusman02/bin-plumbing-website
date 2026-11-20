@@ -10,7 +10,8 @@ class GoogleServicesBootstrap {
 
   static const String googleWebClientId = String.fromEnvironment(
     "GOOGLE_WEB_CLIENT_ID",
-    defaultValue: "",
+    defaultValue:
+        "1080146694782-q3ep6g62oqh5q0e1duv7cggn3qou230g.apps.googleusercontent.com",
   );
 
   /// Safely initializes Firebase & FCM when google-services.json is configured.
