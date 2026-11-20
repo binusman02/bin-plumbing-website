@@ -143,18 +143,18 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
     if (_quote == null || _busy) return;
     setState(() => _busy = true);
     try {
-      await SupabaseConfig.client
-          .from("quotations")
-          .update({"customer_approval_status": decision})
-          .eq("id", _quote!.id);
-      if (decision == "approved") {
-        await SupabaseConfig.client
-            .from("service_requests")
-            .update({"status": "approved"})
-            .eq("id", widget.request.id);
-      }
+      await FlowGuardApiClient.decideQuotation(
+        quotationId: _quote!.id,
+        decision: decision,
+      );
       await _loadQuote();
       widget.onUpdated();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not update quote: $e")),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -164,28 +164,54 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
     final picker = ImagePicker();
     final file = await picker.pickImage(source: source, imageQuality: 80);
     if (file == null || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Receipt '${file.name}' selected for verification."),
-      ),
-    );
+    setState(() => _busy = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final url = await FlowGuardApiClient.uploadRequestPhoto(
+        bytes: bytes,
+        filename: file.name,
+      );
+      await FlowGuardApiClient.recordPayment(
+        ticketNumber: widget.request.ticketNumber,
+        amount: _quote?.totalAmount,
+        proofUrl: url,
+      );
+      widget.onUpdated();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Proof of payment uploaded for admin verification."),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Receipt upload failed: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _submitReview() async {
     if (_busy || _reviewSubmitted) return;
     setState(() => _busy = true);
     try {
-      await SupabaseConfig.client.from("reviews").insert({
-        "request_id": widget.request.id,
-        "ticket_number": widget.request.ticketNumber,
-        "customer_name": widget.request.customerName ?? "Customer",
-        "service_category": widget.request.problemCategory,
-        "rating": _reviewRating,
-        "comment": _reviewController.text.trim(),
-        "status": "pending",
-      });
+      await FlowGuardApiClient.submitReview(
+        ticketNumber: widget.request.ticketNumber,
+        rating: _reviewRating,
+        comment: _reviewController.text.trim(),
+      );
       if (mounted) {
         setState(() => _reviewSubmitted = true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not submit review: $e")),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);

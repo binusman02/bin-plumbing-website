@@ -2,7 +2,7 @@ import "package:flutter/material.dart";
 import "package:google_maps_flutter/google_maps_flutter.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
-class FlowGuardGoogleMap extends StatelessWidget {
+class FlowGuardGoogleMap extends StatefulWidget {
   final double? customerLat;
   final double? customerLng;
   final double? plumberLat;
@@ -28,13 +28,49 @@ class FlowGuardGoogleMap extends StatelessWidget {
     this.allowFullscreen = false,
   });
 
+  @override
+  State<FlowGuardGoogleMap> createState() => _FlowGuardGoogleMapState();
+}
+
+class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
+  GoogleMapController? _controller;
+
+  LatLng get _target {
+    if (widget.plumberLat != null && widget.plumberLng != null) {
+      return LatLng(widget.plumberLat!, widget.plumberLng!);
+    }
+    if (widget.customerLat != null && widget.customerLng != null) {
+      return LatLng(widget.customerLat!, widget.customerLng!);
+    }
+    return FlowGuardGoogleMap._kanoCenter;
+  }
+
+  @override
+  void didUpdateWidget(covariant FlowGuardGoogleMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final changed = oldWidget.customerLat != widget.customerLat ||
+        oldWidget.customerLng != widget.customerLng ||
+        oldWidget.plumberLat != widget.plumberLat ||
+        oldWidget.plumberLng != widget.plumberLng;
+    if (changed && _controller != null) {
+      _controller!.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          _target,
+          (widget.customerLat != null || widget.plumberLat != null)
+              ? 15.0
+              : 12.0,
+        ),
+      );
+    }
+  }
+
   Set<Marker> _buildMarkers() {
     final markers = <Marker>{};
-    if (customerLat != null && customerLng != null) {
+    if (widget.customerLat != null && widget.customerLng != null) {
       markers.add(
         Marker(
           markerId: const MarkerId("customer-property"),
-          position: LatLng(customerLat!, customerLng!),
+          position: LatLng(widget.customerLat!, widget.customerLng!),
           infoWindow: const InfoWindow(title: "Property Location"),
           icon: BitmapDescriptor.defaultMarkerWithHue(
             BitmapDescriptor.hueAzure,
@@ -42,12 +78,14 @@ class FlowGuardGoogleMap extends StatelessWidget {
         ),
       );
     }
-    if (plumberLat != null && plumberLng != null) {
+    if (widget.plumberLat != null && widget.plumberLng != null) {
       markers.add(
         Marker(
           markerId: const MarkerId("assigned-plumber"),
-          position: LatLng(plumberLat!, plumberLng!),
-          infoWindow: InfoWindow(title: plumberLabel ?? "Assigned Plumber"),
+          position: LatLng(widget.plumberLat!, widget.plumberLng!),
+          infoWindow: InfoWindow(
+            title: widget.plumberLabel ?? "Assigned Plumber",
+          ),
           icon: BitmapDescriptor.defaultMarkerWithHue(
             BitmapDescriptor.hueOrange,
           ),
@@ -58,43 +96,41 @@ class FlowGuardGoogleMap extends StatelessWidget {
   }
 
   Set<Polyline> _buildPolylines() {
-    if (routePoints.length < 2) return const {};
+    if (widget.routePoints.length < 2) return const {};
     return {
       Polyline(
         polylineId: const PolylineId("live-route"),
         color: FlowGuardTheme.navy,
         width: 5,
-        points: routePoints,
+        points: widget.routePoints,
       ),
     };
   }
 
   @override
   Widget build(BuildContext context) {
-    final initialTarget = (plumberLat != null && plumberLng != null)
-        ? LatLng(plumberLat!, plumberLng!)
-        : (customerLat != null && customerLng != null)
-            ? LatLng(customerLat!, customerLng!)
-            : _kanoCenter;
-
     final mapWidget = GoogleMap(
       initialCameraPosition: CameraPosition(
-        target: initialTarget,
-        zoom: (customerLat != null || plumberLat != null) ? 14.5 : 12.0,
+        target: _target,
+        zoom: (widget.customerLat != null || widget.plumberLat != null)
+            ? 15.0
+            : 12.0,
       ),
+      onMapCreated: (ctrl) => _controller = ctrl,
       markers: _buildMarkers(),
       polylines: _buildPolylines(),
       myLocationEnabled: true,
       myLocationButtonEnabled: true,
-      onTap: onPickLocation == null
+      zoomControlsEnabled: true,
+      onTap: widget.onPickLocation == null
           ? null
-          : (pos) => onPickLocation!(pos.latitude, pos.longitude),
+          : (pos) => widget.onPickLocation!(pos.latitude, pos.longitude),
     );
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: Container(
-        height: height,
+        height: widget.height,
         decoration: BoxDecoration(
           border: Border.all(color: FlowGuardTheme.border),
           borderRadius: BorderRadius.circular(18),
@@ -102,46 +138,61 @@ class FlowGuardGoogleMap extends StatelessWidget {
         child: Stack(
           children: [
             mapWidget,
-            if (allowFullscreen)
+            if (widget.allowFullscreen)
               Positioned(
                 top: 10,
                 left: 10,
                 child: Material(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
                   elevation: 2,
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.fullscreen_rounded,
-                      color: FlowGuardTheme.navy,
-                    ),
-                    tooltip: "Full screen map",
-                    onPressed: () {
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
                       Navigator.of(context).push(
-                        MaterialPageRoute<void>(
+                        MaterialPageRoute(
                           builder: (_) => Scaffold(
-                            appBar: AppBar(
-                              title: const Text(
-                                "Live Service Map",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  color: FlowGuardTheme.navy,
-                                ),
-                              ),
-                            ),
+                            appBar: AppBar(title: const Text("Live Map")),
                             body: FlowGuardGoogleMap(
-                              customerLat: customerLat,
-                              customerLng: customerLng,
-                              plumberLat: plumberLat,
-                              plumberLng: plumberLng,
-                              plumberLabel: plumberLabel,
-                              routePoints: routePoints,
+                              customerLat: widget.customerLat,
+                              customerLng: widget.customerLng,
+                              plumberLat: widget.plumberLat,
+                              plumberLng: widget.plumberLng,
+                              plumberLabel: widget.plumberLabel,
+                              routePoints: widget.routePoints,
+                              onPickLocation: widget.onPickLocation,
                               height: double.infinity,
+                              allowFullscreen: false,
                             ),
                           ),
                         ),
                       );
                     },
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.fullscreen_rounded,
+                            size: 18,
+                            color: FlowGuardTheme.navy,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            "Expand",
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),

@@ -221,13 +221,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     await _gpsSub?.cancel();
     _gpsSub = null;
     if (disableSharing) {
-      try {
-        await SupabaseConfig.client.from("plumber_live_locations").upsert({
-          "plumber_id": widget.plumberId,
-          "sharing_enabled": false,
-          "updated_at": DateTime.now().toUtc().toIso8601String(),
-        }, onConflict: "plumber_id");
-      } catch (_) {}
+      await FlowGuardApiClient.stopLiveLocation().catchError((_) {});
     }
     if (mounted) {
       setState(() {
@@ -240,7 +234,6 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   }
 
   Future<void> _pushLocation(Position pos) async {
-    final nowIso = DateTime.now().toUtc().toIso8601String();
     if (mounted) {
       setState(() {
         _plumberLat = pos.latitude;
@@ -251,25 +244,13 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       });
     }
     try {
-      final client = SupabaseConfig.client;
-      await client.from("plumber_live_locations").upsert({
-        "plumber_id": widget.plumberId,
-        "latitude": pos.latitude,
-        "longitude": pos.longitude,
-        "accuracy_m": pos.accuracy,
-        "heading": pos.heading,
-        "speed": pos.speed,
-        "location_timestamp": nowIso,
-        "last_seen_at": nowIso,
-        "sharing_enabled": true,
-        "updated_at": nowIso,
-      }, onConflict: "plumber_id");
-
-      await client.from("plumbers").update({
-        "current_lat": pos.latitude,
-        "current_lng": pos.longitude,
-        "location_updated_at": nowIso,
-      }).eq("id", widget.plumberId);
+      await FlowGuardApiClient.pushLiveLocation(
+        lat: pos.latitude,
+        lng: pos.longitude,
+        accuracy: pos.accuracy,
+        heading: pos.heading,
+        speed: pos.speed,
+      );
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -280,31 +261,14 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     }
   }
 
-  Future<void> _appendHistoryAndUpdate({
-    required String action,
-    String? nextStatus,
-  }) async {
+  Future<void> _performAction(String action, {List<String>? photos}) async {
     setState(() => _busy = true);
     try {
-      final nowIso = DateTime.now().toUtc().toIso8601String();
-      final updatedHistory = [
-        ..._history,
-        {
-          "action": action,
-          "timestamp": nowIso,
-          "actor": widget.plumberName,
-          "role": "plumber",
-        },
-      ];
-      final payload = <String, dynamic>{
-        "history": updatedHistory,
-        if (nextStatus != null) "status": nextStatus,
-      };
-      await SupabaseConfig.client
-          .from("service_requests")
-          .update(payload)
-          .eq("id", _job.id);
-
+      await FlowGuardApiClient.performJobAction(
+        ticketOrId: _job.ticketNumber,
+        action: action,
+        photos: photos,
+      );
       await _loadJobDetails();
       widget.onUpdated();
     } catch (e) {
@@ -328,18 +292,13 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       }
       return;
     }
-    await _appendHistoryAndUpdate(
-      action: "trip_started",
-      nextStatus: _job.status == "new" || _job.status == "pending"
-          ? "scheduled"
-          : null,
-    );
+    await _performAction("start_trip");
     await _startGpsStream();
   }
 
   Future<void> _handleArrived() async {
     await _stopGpsStream(disableSharing: true);
-    await _appendHistoryAndUpdate(action: "arrived");
+    await _performAction("arrived");
   }
 
   double _parseNum(TextEditingController c) =>
@@ -360,31 +319,16 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     }
     setState(() => _busy = true);
     try {
-      final labour = _parseNum(_labourCtrl);
-      final materials = _parseNum(_materialsCtrl);
-      final transport = _parseNum(_transportCtrl);
-      final other = _parseNum(_otherCtrl);
-      final total = labour + materials + transport + other;
-
-      await SupabaseConfig.client.from("quotations").insert({
-        "request_id": _job.id,
-        "ticket_number": _job.ticketNumber,
-        "plumber_id": widget.plumberId,
-        "plumber_name": widget.plumberName,
-        "labour_charge": labour,
-        "materials_cost": materials,
-        "transport_charge": transport,
-        "other_charges": other,
-        "total_amount": total,
-        "customer_approval_status": "pending",
-        "admin_approved": false,
-        "notes": _notesCtrl.text.trim(),
-      });
-
-      await _appendHistoryAndUpdate(
-        action: "quotation_submitted",
-        nextStatus: "quoted",
+      await FlowGuardApiClient.submitQuotation(
+        ticketNumber: _job.ticketNumber,
+        labourCharge: _parseNum(_labourCtrl),
+        materialsCost: _parseNum(_materialsCtrl),
+        transportCharge: _parseNum(_transportCtrl),
+        otherCharges: _parseNum(_otherCtrl),
+        notes: _notesCtrl.text.trim(),
       );
+      await _loadJobDetails();
+      widget.onUpdated();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -413,14 +357,12 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       );
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
-      final ext = picked.name.split(".").last.toLowerCase();
-      final storagePath =
-          "jobs/${_job.ticketNumber}/${DateTime.now().millisecondsSinceEpoch}.$ext";
-      await SupabaseConfig.client.storage
-          .from("request-photos")
-          .uploadBinary(storagePath, bytes);
+      final url = await FlowGuardApiClient.uploadRequestPhoto(
+        bytes: bytes,
+        filename: picked.name,
+      );
       if (mounted) {
-        setState(() => _uploadedPhotoNames.add(picked.name));
+        setState(() => _uploadedPhotoNames.add(url ?? picked.name));
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Uploaded ${picked.name}")),
         );
@@ -734,12 +676,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
         subtitle:
             "Review the customer's address and issue above, then accept to schedule.",
         buttonLabel: "Accept Assignment",
-        onPressed: _busy
-            ? null
-            : () => _appendHistoryAndUpdate(
-                  action: "assignment_accepted",
-                  nextStatus: "scheduled",
-                ),
+        onPressed: _busy ? null : () => _performAction("accept"),
       );
     }
 
@@ -805,13 +742,8 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _appendHistoryAndUpdate(
-                            action: "work_started",
-                            nextStatus: "in_progress",
-                          ),
-                  child: const Text("Start Work"),
+                  onPressed: _busy ? null : () => _performAction("start_work"),
+                  child: const Text("Start Work", maxLines: 1),
                 ),
               ),
             ],
@@ -826,12 +758,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
         subtitle:
             "Customer approved the quotation. Begin the plumbing repair now.",
         buttonLabel: "Start Work",
-        onPressed: _busy
-            ? null
-            : () => _appendHistoryAndUpdate(
-                  action: "work_started",
-                  nextStatus: "in_progress",
-                ),
+        onPressed: _busy ? null : () => _performAction("start_work"),
       );
     }
 
@@ -900,11 +827,11 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
               child: ElevatedButton(
                 onPressed: _busy
                     ? null
-                    : () => _appendHistoryAndUpdate(
-                          action: "work_completed",
-                          nextStatus: "work_completed",
+                    : () => _performAction(
+                          "complete_work",
+                          photos: _uploadedPhotoNames,
                         ),
-                child: const Text("Mark Work Complete"),
+                child: const Text("Mark Work Complete", maxLines: 1),
               ),
             ),
           ],

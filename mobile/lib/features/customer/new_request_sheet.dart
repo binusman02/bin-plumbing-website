@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 import "package:image_picker/image_picker.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
+import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
@@ -119,6 +120,17 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
       _error = null;
     });
     try {
+      final uploadedUrls = <String>[];
+      for (final file in _photos) {
+        final bytes = await file.readAsBytes();
+        final url = await FlowGuardApiClient.uploadRequestPhoto(
+          bytes: bytes,
+          filename: file.name,
+        );
+        if (url != null && url.isNotEmpty) {
+          uploadedUrls.add(url);
+        }
+      }
       final ticketNum = "FG-${100000 + Random().nextInt(900000)}";
       final addr = _addressController.text.trim();
       final desc = _descriptionController.text.trim();
@@ -132,6 +144,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
         "priority": _priority,
         "address": addr,
         "issue_description": desc,
+        "photos": uploadedUrls,
         "status": "new",
         if (_lat != null) "customer_lat": _lat,
         if (_lng != null) "customer_lng": _lng,
@@ -179,44 +192,45 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
 
     const stepLabels = ["1. Details", "2. Location", "3. Confirm"];
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        4,
-        20,
-        MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: SingleChildScrollView(
+    return FractionallySizedBox(
+      heightFactor: 0.88,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          12,
+          20,
+          MediaQuery.of(context).viewInsets.bottom + 20,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
               "New Plumbing Request",
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 19,
                 fontWeight: FontWeight.w800,
                 color: FlowGuardTheme.navy,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: List.generate(3, (idx) {
                 final active = idx <= _step;
                 return Expanded(
                   child: Container(
-                    margin: EdgeInsets.only(right: idx < 2 ? 6 : 0),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    margin: EdgeInsets.only(right: idx < 2 ? 8 : 0),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
                       color: active ? FlowGuardTheme.navy : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       stepLabels[idx],
                       textAlign: TextAlign.center,
+                      maxLines: 1,
                       style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
                         color: active ? Colors.white : FlowGuardTheme.mutedText,
                       ),
                     ),
@@ -224,7 +238,13 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                 );
               }),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
             if (_step == 0) ...[
               DropdownButtonFormField<String>(
                 initialValue: _selectedCategory,
@@ -421,6 +441,10 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                   ),
                 ),
               ],
+            ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

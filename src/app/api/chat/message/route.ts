@@ -1,7 +1,83 @@
 import { NextResponse } from "next/server";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
-import { deleteJobMessageById, editJobMessageById } from "@/lib/marketplace";
+import {
+  deleteJobMessageById,
+  editJobMessageById,
+  postJobMessage,
+} from "@/lib/marketplace";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const ticketNumber =
+      typeof body?.ticketNumber === "string" ? body.ticketNumber.trim() : "";
+    const message = typeof body?.message === "string" ? body.message.trim() : "";
+    const preferredRole =
+      body?.actorRole === "admin" ||
+      body?.actorRole === "customer" ||
+      body?.actorRole === "plumber"
+        ? body.actorRole
+        : undefined;
+
+    const actor = await resolveChatActor(preferredRole);
+    if (!actor) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!ticketNumber || (!message && !body?.attachment)) {
+      return NextResponse.json(
+        { error: "ticketNumber and message or attachment are required" },
+        { status: 400 }
+      );
+    }
+
+    const ctx = await verifyTicketAccess(actor, ticketNumber);
+    if (!ctx) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const recipientRole: "admin" | "customer" | "plumber" =
+      body?.recipientRole === "customer" ||
+      body?.recipientRole === "plumber" ||
+      body?.recipientRole === "admin"
+        ? body.recipientRole
+        : actor.role === "customer"
+          ? ctx.assignedPlumberId
+            ? "plumber"
+            : "admin"
+          : actor.role === "plumber"
+            ? "customer"
+            : "customer";
+
+    const recipientId =
+      recipientRole === "customer"
+        ? ctx.customerId
+        : recipientRole === "plumber"
+          ? ctx.assignedPlumberId
+          : null;
+
+    const created = await postJobMessage({
+      requestId: ctx.requestId,
+      ticketNumber: ctx.ticketNumber,
+      senderRole: actor.role,
+      senderName: actor.name,
+      senderId: actor.id,
+      recipientRole,
+      recipientId,
+      message,
+      attachment: body?.attachment,
+      isInternal: false,
+      replyToId: typeof body?.replyToId === "string" ? body.replyToId : null,
+    });
+
+    return NextResponse.json({ success: true, message: created });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to send message" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function PATCH(request: Request) {
   try {

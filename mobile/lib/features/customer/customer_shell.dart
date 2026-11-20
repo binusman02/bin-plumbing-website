@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
+import "package:image_picker/image_picker.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
@@ -8,6 +9,7 @@ import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/customer/customer_request_detail_page.dart";
 import "package:flowguard_plumbing/features/customer/new_request_sheet.dart";
 import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
+import "package:flowguard_plumbing/features/shared/profile_and_edit_pages.dart";
 import "package:flowguard_plumbing/features/shared/ticket_chat_view.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -31,6 +33,7 @@ class _CustomerShellState extends State<CustomerShell> {
   String _customerName = "Customer";
   String _customerPhone = "";
   String? _savedAddress;
+  String? _avatarUrl;
 
   @override
   void initState() {
@@ -69,7 +72,7 @@ class _CustomerShellState extends State<CustomerShell> {
 
       final customerRows = await client
           .from("customers")
-          .select("id, full_name, phone, address")
+          .select("id, full_name, phone, address, avatar_url")
           .eq("auth_user_id", widget.user.id)
           .limit(1);
 
@@ -78,12 +81,14 @@ class _CustomerShellState extends State<CustomerShell> {
           widget.user.userMetadata?["full_name"]?.toString() ?? "Customer";
       String phone = widget.user.phone ?? "";
       String? savedAddr;
+      String? avatarUrl;
       if (customerRows.isNotEmpty) {
         customerId = customerRows.first["id"]?.toString() ?? "";
         displayName =
             customerRows.first["full_name"]?.toString() ?? displayName;
         phone = customerRows.first["phone"]?.toString() ?? phone;
         savedAddr = customerRows.first["address"]?.toString();
+        avatarUrl = customerRows.first["avatar_url"]?.toString();
       }
 
       final reqList = <ServiceRequestItem>[];
@@ -107,6 +112,7 @@ class _CustomerShellState extends State<CustomerShell> {
           _customerName = displayName;
           _customerPhone = phone;
           _savedAddress = savedAddr;
+          _avatarUrl = avatarUrl;
           _loading = false;
         });
       }
@@ -257,12 +263,28 @@ class _CustomerShellState extends State<CustomerShell> {
         senderName: _customerName,
         senderId: _customerId,
       ),
-      _CustomerPaymentsTab(bankDetails: _bankDetails),
-      _CustomerProfileTab(
-        name: _customerName,
-        email: widget.user.email ?? "",
+      _CustomerPaymentsTab(
+        bankDetails: _bankDetails,
+        requests: _requests,
+        onUploaded: _loadCustomerData,
+      ),
+      FlowGuardProfileView(
+        role: "customer",
+        fullName: _customerName,
         phone: _customerPhone,
-        address: _savedAddress,
+        email: widget.user.email ?? "",
+        location: _savedAddress ?? "Kano State, Nigeria",
+        avatarUrl: _avatarUrl,
+        onProfileUpdated: _loadCustomerData,
+        onFeedbackTap: () => setState(() => _tabIndex = 1),
+        onSignOut: () async {
+          final token = GoogleServicesBootstrap.fcmToken;
+          if (token != null) {
+            await FlowGuardApiClient.deactivateDeviceToken(token)
+                .catchError((_) {});
+          }
+          await SupabaseConfig.client.auth.signOut();
+        },
       ),
     ];
 
@@ -274,8 +296,8 @@ class _CustomerShellState extends State<CustomerShell> {
             ClipOval(
               child: Image.asset(
                 "assets/images/flowguard-icon.jpg",
-                width: 38,
-                height: 38,
+                width: 36,
+                height: 36,
                 fit: BoxFit.cover,
               ),
             ),
@@ -301,7 +323,36 @@ class _CustomerShellState extends State<CustomerShell> {
               }
             },
           ),
-          const SizedBox(width: 6),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: InkWell(
+              onTap: () => setState(() => _tabIndex = 4),
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: FlowGuardTheme.gold, width: 1.5),
+                ),
+                child: ClipOval(
+                  child: _avatarUrl != null && _avatarUrl!.isNotEmpty
+                      ? Image.network(
+                          _avatarUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            "assets/images/flowguard-icon.jpg",
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Image.asset(
+                          "assets/images/flowguard-icon.jpg",
+                          fit: BoxFit.cover,
+                        ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
       body: pages[_tabIndex],
@@ -332,7 +383,7 @@ class _CustomerShellState extends State<CustomerShell> {
   }
 }
 
-class _CustomerHomeTab extends StatelessWidget {
+class _CustomerHomeTab extends StatefulWidget {
   final String customerName;
   final bool loading;
   final List<ServiceCategoryItem> categories;
@@ -356,13 +407,33 @@ class _CustomerHomeTab extends StatelessWidget {
   });
 
   @override
+  State<_CustomerHomeTab> createState() => _CustomerHomeTabState();
+}
+
+class _CustomerHomeTabState extends State<_CustomerHomeTab> {
+  late final PageController _spotlightController;
+  int _spotlightPage = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _spotlightController = PageController(viewportFraction: 0.88);
+  }
+
+  @override
+  void dispose() {
+    _spotlightController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final activeRequests = requests.where((r) => r.isActive).toList();
-    final recentRequests = requests.take(3).toList();
-    final spotlight = categories.take(5).toList();
+    final activeRequests = widget.requests.where((r) => r.isActive).toList();
+    final recentRequests = widget.requests.take(3).toList();
+    final spotlight = widget.categories.take(5).toList();
 
     return RefreshIndicator(
-      onRefresh: onRefresh,
+      onRefresh: widget.onRefresh,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -377,7 +448,7 @@ class _CustomerHomeTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Welcome, $customerName",
+                  "Welcome, ${widget.customerName}",
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
@@ -386,17 +457,21 @@ class _CustomerHomeTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 ElevatedButton.icon(
-                  onPressed: () => onSelectCategory(),
+                  onPressed: () => widget.onSelectCategory(),
                   icon: const Icon(Icons.add),
-                  label: const Text("New Plumbing Request"),
+                  label: const Text(
+                    "New Plumbing Request",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
           ),
-          if (loading) ...[
+          if (widget.loading) ...[
             const SizedBox(height: 28),
             const Center(child: CircularProgressIndicator()),
-          ] else if (categories.isNotEmpty) ...[
+          ] else if (widget.categories.isNotEmpty) ...[
             const SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -410,8 +485,8 @@ class _CustomerHomeTab extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: onViewAllCategories,
-                  child: const Text("View All >"),
+                  onPressed: widget.onViewAllCategories,
+                  child: const Text("View All >", maxLines: 1),
                 ),
               ],
             ),
@@ -422,14 +497,15 @@ class _CustomerHomeTab extends StatelessWidget {
                 behavior: ScrollConfiguration.of(context)
                     .copyWith(scrollbars: false),
                 child: ListView.separated(
+                  physics: const BouncingScrollPhysics(),
                   scrollDirection: Axis.horizontal,
-                  itemCount: categories.length,
+                  itemCount: widget.categories.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 12),
                   itemBuilder: (context, idx) {
-                    final cat = categories[idx];
+                    final cat = widget.categories[idx];
                     return InkWell(
                       borderRadius: BorderRadius.circular(16),
-                      onTap: () => onSelectCategory(cat.title),
+                      onTap: () => widget.onSelectCategory(cat.title),
                       child: SizedBox(
                         width: 74,
                         child: Column(
@@ -486,7 +562,9 @@ class _CustomerHomeTab extends StatelessWidget {
             SizedBox(
               height: 186,
               child: PageView.builder(
-                controller: PageController(viewportFraction: 0.88),
+                controller: _spotlightController,
+                physics: const BouncingScrollPhysics(),
+                onPageChanged: (p) => setState(() => _spotlightPage = p),
                 itemCount: spotlight.length,
                 itemBuilder: (context, idx) {
                   final cat = spotlight[idx];
@@ -557,8 +635,11 @@ class _CustomerHomeTab extends StatelessWidget {
                                   const SizedBox(height: 10),
                                   ElevatedButton(
                                     onPressed: () =>
-                                        onSelectCategory(cat.title),
-                                    child: const Text("Request This Service"),
+                                        widget.onSelectCategory(cat.title),
+                                    child: const Text(
+                                      "Request This Service",
+                                      maxLines: 1,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -569,6 +650,24 @@ class _CustomerHomeTab extends StatelessWidget {
                     ),
                   );
                 },
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                spotlight.length,
+                (i) => Container(
+                  width: _spotlightPage == i ? 18 : 6,
+                  height: 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: BoxDecoration(
+                    color: _spotlightPage == i
+                        ? FlowGuardTheme.navy
+                        : FlowGuardTheme.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
               ),
             ),
           ],
@@ -586,14 +685,14 @@ class _CustomerHomeTab extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: onViewAllRequests,
-                  child: const Text("View All"),
+                  onPressed: widget.onViewAllRequests,
+                  child: const Text("View All", maxLines: 1),
                 ),
               ],
             ),
             InkWell(
               borderRadius: BorderRadius.circular(18),
-              onTap: () => onOpenRequest(activeRequests.first),
+              onTap: () => widget.onOpenRequest(activeRequests.first),
               child: _RequestSummaryCard(request: activeRequests.first),
             ),
           ],
@@ -613,7 +712,7 @@ class _CustomerHomeTab extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(18),
-                      onTap: () => onOpenRequest(req),
+                      onTap: () => widget.onOpenRequest(req),
                       child: _RequestSummaryCard(request: req),
                     ),
                   ),
@@ -798,160 +897,225 @@ class _RequestSummaryCard extends StatelessWidget {
   }
 }
 
-class _CustomerPaymentsTab extends StatelessWidget {
+class _CustomerPaymentsTab extends StatefulWidget {
   final BankDetailsData? bankDetails;
+  final List<ServiceRequestItem> requests;
+  final Future<void> Function() onUploaded;
 
-  const _CustomerPaymentsTab({this.bankDetails});
+  const _CustomerPaymentsTab({
+    this.bankDetails,
+    required this.requests,
+    required this.onUploaded,
+  });
+
+  @override
+  State<_CustomerPaymentsTab> createState() => _CustomerPaymentsTabState();
+}
+
+class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
+  bool _uploading = false;
+
+  Future<void> _uploadProof() async {
+    final activeReq =
+        widget.requests.where((r) => r.isActive).firstOrNull ??
+            widget.requests.firstOrNull;
+    if (activeReq == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Submit a plumbing request before uploading payment proof."),
+        ),
+      );
+      return;
+    }
+
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+      maxWidth: 1400,
+    );
+    if (picked == null) return;
+
+    setState(() => _uploading = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final url = await FlowGuardApiClient.uploadRequestPhoto(
+        bytes: bytes,
+        filename: picked.name,
+      );
+      await FlowGuardApiClient.recordPayment(
+        ticketNumber: activeReq.ticketNumber,
+        proofUrl: url,
+      );
+      await widget.onUploaded();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Proof of payment uploaded for ${activeReq.ticketNumber}.",
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Upload failed: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final bank = widget.bankDetails;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // Official FlowGuard Bank Details Card
         Container(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: FlowGuardTheme.border),
+            color: FlowGuardTheme.navy,
+            borderRadius: BorderRadius.circular(22),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "Official FlowGuard Bank Details",
+                "OFFICIAL FLOWGUARD BANK DETAILS",
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: 10.5,
                   fontWeight: FontWeight.w800,
-                  color: FlowGuardTheme.navy,
+                  letterSpacing: 1.0,
+                  color: FlowGuardTheme.gold,
                 ),
               ),
-              const SizedBox(height: 8),
-              if (bankDetails?.isConfigured == true) ...[
-                Text("Bank: ${bankDetails!.bankName}"),
-                Text("Account Name: ${bankDetails!.accountName}"),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Text(
-                      bankDetails!.accountNumber,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: FlowGuardTheme.navy,
+              const SizedBox(height: 12),
+              if (bank?.isConfigured == true) ...[
+                Text(
+                  bank!.bankName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  bank.accountName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFFCBD5E1),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        bank.accountNumber,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: () {
-                        Clipboard.setData(
-                          ClipboardData(text: bankDetails!.accountNumber),
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Account number copied")),
-                        );
-                      },
-                      icon: const Icon(Icons.copy_rounded),
-                    ),
-                  ],
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () {
+                          Clipboard.setData(
+                            ClipboardData(text: bank.accountNumber),
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Account number copied"),
+                            ),
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.copy_rounded,
+                          color: FlowGuardTheme.gold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ] else
                 const Text(
                   "Bank transfer details will appear here once configured in Admin Settings.",
-                  style: TextStyle(fontSize: 13, color: FlowGuardTheme.mutedText),
+                  style: TextStyle(fontSize: 13, color: Color(0xFFCBD5E1)),
                 ),
             ],
           ),
         ),
-      ],
-    );
-  }
-}
 
-class _CustomerProfileTab extends StatelessWidget {
-  final String name;
-  final String email;
-  final String phone;
-  final String? address;
+        const SizedBox(height: 16),
 
-  const _CustomerProfileTab({
-    required this.name,
-    required this.email,
-    required this.phone,
-    this.address,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: FlowGuardTheme.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: FlowGuardTheme.navy,
-                ),
+        // Single Box directly below card: "Upload Proof of Payment"
+        InkWell(
+          onTap: _uploading ? null : _uploadProof,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: FlowGuardTheme.navy.withValues(alpha: 0.35),
+                width: 1.5,
               ),
-              if (phone.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  phone,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: FlowGuardTheme.mutedText,
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: _uploading
+                      ? const Padding(
+                          padding: EdgeInsets.all(14),
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        )
+                      : const Icon(
+                          Icons.cloud_upload_outlined,
+                          size: 28,
+                          color: FlowGuardTheme.navy,
+                        ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  "Upload Proof of Payment",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
                   ),
                 ),
-              ],
-              if (email.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(
-                  email,
-                  style: const TextStyle(
-                    fontSize: 13,
+                const Text(
+                  "Tap to select your bank transfer receipt photo",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
                     color: FlowGuardTheme.mutedText,
                   ),
                 ),
               ],
-              if (address != null && address!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  address!,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: FlowGuardTheme.mutedText,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 18),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final token = GoogleServicesBootstrap.fcmToken;
-                  if (token != null) {
-                    await FlowGuardApiClient.deactivateDeviceToken(token)
-                        .catchError((_) {});
-                  }
-                  await SupabaseConfig.client.auth.signOut();
-                },
-                icon: const Icon(Icons.logout_rounded),
-                label: const Text("Sign Out"),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(46),
-                  foregroundColor: FlowGuardTheme.navy,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ],

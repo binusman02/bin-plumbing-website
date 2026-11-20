@@ -1,10 +1,12 @@
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:geolocator/geolocator.dart";
 import "package:intl/intl.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/plumber/plumber_job_detail_page.dart";
 import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
+import "package:flowguard_plumbing/features/shared/profile_and_edit_pages.dart";
 import "package:flowguard_plumbing/features/shared/ticket_chat_view.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -27,6 +29,11 @@ class _PlumberShellState extends State<PlumberShell> {
   String _plumberName = "Technician";
   String? _plumberId;
   String? _plumberPhone;
+  String? _avatarUrl;
+  String? _address;
+  String? _bankName;
+  String? _accountNumber;
+  String? _accountName;
   String _verificationStatus = "approved";
   double _rating = 5.0;
   double _verifiedEarnings = 0;
@@ -47,7 +54,7 @@ class _PlumberShellState extends State<PlumberShell> {
       final plumberRows = await client
           .from("plumbers")
           .select(
-            "id, full_name, phone, is_available, verification_status, rating",
+            "id, full_name, phone, address, avatar_url, bank_name, account_number, account_name, is_available, verification_status, rating",
           )
           .eq("auth_user_id", widget.user.id)
           .limit(1);
@@ -57,6 +64,11 @@ class _PlumberShellState extends State<PlumberShell> {
         _plumberId = row["id"]?.toString();
         _plumberName = row["full_name"]?.toString() ?? "Technician";
         _plumberPhone = row["phone"]?.toString();
+        _address = row["address"]?.toString();
+        _avatarUrl = row["avatar_url"]?.toString();
+        _bankName = row["bank_name"]?.toString();
+        _accountNumber = row["account_number"]?.toString();
+        _accountName = row["account_name"]?.toString();
         _isAvailable = row["is_available"] == true;
         _verificationStatus =
             row["verification_status"]?.toString() ?? "approved";
@@ -266,6 +278,82 @@ class _PlumberShellState extends State<PlumberShell> {
     await SupabaseConfig.client.auth.signOut();
   }
 
+  void _openEarningsReceipt(Map<String, dynamic> row, NumberFormat naira) {
+    final ticket = row["ticket"] as String;
+    final amount = "₦${naira.format(row["amount"] as double)}";
+    final status =
+        (row["approved"] as bool) ? "Approved / Payable" : "Pending Approval";
+    final created = (row["created_at"] as String).split("T").first;
+    final receiptText =
+        "FLOWGUARD PLUMBING PAYOUT RECEIPT\nTicket: $ticket\nTechnician: $_plumberName\nAmount: $amount\nStatus: $status\nDate: $created";
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(22, 4, 22, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              "FlowGuard Payout Receipt",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: FlowGuardTheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: FlowGuardTheme.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Ticket: $ticket",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: FlowGuardTheme.navy,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text("Technician: $_plumberName"),
+                  Text("Amount: $amount"),
+                  Text("Status: $status"),
+                  if (created.isNotEmpty) Text("Date: $created"),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: receiptText));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Receipt copied — ready to print or share."),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.print_outlined),
+              label: const Text("Copy / Print Receipt", maxLines: 1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeJob = _jobs.where((j) => j.isActive).firstOrNull;
@@ -453,15 +541,24 @@ class _PlumberShellState extends State<PlumberShell> {
             ),
 
             const SizedBox(height: 18),
-            const Text(
-              "Assigned Jobs",
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                color: FlowGuardTheme.navy,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Assigned Jobs",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _tabIndex = 1),
+                  child: const Text("View All >", maxLines: 1),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.all(24),
@@ -597,47 +694,51 @@ class _PlumberShellState extends State<PlumberShell> {
               )
             else
               ..._earningsLedger.map(
-                (row) => Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: FlowGuardTheme.border),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            row["ticket"] as String,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: FlowGuardTheme.navy,
+                (row) => InkWell(
+                  onTap: () => _openEarningsReceipt(row, naira),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: FlowGuardTheme.border),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              row["ticket"] as String,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: FlowGuardTheme.navy,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            (row["approved"] as bool)
-                                ? "Approved"
-                                : "Pending approval",
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: FlowGuardTheme.mutedText,
+                            const SizedBox(height: 2),
+                            Text(
+                              (row["approved"] as bool)
+                                  ? "Approved • Tap for receipt"
+                                  : "Pending approval • Tap for receipt",
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: FlowGuardTheme.mutedText,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        "₦${naira.format(row["amount"] as double)}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: FlowGuardTheme.navy,
+                          ],
                         ),
-                      ),
-                    ],
+                        Text(
+                          "₦${naira.format(row["amount"] as double)}",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -646,90 +747,28 @@ class _PlumberShellState extends State<PlumberShell> {
       ),
 
       // 5. PROFILE TAB
-      ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: FlowGuardTheme.border),
+      FlowGuardProfileView(
+        role: "plumber",
+        fullName: _plumberName,
+        phone: _plumberPhone ?? "",
+        email: widget.user.email ?? "",
+        location: _address ?? "Kano State, Nigeria",
+        avatarUrl: _avatarUrl,
+        isVerifiedTechnician: _verificationStatus == "approved",
+        bankName: _bankName,
+        accountNumber: _accountNumber,
+        accountName: _accountName,
+        onProfileUpdated: _loadPlumberData,
+        onFeedbackTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                "Current Technician Rating: ${_rating.toStringAsFixed(1)} ★",
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: FlowGuardTheme.navy,
-                      child: Text(
-                        _plumberName.isNotEmpty
-                            ? _plumberName[0].toUpperCase()
-                            : "T",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _plumberName,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: FlowGuardTheme.navy,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _plumberPhone ?? widget.user.email ?? "",
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: FlowGuardTheme.mutedText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD1FAE5),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    "Status: ${_verificationStatus.toUpperCase()} TECHNICIAN",
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF065F46),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          OutlinedButton.icon(
-            onPressed: _signOut,
-            icon: const Icon(Icons.logout_rounded),
-            label: const Text("Sign Out"),
-          ),
-        ],
+          );
+        },
+        onSignOut: _signOut,
       ),
     ];
 
@@ -741,8 +780,8 @@ class _PlumberShellState extends State<PlumberShell> {
             ClipOval(
               child: Image.asset(
                 "assets/images/flowguard-icon.jpg",
-                width: 38,
-                height: 38,
+                width: 36,
+                height: 36,
                 fit: BoxFit.cover,
               ),
             ),
@@ -761,6 +800,36 @@ class _PlumberShellState extends State<PlumberShell> {
           NotificationsButton(
             role: "plumber",
             onNavigateLink: _handleNotificationLink,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: InkWell(
+              onTap: () => setState(() => _tabIndex = 4),
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: FlowGuardTheme.gold, width: 1.5),
+                ),
+                child: ClipOval(
+                  child: _avatarUrl != null && _avatarUrl!.isNotEmpty
+                      ? Image.network(
+                          _avatarUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            "assets/images/flowguard-icon.jpg",
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Image.asset(
+                          "assets/images/flowguard-icon.jpg",
+                          fit: BoxFit.cover,
+                        ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
