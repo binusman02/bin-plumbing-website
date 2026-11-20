@@ -1,7 +1,7 @@
 import "dart:async";
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
-import "package:google_maps_flutter/google_maps_flutter.dart";
+import "package:latlong2/latlong.dart";
 import "package:image_picker/image_picker.dart";
 import "package:intl/intl.dart";
 import "package:url_launcher/url_launcher.dart";
