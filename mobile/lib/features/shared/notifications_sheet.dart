@@ -123,7 +123,7 @@ class _NotificationCentreSheetState extends State<_NotificationCentreSheet> {
         role: widget.role,
         limit: 40,
       );
-      final raw = data["notifications"];
+      final raw = data["items"] ?? data["notifications"];
       final list = <NotificationItem>[];
       if (raw is List) {
         for (final entry in raw) {

@@ -53,42 +53,53 @@ class _CustomerShellState extends State<CustomerShell> {
           .order("sort_order", ascending: true);
 
       final parsedCategories = catRows
-          .where((r) => r["visible"] != false && r["active"] != false)
+          .where(
+            (r) =>
+                r["visible"] != false &&
+                r["active"] != false &&
+                r["deleted_at"] == null,
+          )
           .map((r) => ServiceCategoryItem.fromJson(r))
           .toList();
 
-      final settingRow = await client
-          .from("settings")
-          .select("value")
-          .eq("key", "marketplace_settings")
-          .maybeSingle();
-
+      final payAndBank = await FlowGuardApiClient.fetchPaymentsAndBank(
+        role: "customer",
+      );
       BankDetailsData? bank;
-      if (settingRow != null && settingRow["value"] is Map<String, dynamic>) {
+      if (payAndBank["bankDetails"] is Map<String, dynamic>) {
         bank = BankDetailsData.fromSettingsValue(
-          settingRow["value"] as Map<String, dynamic>,
+          payAndBank["bankDetails"] as Map<String, dynamic>,
         );
       }
 
-      final customerRows = await client
-          .from("customers")
-          .select("id, full_name, phone, address, avatar_url")
-          .eq("auth_user_id", widget.user.id)
-          .limit(1);
+      final profileResp = await FlowGuardApiClient.fetchProfile(
+        role: "customer",
+      );
+      final profileMap = profileResp?["profile"] as Map<String, dynamic>?;
 
-      String customerId = "";
-      String displayName =
-          widget.user.userMetadata?["full_name"]?.toString() ?? "Customer";
-      String phone = widget.user.phone ?? "";
-      String? savedAddr;
-      String? avatarUrl;
-      if (customerRows.isNotEmpty) {
-        customerId = customerRows.first["id"]?.toString() ?? "";
-        displayName =
-            customerRows.first["full_name"]?.toString() ?? displayName;
-        phone = customerRows.first["phone"]?.toString() ?? phone;
-        savedAddr = customerRows.first["address"]?.toString();
-        avatarUrl = customerRows.first["avatar_url"]?.toString();
+      String customerId = profileMap?["id"]?.toString() ?? "";
+      String displayName = profileMap?["full_name"]?.toString() ??
+          widget.user.userMetadata?["full_name"]?.toString() ??
+          "Customer";
+      String phone =
+          profileMap?["phone"]?.toString() ?? widget.user.phone ?? "";
+      String? savedAddr = profileMap?["address"]?.toString();
+      String? avatarUrl = profileMap?["avatar_url"]?.toString();
+
+      if (customerId.isEmpty) {
+        final customerRows = await client
+            .from("customers")
+            .select("id, full_name, phone, address, avatar_url")
+            .eq("auth_user_id", widget.user.id)
+            .limit(1);
+        if (customerRows.isNotEmpty) {
+          customerId = customerRows.first["id"]?.toString() ?? "";
+          displayName =
+              customerRows.first["full_name"]?.toString() ?? displayName;
+          phone = customerRows.first["phone"]?.toString() ?? phone;
+          savedAddr = customerRows.first["address"]?.toString();
+          avatarUrl = customerRows.first["avatar_url"]?.toString();
+        }
       }
 
       final reqList = <ServiceRequestItem>[];
@@ -99,7 +110,9 @@ class _CustomerShellState extends State<CustomerShell> {
             .eq("customer_id", customerId)
             .order("created_at", ascending: false);
         for (final row in rows) {
-          reqList.add(ServiceRequestItem.fromJson(row));
+          if (row["deleted_at"] == null) {
+            reqList.add(ServiceRequestItem.fromJson(row));
+          }
         }
       }
 
@@ -276,7 +289,6 @@ class _CustomerShellState extends State<CustomerShell> {
         location: _savedAddress ?? "Kano State, Nigeria",
         avatarUrl: _avatarUrl,
         onProfileUpdated: _loadCustomerData,
-        onFeedbackTap: () => setState(() => _tabIndex = 1),
         onSignOut: () async {
           final token = GoogleServicesBootstrap.fcmToken;
           if (token != null) {
@@ -749,13 +761,16 @@ class _CustomerRequestsTabState extends State<_CustomerRequestsTab> {
       if (_filter == "Needs Action") {
         return r.status == "awaiting_final_payment" ||
             r.status == "work_completed" ||
-            r.status == "scheduled";
+            r.status == "awaiting_approval" ||
+            r.status == "quotation_submitted" ||
+            r.status == "quoted";
       }
       if (_filter == "Completed") return r.status == "completed";
+      if (_filter == "Cancelled") return r.status == "cancelled";
       return true;
     }).toList();
 
-    const filters = ["All", "Active", "Needs Action", "Completed"];
+    const filters = ["All", "Active", "Needs Action", "Completed", "Cancelled"];
 
     return Column(
       children: [

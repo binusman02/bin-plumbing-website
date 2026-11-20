@@ -168,6 +168,7 @@ export async function verifyTurnstileToken(token?: string | null): Promise<boole
 // ---------------------------------------------------------------------------
 const ALLOWED_CHAT_MIME_TYPES = new Set([
   "image/jpeg",
+  "image/jpg",
   "image/png",
   "image/webp",
   "image/gif",
@@ -179,6 +180,17 @@ const ALLOWED_CHAT_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "video/mp4",
   "video/quicktime",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/webm",
+  "application/octet-stream",
 ]);
 
 const ALLOWED_CHAT_EXTENSIONS = new Set([
@@ -195,16 +207,46 @@ const ALLOWED_CHAT_EXTENSIONS = new Set([
   ".xlsx",
   ".mp4",
   ".mov",
+  ".m4a",
+  ".aac",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".webm",
 ]);
 
 const ALLOWED_DOC_MIME_TYPES = new Set([
   "image/jpeg",
+  "image/jpg",
   "image/png",
   "image/webp",
   "application/pdf",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/webm",
+  "application/octet-stream",
 ]);
 
-const ALLOWED_DOC_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf"]);
+const ALLOWED_DOC_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".pdf",
+  ".m4a",
+  ".aac",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".webm",
+]);
 
 export function validateUploadFile(
   file: File,

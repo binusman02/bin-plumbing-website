@@ -114,14 +114,69 @@ export async function resolvePortalActor(
         }
       }
 
-      // 3. Customer via Supabase Auth (linked strictly by auth_user_id)
-      if ((!preferredRole || preferredRole === "customer") && metaRole === "customer") {
+      // 3. Customer via Supabase Auth (linked by auth_user_id, with auto-heal for mobile signups)
+      if (
+        (!preferredRole || preferredRole === "customer") &&
+        (metaRole === "customer" || (!metaRole && preferredRole === "customer"))
+      ) {
         const userEmail = (user.email || "").toLowerCase().trim();
-        const { data: byAuth } = await adminSupabase
+        let { data: byAuth } = await adminSupabase
           .from("customers")
           .select("*")
           .eq("auth_user_id", user.id)
           .maybeSingle();
+
+        // Auto-heal mobile/OAuth signups that didn't go through web server action
+        if (!byAuth) {
+          const { data: isPlumber } = await adminSupabase
+            .from("plumbers")
+            .select("id")
+            .eq("auth_user_id", user.id)
+            .maybeSingle();
+          if (!isPlumber) {
+            if (userEmail) {
+              const { data: byEmail } = await adminSupabase
+                .from("customers")
+                .select("*")
+                .ilike("email", userEmail)
+                .maybeSingle();
+              if (byEmail) {
+                await adminSupabase
+                  .from("customers")
+                  .update({ auth_user_id: user.id })
+                  .eq("id", byEmail.id);
+                byAuth = { ...byEmail, auth_user_id: user.id };
+              }
+            }
+            if (!byAuth) {
+              const newId = `cust-${Date.now().toString(36)}`;
+              const fullName =
+                String(user.user_metadata?.full_name || userEmail.split("@")[0] || "Customer");
+              const phone = String(user.user_metadata?.phone || user.phone || "");
+              const { data: created } = await adminSupabase
+                .from("customers")
+                .insert({
+                  id: newId,
+                  auth_user_id: user.id,
+                  full_name: fullName,
+                  email: userEmail || null,
+                  phone,
+                  area_in_kano: "Kano Municipal",
+                  address: "",
+                })
+                .select("*")
+                .maybeSingle();
+              byAuth = created ?? null;
+            }
+            if (!metaRole) {
+              await adminSupabase.auth.admin
+                .updateUserById(user.id, {
+                  app_metadata: { ...user.app_metadata, role: "customer" },
+                })
+                .catch(() => {});
+            }
+          }
+        }
 
         const match = byAuth && !byAuth.deleted_at ? byAuth : null;
         if (match) {

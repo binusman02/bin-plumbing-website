@@ -8,6 +8,7 @@ import "package:url_launcher/url_launcher.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
+import "package:flowguard_plumbing/features/shared/voice_note_widgets.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
@@ -82,10 +83,15 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
 
       if (reqRow != null) {
         _job = ServiceRequestItem.fromJson(reqRow);
-        final rawHistory = reqRow["history"];
-        _history = rawHistory is List ? List<dynamic>.from(rawHistory) : [];
-        _tripState = _deriveTripState(_history);
       }
+
+      final histRows = await client
+          .from("request_history")
+          .select("action, created_at")
+          .eq("request_id", _job.id)
+          .order("created_at", ascending: true);
+      _history = List<dynamic>.from(histRows);
+      _tripState = _deriveTripState(_history);
 
       final quoteRows = await client
           .from("quotations")
@@ -103,25 +109,29 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
         viewerRole: "plumber",
         ticket: _job.ticketNumber,
       );
-      final plumberMap = snap?["plumber"] as Map<String, dynamic>?;
-      final routeRaw = snap?["routePoints"] as List?;
+      final plumbersList = snap?["plumbers"] as List?;
+      final plumberMap = (plumbersList != null && plumbersList.isNotEmpty)
+          ? plumbersList.first as Map<String, dynamic>
+          : snap?["plumber"] as Map<String, dynamic>?;
+
+      List<LatLng> routePts = _routePoints;
+      if (_tripState == "on_the_way") {
+        final rawPts = await FlowGuardApiClient.fetchRoutePoints(
+          ticket: _job.ticketNumber,
+          viewerRole: "plumber",
+        );
+        if (rawPts.isNotEmpty) {
+          routePts =
+              rawPts.map((p) => LatLng(p["lat"]!, p["lng"]!)).toList();
+        }
+      }
 
       if (mounted) {
         setState(() {
           _quote = loadedQuote;
-          _plumberLat = (plumberMap?["lat"] as num?)?.toDouble();
-          _plumberLng = (plumberMap?["lng"] as num?)?.toDouble();
-          if (routeRaw != null) {
-            _routePoints = routeRaw
-                .whereType<Map>()
-                .map(
-                  (p) => LatLng(
-                    (p["lat"] as num).toDouble(),
-                    (p["lng"] as num).toDouble(),
-                  ),
-                )
-                .toList();
-          }
+          _plumberLat = (plumberMap?["lat"] as num?)?.toDouble() ?? _plumberLat;
+          _plumberLng = (plumberMap?["lng"] as num?)?.toDouble() ?? _plumberLng;
+          _routePoints = routePts;
           _loading = false;
         });
       }
@@ -362,7 +372,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
         filename: picked.name,
       );
       if (mounted) {
-        setState(() => _uploadedPhotoNames.add(url ?? picked.name));
+        setState(() => _uploadedPhotoNames.add(url));
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Uploaded ${picked.name}")),
         );
@@ -514,6 +524,9 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                             color: FlowGuardTheme.navy,
                           ),
                         ),
+                        ..._job.photos
+                            .where((p) => VoiceNoteBubblePlayer.isAudioUrl(p))
+                            .map((v) => VoiceNoteBubblePlayer(rawUrl: v)),
                         const SizedBox(height: 14),
                         Row(
                           children: [
@@ -670,7 +683,9 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       );
     }
 
-    if (_job.status == "new" || _job.status == "pending") {
+    if (_job.status == "new" ||
+        _job.status == "pending" ||
+        _job.status == "contacted") {
       return _actionCard(
         title: "New Job Assignment",
         subtitle:
@@ -680,7 +695,9 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       );
     }
 
-    if (_job.status == "scheduled" && _tripState == "idle") {
+    if ((_job.status == "scheduled" ||
+            _job.status == "inspection_required") &&
+        _tripState == "idle") {
       return _actionCard(
         title: "Ready to Travel",
         subtitle:
@@ -700,12 +717,18 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       );
     }
 
-    if ((_tripState == "arrived" || _job.status == "scheduled") &&
-        _quote == null) {
+    if ((_tripState == "arrived" ||
+            _job.status == "scheduled" ||
+            _job.status == "inspection_required" ||
+            _job.status == "quotation_submitted") &&
+        (_quote == null || _quote!.approvalStatus == "rejected")) {
       return _buildQuotationBuilder(naira);
     }
 
-    if (_job.status == "quoted" && _quote != null) {
+    if ((_job.status == "quoted" ||
+            _job.status == "awaiting_approval" ||
+            _job.status == "quotation_submitted") &&
+        _quote != null) {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

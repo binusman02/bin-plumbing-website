@@ -1,11 +1,10 @@
-import "dart:math";
+import "dart:io";
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 import "package:image_picker/image_picker.dart";
-import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
-import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
+import "package:flowguard_plumbing/features/shared/voice_note_widgets.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
@@ -41,6 +40,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
   late final TextEditingController _addressController;
   final _descriptionController = TextEditingController();
   final List<XFile> _photos = [];
+  String? _voiceNotePath;
   double? _lat;
   double? _lng;
   bool _locating = false;
@@ -50,10 +50,10 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
   @override
   void initState() {
     super.initState();
-    final first = widget.categories.isNotEmpty
-        ? widget.categories.first.title
-        : "Pipe Installation & Repairs";
-    _selectedCategory = widget.initialCategory ?? first;
+    _selectedCategory = widget.initialCategory ??
+        (widget.categories.isNotEmpty
+            ? widget.categories.first.title
+            : "General Plumbing");
     _addressController = TextEditingController(text: widget.savedAddress ?? "");
   }
 
@@ -79,33 +79,55 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
         setState(() => _error = "Location permission denied.");
         return;
       }
-      final pos = await Geolocator.getCurrentPosition();
-      if (mounted) {
-        setState(() {
-          _lat = pos.latitude;
-          _lng = pos.longitude;
-        });
-      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      setState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+        if (_addressController.text.trim().isEmpty) {
+          _addressController.text =
+              "Pinned GPS Location (${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}), Kano";
+        }
+      });
     } catch (_) {
-      if (mounted) setState(() => _error = "Unable to read GPS coordinates.");
+      setState(
+        () => _error = "Could not fetch GPS. You can enter your address below.",
+      );
     } finally {
       if (mounted) setState(() => _locating = false);
     }
   }
 
-  Future<void> _addPhoto(ImageSource source) async {
+  Future<void> _pickPhoto(ImageSource source) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: source, imageQuality: 75);
-    if (picked != null && mounted) {
-      setState(() => _photos.add(picked));
+    final file = await picker.pickImage(
+      source: source,
+      imageQuality: 80,
+      maxWidth: 1400,
+    );
+    if (file != null && mounted) {
+      setState(() => _photos.add(file));
     }
   }
 
   void _nextStep() {
     setState(() => _error = null);
-    if (_step == 0 && _descriptionController.text.trim().isEmpty) {
-      setState(() => _error = "Please describe the plumbing issue.");
-      return;
+    if (_step == 0) {
+      if (_descriptionController.text.trim().isEmpty &&
+          _voiceNotePath != null) {
+        _descriptionController.text =
+            "Voice note attached describing the plumbing issue.";
+      }
+      if (_descriptionController.text.trim().isEmpty) {
+        setState(
+          () => _error =
+              "Please describe the issue or record a quick voice note.",
+        );
+        return;
+      }
     }
     if (_step == 1 && _addressController.text.trim().isEmpty) {
       setState(() => _error = "Please enter or confirm your address in Kano.");
@@ -127,52 +149,35 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
           bytes: bytes,
           filename: file.name,
         );
-        if (url != null && url.isNotEmpty) {
-          uploadedUrls.add(url);
+        uploadedUrls.add(url);
+      }
+      if (_voiceNotePath != null) {
+        final voiceFile = File(_voiceNotePath!);
+        if (await voiceFile.exists()) {
+          final bytes = await voiceFile.readAsBytes();
+          final voiceUrl = await FlowGuardApiClient.uploadRequestPhoto(
+            bytes: bytes,
+            filename:
+                "voice_${DateTime.now().millisecondsSinceEpoch}.m4a",
+          );
+          uploadedUrls.add(voiceUrl);
         }
       }
-      final ticketNum = "FG-${100000 + Random().nextInt(900000)}";
-      final addr = _addressController.text.trim();
-      final desc = _descriptionController.text.trim();
-      final basePayload = <String, dynamic>{
-        "ticket_number": ticketNum,
-        "customer_id": widget.customerId,
-        "customer_name": widget.customerName,
-        "customer_phone": widget.customerPhone,
-        "problem_category": _selectedCategory,
-        "property_type": _propertyType,
-        "priority": _priority,
-        "address": addr,
-        "issue_description": desc,
-        "photos": uploadedUrls,
-        "status": "new",
-        if (_lat != null) "customer_lat": _lat,
-        if (_lng != null) "customer_lng": _lng,
-      };
-      try {
-        await SupabaseConfig.client.from("service_requests").insert(basePayload);
-      } on PostgrestException catch (pgErr) {
-        if (pgErr.message.contains("'address'") ||
-            pgErr.message.contains("'issue_description'")) {
-          final legacyPayload = Map<String, dynamic>.from(basePayload)
-            ..remove("address")
-            ..remove("issue_description")
-            ..["address_in_kano"] = addr
-            ..["description"] = desc;
-          await SupabaseConfig.client
-              .from("service_requests")
-              .insert(legacyPayload);
-        } else {
-          rethrow;
-        }
-      }
+
+      await FlowGuardApiClient.createServiceRequest(
+        problemCategory: _selectedCategory,
+        propertyType: _propertyType,
+        priority: _priority,
+        address: _addressController.text.trim(),
+        issueDescription: _descriptionController.text.trim(),
+        photos: uploadedUrls,
+        customerLat: _lat,
+        customerLng: _lng,
+      );
+
       if (mounted) {
         Navigator.pop(context);
         widget.onCreated();
-      }
-    } on PostgrestException catch (e) {
-      if (mounted) {
-        setState(() => _error = "Could not submit request: ${e.message}");
       }
     } catch (e) {
       if (mounted) {
@@ -193,7 +198,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
     const stepLabels = ["1. Details", "2. Location", "3. Confirm"];
 
     return FractionallySizedBox(
-      heightFactor: 0.88,
+      heightFactor: 0.90,
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           20,
@@ -221,7 +226,9 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                     margin: EdgeInsets.only(right: idx < 2 ? 8 : 0),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
-                      color: active ? FlowGuardTheme.navy : const Color(0xFFF1F5F9),
+                      color: active
+                          ? FlowGuardTheme.navy
+                          : const Color(0xFFF1F5F9),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -231,7 +238,8 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: active ? Colors.white : FlowGuardTheme.mutedText,
+                        color:
+                            active ? Colors.white : FlowGuardTheme.mutedText,
                       ),
                     ),
                   ),
@@ -245,203 +253,265 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-            if (_step == 0) ...[
-              DropdownButtonFormField<String>(
-                initialValue: _selectedCategory,
-                decoration: const InputDecoration(labelText: "Plumbing Category"),
-                items: options
-                    .map((o) => DropdownMenuItem(value: o, child: Text(o)))
-                    .toList(),
-                onChanged: (v) {
-                  if (v != null) setState(() => _selectedCategory = v);
-                },
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _priority,
-                      decoration: const InputDecoration(labelText: "Priority"),
-                      items: const [
-                        DropdownMenuItem(value: "standard", child: Text("Standard")),
-                        DropdownMenuItem(value: "urgent", child: Text("Urgent")),
+                    if (_step == 0) ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedCategory,
+                        decoration: const InputDecoration(
+                          labelText: "Plumbing Category",
+                        ),
+                        items: options
+                            .map(
+                              (o) => DropdownMenuItem(value: o, child: Text(o)),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedCategory = v);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _priority,
+                              decoration: const InputDecoration(
+                                labelText: "Priority",
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: "standard",
+                                  child: Text("Standard"),
+                                ),
+                                DropdownMenuItem(
+                                  value: "urgent",
+                                  child: Text("Urgent"),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) setState(() => _priority = v);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _propertyType,
+                              decoration: const InputDecoration(
+                                labelText: "Property",
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: "Residential",
+                                  child: Text("Residential"),
+                                ),
+                                DropdownMenuItem(
+                                  value: "Commercial",
+                                  child: Text("Commercial"),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _propertyType = v);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _descriptionController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: "Problem Description (or record voice below)",
+                          hintText:
+                              "Describe the leak, blockage, or installation needed...",
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      VoiceNoteRecorderBox(
+                        onRecorded: (path) =>
+                            setState(() => _voiceNotePath = path),
+                      ),
+                    ] else if (_step == 1) ...[
+                      TextField(
+                        controller: _addressController,
+                        decoration: const InputDecoration(
+                          labelText: "Property Address in Kano",
+                          prefixIcon: Icon(Icons.location_on_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: _locating ? null : _captureGps,
+                        icon: const Icon(Icons.my_location_outlined, size: 18),
+                        label: Text(
+                          _locating
+                              ? "Fetching GPS..."
+                              : _lat != null
+                                  ? "GPS Pinned (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})"
+                                  : "Use Current GPS Location",
+                          maxLines: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        "Or tap on the map to pin exact property location:",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      FlowGuardGoogleMap(
+                        customerLat: _lat,
+                        customerLng: _lng,
+                        height: 200,
+                        onPickLocation: (lat, lng) {
+                          setState(() {
+                            _lat = lat;
+                            _lng = lng;
+                            if (_addressController.text.trim().isEmpty) {
+                              _addressController.text =
+                                  "Pinned Map Location (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}), Kano";
+                            }
+                          });
+                        },
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _pickPhoto(ImageSource.camera),
+                              icon: const Icon(Icons.camera_alt_outlined),
+                              label: const Text("Camera", maxLines: 1),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _pickPhoto(ImageSource.gallery),
+                              icon: const Icon(Icons.photo_library_outlined),
+                              label: const Text("Gallery", maxLines: 1),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_photos.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          "${_photos.length} photo(s) attached",
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
                       ],
-                      onChanged: (v) {
-                        if (v != null) setState(() => _priority = v);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _propertyType,
-                      decoration: const InputDecoration(labelText: "Property"),
-                      items: const [
-                        DropdownMenuItem(value: "Residential", child: Text("Residential")),
-                        DropdownMenuItem(value: "Commercial", child: Text("Commercial")),
+                      if (_voiceNotePath != null) ...[
+                        const SizedBox(height: 6),
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.mic_rounded,
+                              size: 16,
+                              color: Color(0xFF059669),
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              "Voice note attached",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF059669),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
-                      onChanged: (v) {
-                        if (v != null) setState(() => _propertyType = v);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _descriptionController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: "Problem Description",
-                  hintText: "Briefly describe what needs repair or installation",
-                ),
-              ),
-            ] else if (_step == 1) ...[
-              TextField(
-                controller: _addressController,
-                decoration: const InputDecoration(
-                  labelText: "Address in Kano",
-                  hintText: "e.g., Hotoro, Nassarawa, Tarauni",
-                ),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _locating ? null : _captureGps,
-                icon: _locating
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        _lat != null
-                            ? Icons.check_circle_outline
-                            : Icons.my_location_rounded,
-                        color: _lat != null ? Colors.green : FlowGuardTheme.navy,
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: FlowGuardTheme.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "$_selectedCategory ($_priority • $_propertyType)",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: FlowGuardTheme.navy,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _addressController.text.trim(),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _descriptionController.text.trim(),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: FlowGuardTheme.mutedText,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                label: Text(
-                  _lat != null
-                      ? "GPS Pinned (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})"
-                      : "Use Current GPS Location",
-                ),
-              ),
-              const SizedBox(height: 10),
-              FlowGuardGoogleMap(
-                height: 200,
-                customerLat: _lat,
-                customerLng: _lng,
-                onPickLocation: (lat, lng) {
-                  setState(() {
-                    _lat = lat;
-                    _lng = lng;
-                  });
-                },
-              ),
-            ] else ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _addPhoto(ImageSource.camera),
-                      icon: const Icon(Icons.photo_camera_outlined),
-                      label: const Text("Camera"),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _addPhoto(ImageSource.gallery),
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text("Gallery"),
-                    ),
-                  ),
-                ],
-              ),
-              if (_photos.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  "${_photos.length} photo(s) ready",
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF065F46),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: FlowGuardTheme.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: FlowGuardTheme.border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "$_selectedCategory ($_priority • $_propertyType)",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: FlowGuardTheme.navy,
+                    ],
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _error!,
+                        style: const TextStyle(
+                          color: Color(0xFFB91C1C),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
+                    ],
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        if (_step > 0) ...[
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _submitting
+                                  ? null
+                                  : () => setState(() => _step -= 1),
+                              child: const Text("Back", maxLines: 1),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                            onPressed: _submitting
+                                ? null
+                                : (_step < 2 ? _nextStep : _submit),
+                            child: _submitting
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(
+                                    _step < 2 ? "Continue" : "Submit Request",
+                                    maxLines: 1,
+                                  ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(_addressController.text.trim()),
-                    const SizedBox(height: 4),
-                    Text(
-                      _descriptionController.text.trim(),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: FlowGuardTheme.mutedText,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF991B1B),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                if (_step > 0) ...[
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _submitting ? null : () => setState(() => _step -= 1),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      child: const Text("Back"),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton(
-                    onPressed: _submitting ? null : (_step < 2 ? _nextStep : _submit),
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(_step < 2 ? "Continue" : "Submit Request"),
-                  ),
-                ),
-              ],
-            ),
                   ],
                 ),
               ),

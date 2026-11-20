@@ -11,11 +11,11 @@ class FlowGuardProfileView extends StatelessWidget {
   final String location;
   final String? avatarUrl;
   final bool isVerifiedTechnician;
+  final double rating;
   final String? bankName;
   final String? accountNumber;
   final String? accountName;
   final VoidCallback onProfileUpdated;
-  final VoidCallback onFeedbackTap;
   final VoidCallback onSignOut;
 
   const FlowGuardProfileView({
@@ -27,11 +27,11 @@ class FlowGuardProfileView extends StatelessWidget {
     required this.location,
     this.avatarUrl,
     this.isVerifiedTechnician = false,
+    this.rating = 5.0,
     this.bankName,
     this.accountNumber,
     this.accountName,
     required this.onProfileUpdated,
-    required this.onFeedbackTap,
     required this.onSignOut,
   });
 
@@ -61,6 +61,25 @@ class FlowGuardProfileView extends StatelessWidget {
           SnackBar(content: Text("Photo upload failed: $e")),
         );
       }
+    }
+  }
+
+  void _openFeedbackAndRating(BuildContext context) {
+    if (role == "plumber") {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlumberReviewsPage(
+            plumberName: fullName,
+            initialRating: rating,
+          ),
+        ),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const CustomerRateCompanyPage(),
+        ),
+      );
     }
   }
 
@@ -114,7 +133,7 @@ class FlowGuardProfileView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 36),
       children: [
-        // Top Profile Card matching mockup
+        // Top Profile Card
         Container(
           padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
           decoration: BoxDecoration(
@@ -137,7 +156,9 @@ class FlowGuardProfileView extends StatelessWidget {
                     child: ClipOval(
                       child: avatarUrl != null && avatarUrl!.isNotEmpty
                           ? Image.network(
-                              avatarUrl!,
+                              FlowGuardApiClient.authenticatedFileUrl(
+                                avatarUrl!,
+                              ),
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Image.asset(
                                 "assets/images/flowguard-icon.jpg",
@@ -150,42 +171,24 @@ class FlowGuardProfileView extends StatelessWidget {
                             ),
                     ),
                   ),
-                  if (isVerifiedTechnician)
+                  if (role == "plumber" && isVerifiedTechnician)
                     Positioned(
-                      top: -2,
+                      bottom: 0,
                       right: -2,
                       child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF10B981),
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981),
                           shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
                         ),
                         child: const Icon(
                           Icons.check_rounded,
-                          size: 15,
+                          size: 16,
                           color: Colors.white,
                         ),
                       ),
                     ),
-                  Positioned(
-                    bottom: 0,
-                    right: -2,
-                    child: InkWell(
-                      onTap: () => _pickAndUploadPhoto(context),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: const BoxDecoration(
-                          color: FlowGuardTheme.navy,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.camera_alt_rounded,
-                          size: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -210,12 +213,19 @@ class FlowGuardProfileView extends StatelessWidget {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 11,
+                        ),
+                      ),
                       onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => EditProfilePage(
                               role: role,
                               fullName: fullName,
+                              phone: phone,
                               email: email,
                               location: location,
                               bankName: bankName,
@@ -226,11 +236,11 @@ class FlowGuardProfileView extends StatelessWidget {
                           ),
                         );
                       },
-                      icon: const Icon(Icons.edit_outlined, size: 17),
+                      icon: const Icon(Icons.edit_outlined, size: 16),
                       label: const Text(
                         "Edit Profile",
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13),
                       ),
                     ),
                   ),
@@ -240,13 +250,17 @@ class FlowGuardProfileView extends StatelessWidget {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: FlowGuardTheme.navy,
                         foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 11,
+                        ),
                       ),
                       onPressed: () => _pickAndUploadPhoto(context),
-                      icon: const Icon(Icons.camera_alt_outlined, size: 17),
+                      icon: const Icon(Icons.camera_alt_outlined, size: 16),
                       label: const Text(
                         "Change Photo",
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13),
                       ),
                     ),
                   ),
@@ -278,9 +292,15 @@ class FlowGuardProfileView extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              _infoRow(Icons.phone_outlined, phone.isNotEmpty ? phone : "Not set"),
+              _infoRow(
+                Icons.phone_outlined,
+                phone.isNotEmpty ? phone : "Not set",
+              ),
               const SizedBox(height: 10),
-              _infoRow(Icons.email_outlined, email.isNotEmpty ? email : "Not set"),
+              _infoRow(
+                Icons.email_outlined,
+                email.isNotEmpty ? email : "Not set",
+              ),
               const SizedBox(height: 10),
               _infoRow(
                 Icons.location_on_outlined,
@@ -292,11 +312,11 @@ class FlowGuardProfileView extends StatelessWidget {
 
         const SizedBox(height: 12),
 
-        // Feedback & Rating
+        // Feedback & Rating (Opens dedicated page with Back button!)
         _navTile(
           icon: Icons.star_outline_rounded,
           title: "Feedback & Rating",
-          onTap: onFeedbackTap,
+          onTap: () => _openFeedbackAndRating(context),
         ),
         const SizedBox(height: 8),
 
@@ -316,10 +336,7 @@ class FlowGuardProfileView extends StatelessWidget {
             child: OutlinedButton.icon(
               onPressed: onSignOut,
               icon: const Icon(Icons.logout_rounded, size: 18),
-              label: const Text(
-                "Sign Out",
-                maxLines: 1,
-              ),
+              label: const Text("Sign Out", maxLines: 1),
             ),
           ),
         ),
@@ -388,6 +405,7 @@ class FlowGuardProfileView extends StatelessWidget {
 class EditProfilePage extends StatefulWidget {
   final String role;
   final String fullName;
+  final String phone;
   final String email;
   final String location;
   final String? bankName;
@@ -399,6 +417,7 @@ class EditProfilePage extends StatefulWidget {
     super.key,
     required this.role,
     required this.fullName,
+    required this.phone,
     required this.email,
     required this.location,
     this.bankName,
@@ -413,17 +432,25 @@ class EditProfilePage extends StatefulWidget {
 
 class _EditProfilePageState extends State<EditProfilePage> {
   late final TextEditingController _nameCtrl;
+  late final TextEditingController _phoneCtrl;
   late final TextEditingController _emailCtrl;
   late final TextEditingController _addressCtrl;
   late final TextEditingController _bankNameCtrl;
   late final TextEditingController _accountNoCtrl;
   late final TextEditingController _accountNameCtrl;
+
+  final _currentPassCtrl = TextEditingController();
+  final _newPassCtrl = TextEditingController();
+  final _confirmPassCtrl = TextEditingController();
+
   bool _saving = false;
+  bool _changingPass = false;
 
   @override
   void initState() {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.fullName);
+    _phoneCtrl = TextEditingController(text: widget.phone);
     _emailCtrl = TextEditingController(text: widget.email);
     _addressCtrl = TextEditingController(text: widget.location);
     _bankNameCtrl = TextEditingController(text: widget.bankName ?? "");
@@ -434,11 +461,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _phoneCtrl.dispose();
     _emailCtrl.dispose();
     _addressCtrl.dispose();
     _bankNameCtrl.dispose();
     _accountNoCtrl.dispose();
     _accountNameCtrl.dispose();
+    _currentPassCtrl.dispose();
+    _newPassCtrl.dispose();
+    _confirmPassCtrl.dispose();
     super.dispose();
   }
 
@@ -448,6 +479,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       await FlowGuardApiClient.updateProfile({
         "role": widget.role,
         "fullName": _nameCtrl.text.trim(),
+        "phone": _phoneCtrl.text.trim(),
         "email": _emailCtrl.text.trim(),
         "address": _addressCtrl.text.trim(),
         if (widget.role == "plumber") ...{
@@ -474,14 +506,56 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  Future<void> _updatePassword() async {
+    final nextPass = _newPassCtrl.text;
+    final confirmPass = _confirmPassCtrl.text;
+    if (nextPass.length < 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("New password must be at least 8 characters."),
+        ),
+      );
+      return;
+    }
+    if (nextPass != confirmPass) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("New passwords do not match.")),
+      );
+      return;
+    }
+    setState(() => _changingPass = true);
+    try {
+      await FlowGuardApiClient.changePassword(
+        role: widget.role,
+        currentPassword: _currentPassCtrl.text,
+        newPassword: nextPass,
+      );
+      _currentPassCtrl.clear();
+      _newPassCtrl.clear();
+      _confirmPassCtrl.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Password updated successfully.")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Password update failed: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _changingPass = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Edit Profile")),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 36),
         children: [
-          // Starts directly from Personal & Account Information (no duplicate Change Picture)
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -507,6 +581,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: "Phone Number"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
                   controller: _emailCtrl,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(labelText: "Email Address"),
@@ -514,7 +594,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _addressCtrl,
-                  decoration: const InputDecoration(labelText: "Address in Kano"),
+                  decoration: const InputDecoration(
+                    labelText: "Address in Kano",
+                  ),
                 ),
               ],
             ),
@@ -565,7 +647,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             ),
           ],
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _saving ? null : _save,
             child: _saving
@@ -574,9 +656,473 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text("Save Changes", maxLines: 1),
+                : const Text("Save Profile Changes", maxLines: 1),
+          ),
+
+          const SizedBox(height: 22),
+
+          // Change / Reset Password Section
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: FlowGuardTheme.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  "Security & Password Reset",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  "Update your account sign-in password below.",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: FlowGuardTheme.mutedText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _currentPassCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: "Current Password",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _newPassCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: "New Password (min 8 chars)",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _confirmPassCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: "Confirm New Password",
+                  ),
+                ),
+                const SizedBox(height: 14),
+                OutlinedButton.icon(
+                  onPressed: _changingPass ? null : _updatePassword,
+                  icon: const Icon(Icons.lock_reset_rounded, size: 18),
+                  label: Text(
+                    _changingPass ? "Updating..." : "Update Password",
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Customer page to rate FlowGuard Plumbing & submit feedback (with Back button).
+class CustomerRateCompanyPage extends StatefulWidget {
+  const CustomerRateCompanyPage({super.key});
+
+  @override
+  State<CustomerRateCompanyPage> createState() =>
+      _CustomerRateCompanyPageState();
+}
+
+class _CustomerRateCompanyPageState extends State<CustomerRateCompanyPage> {
+  int _rating = 5;
+  final _commentCtrl = TextEditingController();
+  bool _submitting = false;
+  bool _loading = true;
+  List<Map<String, dynamic>> _myReviews = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReviews();
+  }
+
+  @override
+  void dispose() {
+    _commentCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadReviews() async {
+    try {
+      final list = await FlowGuardApiClient.fetchReviews(role: "customer");
+      if (mounted) {
+        setState(() {
+          _myReviews = list;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_commentCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please write a short review or feedback.")),
+      );
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      await FlowGuardApiClient.submitReview(
+        ticketNumber: "",
+        rating: _rating,
+        comment: _commentCtrl.text.trim(),
+      );
+      _commentCtrl.clear();
+      await _loadReviews();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Thank you! Your rating has been submitted."),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not submit rating: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Feedback & Rating")),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: FlowGuardTheme.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  "Rate FlowGuard Plumbing",
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  "Tell us about your experience with our plumbing services in Kano.",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: FlowGuardTheme.mutedText,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (idx) {
+                    final star = idx + 1;
+                    return IconButton(
+                      onPressed: () => setState(() => _rating = star),
+                      icon: Icon(
+                        star <= _rating
+                            ? Icons.star_rounded
+                            : Icons.star_border_rounded,
+                        size: 36,
+                        color: FlowGuardTheme.gold,
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _commentCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: "Your Feedback / Review",
+                    hintText: "Fast response, neat plumbing work...",
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ElevatedButton(
+                  onPressed: _submitting ? null : _submit,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text("Submit Rating", maxLines: 1),
+                ),
+              ],
+            ),
+          ),
+          if (!_loading && _myReviews.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            const Text(
+              "Your Previous Ratings",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ..._myReviews.map(
+              (r) => Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: FlowGuardTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "★ ${(r["rating"] ?? 5)} / 5",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                        Text(
+                          (r["created_at"] ?? "").toString().split("T").first,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: FlowGuardTheme.mutedText,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      (r["comment"] ?? "").toString(),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: FlowGuardTheme.navy,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Technician page to view all customer reviews given to them (with Back button).
+class PlumberReviewsPage extends StatefulWidget {
+  final String plumberName;
+  final double initialRating;
+
+  const PlumberReviewsPage({
+    super.key,
+    required this.plumberName,
+    required this.initialRating,
+  });
+
+  @override
+  State<PlumberReviewsPage> createState() => _PlumberReviewsPageState();
+}
+
+class _PlumberReviewsPageState extends State<PlumberReviewsPage> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _reviews = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await FlowGuardApiClient.fetchReviews(role: "plumber");
+      if (mounted) {
+        setState(() {
+          _reviews = list;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final avg = _reviews.isEmpty
+        ? widget.initialRating
+        : _reviews.fold<double>(
+              0,
+              (sum, r) => sum + ((r["rating"] as num?)?.toDouble() ?? 5.0),
+            ) /
+            _reviews.length;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text("Customer Reviews & Ratings")),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: FlowGuardTheme.navy,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: FlowGuardTheme.gold,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      "${avg.toStringAsFixed(1)} ★",
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        color: FlowGuardTheme.navy,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.plumberName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "${_reviews.length} customer review(s) recorded",
+                          style: const TextStyle(
+                            color: Color(0xFFCBD5E1),
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(28),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_reviews.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: FlowGuardTheme.border),
+                ),
+                child: const Text(
+                  "No customer reviews have been submitted for your completed jobs yet.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: FlowGuardTheme.mutedText),
+                ),
+              )
+            else
+              ..._reviews.map(
+                (r) => Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: FlowGuardTheme.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            (r["customer_name"] ?? "Customer").toString(),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: FlowGuardTheme.navy,
+                            ),
+                          ),
+                          Text(
+                            "★ ${(r["rating"] ?? 5)} / 5",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "${r["ticket_number"] ?? ""} • ${r["service_category"] ?? ""}",
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        (r["comment"] ?? "").toString(),
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -47,6 +47,7 @@ class ServiceRequestItem {
   final String? customerPhone;
   final double? customerLat;
   final double? customerLng;
+  final List<String> photos;
   final String createdAt;
 
   const ServiceRequestItem({
@@ -64,10 +65,15 @@ class ServiceRequestItem {
     this.customerPhone,
     this.customerLat,
     this.customerLng,
+    this.photos = const [],
     required this.createdAt,
   });
 
   factory ServiceRequestItem.fromJson(Map<String, dynamic> json) {
+    final rawPhotos = json["photos"];
+    final photoList = rawPhotos is List
+        ? rawPhotos.map((p) => p.toString()).toList()
+        : <String>[];
     return ServiceRequestItem(
       id: (json["id"] ?? "").toString(),
       ticketNumber: (json["ticket_number"] ?? "").toString(),
@@ -83,6 +89,7 @@ class ServiceRequestItem {
       customerPhone: json["customer_phone"]?.toString(),
       customerLat: (json["customer_lat"] as num?)?.toDouble(),
       customerLng: (json["customer_lng"] as num?)?.toDouble(),
+      photos: photoList,
       createdAt: (json["created_at"] ?? "").toString(),
     );
   }
@@ -186,8 +193,10 @@ class NotificationItem {
       id: (json["id"] ?? "").toString(),
       title: (json["title"] ?? "Notification").toString(),
       body: (json["body"] ?? json["message"] ?? "").toString(),
-      link: json["link"]?.toString(),
-      isRead: json["is_read"] == true || json["read"] == true,
+      link: (json["destination"] ?? json["link"])?.toString(),
+      isRead: json["read_at"] != null ||
+          json["is_read"] == true ||
+          json["read"] == true,
       createdAt: (json["created_at"] ?? "").toString(),
     );
   }
@@ -206,11 +215,13 @@ class BankDetailsData {
 
   factory BankDetailsData.fromSettingsValue(Map<String, dynamic> row) {
     return BankDetailsData(
-      bankName: (row["bank_name"] ?? "").toString(),
-      accountName:
-          (row["bank_account_name"] ?? "FlowGuard Plumbing Enterprises")
-              .toString(),
-      accountNumber: (row["bank_account_number"] ?? "").toString(),
+      bankName: (row["bankName"] ?? row["bank_name"] ?? "").toString(),
+      accountName: (row["accountName"] ??
+              row["bank_account_name"] ??
+              "FlowGuard Plumbing Enterprises")
+          .toString(),
+      accountNumber:
+          (row["accountNumber"] ?? row["bank_account_number"] ?? "").toString(),
     );
   }
 
@@ -249,9 +260,18 @@ class StatusBadgeMeta {
           background: Color(0xFFFEF3C7),
           foreground: Color(0xFF92400E),
         );
+      case "awaiting_approval":
+      case "quotation_submitted":
+      case "quoted":
+        return const StatusBadgeMeta(
+          label: "Quote Ready",
+          background: Color(0xFFFEF3C7),
+          foreground: Color(0xFFB45309),
+        );
       case "scheduled":
       case "approved":
-      case "qualified":
+      case "contacted":
+      case "inspection_required":
         return const StatusBadgeMeta(
           label: "Assigned",
           background: Color(0xFFE0E7FF),

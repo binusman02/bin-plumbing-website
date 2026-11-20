@@ -4,10 +4,54 @@ import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ filename: string }> }
 ) {
-  const actor = await resolveChatActor();
+  let actor = await resolveChatActor();
+  if (!actor) {
+    // Support ?token=<jwt> for mobile AudioPlayer / Image.network media streams
+    const url = new URL(request.url);
+    const qToken = url.searchParams.get("token")?.trim();
+    if (qToken) {
+      const adminSb = getServiceSupabase();
+      const { data: tokenData } = await adminSb.auth.getUser(qToken);
+      if (tokenData?.user) {
+        const uid = tokenData.user.id;
+        const { data: cust } = await adminSb
+          .from("customers")
+          .select("id, full_name, phone, email")
+          .eq("auth_user_id", uid)
+          .maybeSingle();
+        if (cust) {
+          actor = {
+            role: "customer",
+            id: String(cust.id),
+            authUserId: uid,
+            name: String(cust.full_name || "Customer"),
+            phone: String(cust.phone || ""),
+            email: cust.email ? String(cust.email) : undefined,
+          };
+        } else {
+          const { data: plb } = await adminSb
+            .from("plumbers")
+            .select("id, full_name, phone, email, verification_status")
+            .eq("auth_user_id", uid)
+            .maybeSingle();
+          if (plb) {
+            actor = {
+              role: "plumber",
+              id: String(plb.id),
+              authUserId: uid,
+              name: String(plb.full_name || "Plumber"),
+              phone: String(plb.phone || ""),
+              email: plb.email ? String(plb.email) : undefined,
+              isApproved: plb.verification_status === "approved",
+            };
+          }
+        }
+      }
+    }
+  }
   if (!actor) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

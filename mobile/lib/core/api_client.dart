@@ -1,5 +1,6 @@
 import "dart:convert";
 import "package:http/http.dart" as http;
+import "package:http_parser/http_parser.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 
 class FlowGuardApiClient {
@@ -12,6 +13,31 @@ class FlowGuardApiClient {
       "Content-Type": "application/json",
       if (token != null && token.isNotEmpty) "Authorization": "Bearer $token",
     };
+  }
+
+  static MediaType _resolveMediaType(String filename) {
+    final lower = filename.toLowerCase();
+    if (lower.endsWith(".png")) return MediaType("image", "png");
+    if (lower.endsWith(".webp")) return MediaType("image", "webp");
+    if (lower.endsWith(".gif")) return MediaType("image", "gif");
+    if (lower.endsWith(".pdf")) return MediaType("application", "pdf");
+    if (lower.endsWith(".m4a")) return MediaType("audio", "mp4");
+    if (lower.endsWith(".aac")) return MediaType("audio", "aac");
+    if (lower.endsWith(".mp3")) return MediaType("audio", "mpeg");
+    if (lower.endsWith(".wav")) return MediaType("audio", "wav");
+    if (lower.endsWith(".ogg")) return MediaType("audio", "ogg");
+    return MediaType("image", "jpeg");
+  }
+
+  static String authenticatedFileUrl(String rawUrl) {
+    if (rawUrl.isEmpty) return "";
+    final full = rawUrl.startsWith("http")
+        ? rawUrl
+        : "${SupabaseConfig.webBaseUrl}${rawUrl.startsWith("/") ? "" : "/"}$rawUrl";
+    final token = _accessToken;
+    if (token == null || token.isEmpty) return full;
+    final sep = full.contains("?") ? "&" : "?";
+    return "$full${sep}token=${Uri.encodeQueryComponent(token)}";
   }
 
   static Future<String> resolveLoginIdentifier({
@@ -90,7 +116,7 @@ class FlowGuardApiClient {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
-    return {"notifications": [], "unreadCount": 0};
+    return {"items": [], "unreadCount": 0};
   }
 
   static Future<void> markNotificationRead({
@@ -105,8 +131,8 @@ class FlowGuardApiClient {
           headers: _authHeaders(),
           body: jsonEncode({
             "role": role,
-            "action": markAll ? "mark_all_read" : "mark_read",
-            if (notificationId != null) "id": notificationId,
+            "action": markAll ? "read_all" : "read",
+            if (notificationId != null) "notificationId": notificationId,
           }),
         )
         .timeout(const Duration(seconds: 10));
@@ -133,6 +159,89 @@ class FlowGuardApiClient {
     return null;
   }
 
+  static Future<List<Map<String, double>>> fetchRoutePoints({
+    required String ticket,
+    required String viewerRole,
+  }) async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/tracking/route?ticket=${Uri.encodeComponent(ticket)}&as=$viewerRole",
+    );
+    final res = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 10));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final raw = data["points"] ?? data["routePoints"] ?? data["coordinates"];
+      if (raw is List) {
+        final pts = <Map<String, double>>[];
+        for (final p in raw) {
+          if (p is List && p.length >= 2) {
+            pts.add({
+              "lat": (p[0] as num).toDouble(),
+              "lng": (p[1] as num).toDouble(),
+            });
+          } else if (p is Map && p["lat"] != null && p["lng"] != null) {
+            pts.add({
+              "lat": (p["lat"] as num).toDouble(),
+              "lng": (p["lng"] as num).toDouble(),
+            });
+          }
+        }
+        return pts;
+      }
+    }
+    return const [];
+  }
+
+  static Future<void> createServiceRequest({
+    required String problemCategory,
+    required String propertyType,
+    required String priority,
+    required String address,
+    required String issueDescription,
+    List<String> photos = const [],
+    double? customerLat,
+    double? customerLng,
+  }) async {
+    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/mobile/requests");
+    final res = await http
+        .post(
+          uri,
+          headers: _authHeaders(),
+          body: jsonEncode({
+            "problemCategory": problemCategory,
+            "propertyType": propertyType,
+            "priority": priority,
+            "address": address,
+            "issueDescription": issueDescription,
+            "photos": photos,
+            if (customerLat != null) "customerLat": customerLat,
+            if (customerLng != null) "customerLng": customerLng,
+          }),
+        )
+        .timeout(const Duration(seconds: 18));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      final err = _extractError(res.body, "Could not submit plumbing request.");
+      throw Exception(err);
+    }
+  }
+
+  static Future<void> cancelServiceRequest({
+    required String ticketNumber,
+  }) async {
+    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/mobile/requests");
+    final res = await http
+        .patch(
+          uri,
+          headers: _authHeaders(),
+          body: jsonEncode({"ticketNumber": ticketNumber, "action": "cancel"}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_extractError(res.body, "Could not cancel request."));
+    }
+  }
+
   static Future<void> submitQuotation({
     required String ticketNumber,
     required double labourCharge,
@@ -157,7 +266,7 @@ class FlowGuardApiClient {
         )
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Quotation failed (${res.statusCode}): ${res.body}");
+      throw Exception(_extractError(res.body, "Quotation submission failed."));
     }
   }
 
@@ -174,7 +283,7 @@ class FlowGuardApiClient {
         )
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Decision failed (${res.statusCode}): ${res.body}");
+      throw Exception(_extractError(res.body, "Decision failed."));
     }
   }
 
@@ -197,7 +306,7 @@ class FlowGuardApiClient {
         )
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Job action failed (${res.statusCode}): ${res.body}");
+      throw Exception(_extractError(res.body, "Job action failed."));
     }
   }
 
@@ -221,7 +330,7 @@ class FlowGuardApiClient {
             if (accuracy != null) "accuracy": accuracy,
             if (heading != null) "heading": heading,
             if (speed != null) "speed": speed,
-            "timestamp": DateTime.now().toUtc().toIso8601String(),
+            "timestamp": DateTime.now().millisecondsSinceEpoch,
           }),
         )
         .timeout(const Duration(seconds: 10));
@@ -238,6 +347,21 @@ class FlowGuardApiClient {
           body: jsonEncode({"stopSharing": true}),
         )
         .timeout(const Duration(seconds: 10));
+  }
+
+  static Future<Map<String, dynamic>> fetchPaymentsAndBank({
+    required String role,
+  }) async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/mobile/payments?role=$role",
+    );
+    final res = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    return {"bankDetails": null, "payments": []};
   }
 
   static Future<void> recordPayment({
@@ -260,14 +384,34 @@ class FlowGuardApiClient {
         )
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Payment upload failed (${res.statusCode})");
+      throw Exception(_extractError(res.body, "Payment upload failed."));
     }
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchReviews({
+    required String role,
+  }) async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/mobile/reviews?role=$role",
+    );
+    final res = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final raw = data["reviews"];
+      if (raw is List) {
+        return raw.whereType<Map<String, dynamic>>().toList();
+      }
+    }
+    return const [];
   }
 
   static Future<void> submitReview({
     required String ticketNumber,
     required int rating,
     required String comment,
+    String? serviceCategory,
   }) async {
     final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/mobile/reviews");
     final res = await http
@@ -278,11 +422,12 @@ class FlowGuardApiClient {
             "ticketNumber": ticketNumber,
             "rating": rating,
             "comment": comment,
+            if (serviceCategory != null) "serviceCategory": serviceCategory,
           }),
         )
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Review failed (${res.statusCode})");
+      throw Exception(_extractError(res.body, "Review submission failed."));
     }
   }
 
@@ -307,7 +452,29 @@ class FlowGuardApiClient {
         .patch(uri, headers: _authHeaders(), body: jsonEncode(body))
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Profile update failed (${res.statusCode})");
+      throw Exception(_extractError(res.body, "Profile update failed."));
+    }
+  }
+
+  static Future<void> changePassword({
+    required String role,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/mobile/profile");
+    final res = await http
+        .post(
+          uri,
+          headers: _authHeaders(),
+          body: jsonEncode({
+            "role": role,
+            "currentPassword": currentPassword,
+            "newPassword": newPassword,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_extractError(res.body, "Password update failed."));
     }
   }
 
@@ -320,13 +487,18 @@ class FlowGuardApiClient {
       "${SupabaseConfig.webBaseUrl}/api/profile/avatar?role=$role",
     );
     final req = http.MultipartRequest("POST", uri);
-    final token = SupabaseConfig.client.auth.currentSession?.accessToken;
+    final token = _accessToken;
     if (token != null) {
       req.headers["Authorization"] = "Bearer $token";
     }
     req.fields["role"] = role;
     req.files.add(
-      http.MultipartFile.fromBytes("file", bytes, filename: filename),
+      http.MultipartFile.fromBytes(
+        "file",
+        bytes,
+        filename: filename,
+        contentType: _resolveMediaType(filename),
+      ),
     );
     final streamed = await req.send().timeout(const Duration(seconds: 20));
     final body = await streamed.stream.bytesToString();
@@ -334,25 +506,35 @@ class FlowGuardApiClient {
       final decoded = jsonDecode(body) as Map<String, dynamic>;
       return decoded["avatarUrl"]?.toString();
     }
-    throw Exception("Avatar upload failed (${streamed.statusCode})");
+    throw Exception(_extractError(body, "Avatar upload failed."));
   }
 
-  static Future<String?> uploadRequestPhoto({
+  static Future<String> uploadRequestPhoto({
     required List<int> bytes,
     required String filename,
   }) async {
     final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/request-photo");
     final req = http.MultipartRequest("POST", uri);
+    final token = _accessToken;
+    if (token != null) {
+      req.headers["Authorization"] = "Bearer $token";
+    }
     req.files.add(
-      http.MultipartFile.fromBytes("file", bytes, filename: filename),
+      http.MultipartFile.fromBytes(
+        "file",
+        bytes,
+        filename: filename,
+        contentType: _resolveMediaType(filename),
+      ),
     );
     final streamed = await req.send().timeout(const Duration(seconds: 20));
     final body = await streamed.stream.bytesToString();
     if (streamed.statusCode >= 200 && streamed.statusCode < 300) {
       final decoded = jsonDecode(body) as Map<String, dynamic>;
-      return decoded["url"]?.toString() ?? decoded["path"]?.toString();
+      final url = decoded["url"]?.toString() ?? decoded["path"]?.toString();
+      if (url != null && url.isNotEmpty) return url;
     }
-    return null;
+    throw Exception(_extractError(body, "File upload failed."));
   }
 
   static Future<Map<String, dynamic>?> fetchChatMessagesWithPresence({
@@ -391,7 +573,7 @@ class FlowGuardApiClient {
         )
         .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("Send message failed (${res.statusCode})");
+      throw Exception(_extractError(res.body, "Could not send message."));
     }
   }
 
@@ -409,7 +591,7 @@ class FlowGuardApiClient {
         .timeout(const Duration(seconds: 10));
   }
 
-  static Future<Map<String, dynamic>?> uploadChatAttachment({
+  static Future<Map<String, dynamic>> uploadChatAttachment({
     required List<int> bytes,
     required String filename,
     required String ticketNumber,
@@ -419,21 +601,44 @@ class FlowGuardApiClient {
       "${SupabaseConfig.webBaseUrl}/api/chat/upload?role=$role",
     );
     final req = http.MultipartRequest("POST", uri);
-    final token = SupabaseConfig.client.auth.currentSession?.accessToken;
+    final token = _accessToken;
     if (token != null) {
       req.headers["Authorization"] = "Bearer $token";
     }
     req.fields["ticketNumber"] = ticketNumber;
     req.fields["role"] = role;
     req.files.add(
-      http.MultipartFile.fromBytes("file", bytes, filename: filename),
+      http.MultipartFile.fromBytes(
+        "file",
+        bytes,
+        filename: filename,
+        contentType: _resolveMediaType(filename),
+      ),
     );
     final streamed = await req.send().timeout(const Duration(seconds: 20));
     final body = await streamed.stream.bytesToString();
     if (streamed.statusCode >= 200 && streamed.statusCode < 300) {
       final decoded = jsonDecode(body) as Map<String, dynamic>;
-      return decoded["attachment"] as Map<String, dynamic>?;
+      if (decoded["attachment"] is Map<String, dynamic>) {
+        return decoded["attachment"] as Map<String, dynamic>;
+      }
+      return {
+        "url": decoded["url"]?.toString() ?? "",
+        "name": decoded["name"]?.toString() ?? filename,
+        "size": decoded["size"] ?? bytes.length,
+        "mimeType": decoded["mimeType"]?.toString() ?? "",
+      };
     }
-    return null;
+    throw Exception(_extractError(body, "Attachment upload failed."));
+  }
+
+  static String _extractError(String rawBody, String fallback) {
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is Map && decoded["error"] != null) {
+        return decoded["error"].toString();
+      }
+    } catch (_) {}
+    return fallback;
   }
 }

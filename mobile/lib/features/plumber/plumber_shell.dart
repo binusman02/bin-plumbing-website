@@ -3,6 +3,8 @@ import "package:flutter/services.dart";
 import "package:geolocator/geolocator.dart";
 import "package:intl/intl.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
+import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/plumber/plumber_job_detail_page.dart";
 import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
@@ -51,20 +53,16 @@ class _PlumberShellState extends State<PlumberShell> {
     setState(() => _loading = true);
     try {
       final client = SupabaseConfig.client;
-      final plumberRows = await client
-          .from("plumbers")
-          .select(
-            "id, full_name, phone, address, avatar_url, bank_name, account_number, account_name, is_available, verification_status, rating",
-          )
-          .eq("auth_user_id", widget.user.id)
-          .limit(1);
+      final profileResp = await FlowGuardApiClient.fetchProfile(
+        role: "plumber",
+      );
+      final row = profileResp?["profile"] as Map<String, dynamic>?;
 
-      if (plumberRows.isNotEmpty) {
-        final row = plumberRows.first;
+      if (row != null) {
         _plumberId = row["id"]?.toString();
         _plumberName = row["full_name"]?.toString() ?? "Technician";
         _plumberPhone = row["phone"]?.toString();
-        _address = row["address"]?.toString();
+        _address = (row["address"] ?? row["residential_location"])?.toString();
         _avatarUrl = row["avatar_url"]?.toString();
         _bankName = row["bank_name"]?.toString();
         _accountNumber = row["account_number"]?.toString();
@@ -75,6 +73,29 @@ class _PlumberShellState extends State<PlumberShell> {
         final parsedRating = (row["rating"] as num?)?.toDouble();
         if (parsedRating != null && parsedRating > 0) {
           _rating = parsedRating;
+        }
+      } else {
+        final plumberRows = await client
+            .from("plumbers")
+            .select(
+              "id, full_name, phone, residential_location, avatar_url, is_available, verification_status, rating",
+            )
+            .eq("auth_user_id", widget.user.id)
+            .limit(1);
+        if (plumberRows.isNotEmpty) {
+          final fallback = plumberRows.first;
+          _plumberId = fallback["id"]?.toString();
+          _plumberName = fallback["full_name"]?.toString() ?? "Technician";
+          _plumberPhone = fallback["phone"]?.toString();
+          _address = fallback["residential_location"]?.toString();
+          _avatarUrl = fallback["avatar_url"]?.toString();
+          _isAvailable = fallback["is_available"] == true;
+          _verificationStatus =
+              fallback["verification_status"]?.toString() ?? "approved";
+          final parsedRating = (fallback["rating"] as num?)?.toDouble();
+          if (parsedRating != null && parsedRating > 0) {
+            _rating = parsedRating;
+          }
         }
       }
 
@@ -90,37 +111,48 @@ class _PlumberShellState extends State<PlumberShell> {
             .eq("assigned_plumber_id", _plumberId!)
             .order("created_at", ascending: false);
 
-        for (final row in rows) {
-          final item = ServiceRequestItem.fromJson(row);
+        final reqIds = <String>[];
+        for (final r in rows) {
+          if (r["deleted_at"] != null) continue;
+          final item = ServiceRequestItem.fromJson(r);
           jobList.add(item);
-          final history = row["history"];
-          tripMap[item.id] = _deriveTripState(
-            history is List ? history : const [],
-          );
+          reqIds.add(item.id);
         }
 
-        final quoteRows = await client
-            .from("quotations")
-            .select(
-              "ticket_number, total_amount, plumber_payable, customer_approval_status, created_at",
-            )
-            .eq("plumber_id", _plumberId!)
-            .order("created_at", ascending: false)
-            .limit(40);
+        if (reqIds.isNotEmpty) {
+          final histRows = await client
+              .from("request_history")
+              .select("request_id, action, created_at")
+              .inFilter("request_id", reqIds)
+              .order("created_at", ascending: true);
+          final grouped = <String, List<dynamic>>{};
+          for (final h in histRows) {
+            final rid = (h["request_id"] ?? "").toString();
+            grouped.putIfAbsent(rid, () => []).add(h);
+          }
+          for (final j in jobList) {
+            tripMap[j.id] = _deriveTripState(grouped[j.id] ?? const []);
+          }
+        }
 
-        for (final q in quoteRows) {
-          final payable = (q["plumber_payable"] as num?)?.toDouble() ??
-              (q["total_amount"] as num?)?.toDouble() ??
+        final payData = await FlowGuardApiClient.fetchPaymentsAndBank(
+          role: "plumber",
+        );
+        final rawPayments = payData["payments"] as List? ?? [];
+        for (final p in rawPayments) {
+          if (p is! Map<String, dynamic>) continue;
+          final payable = (p["plumber_payable"] as num?)?.toDouble() ??
+              (p["total_payment"] as num?)?.toDouble() ??
               0;
-          final approved = q["customer_approval_status"] == "approved";
-          if (approved) {
+          final verified = p["verification_status"] == "verified";
+          if (verified) {
             earningsTotal += payable;
           }
           ledger.add({
-            "ticket": (q["ticket_number"] ?? "").toString(),
+            "ticket": (p["ticket_number"] ?? "").toString(),
             "amount": payable,
-            "approved": approved,
-            "created_at": (q["created_at"] ?? "").toString(),
+            "approved": verified,
+            "created_at": (p["created_at"] ?? "").toString(),
           });
         }
       }
@@ -240,16 +272,22 @@ class _PlumberShellState extends State<PlumberShell> {
     String title = "${activeJob.ticketNumber} • ${activeJob.problemCategory}";
     String subtitle = activeJob.addressInKano;
 
-    if (activeJob.status == "new" || activeJob.status == "pending") {
+    if (activeJob.status == "new" ||
+        activeJob.status == "pending" ||
+        activeJob.status == "contacted") {
       label = "Review Assignment";
       subtitle = "New job assigned at ${activeJob.addressInKano}";
     } else if (tripState == "on_the_way") {
       label = "Arrived at Property";
       subtitle = "Live trip in progress to ${activeJob.addressInKano}";
-    } else if (activeJob.status == "scheduled" && tripState == "idle") {
+    } else if ((activeJob.status == "scheduled" ||
+            activeJob.status == "inspection_required") &&
+        tripState == "idle") {
       label = "Start Trip";
       subtitle = "Begin navigation & live GPS tracking to customer";
-    } else if (tripState == "arrived" && activeJob.status != "quoted") {
+    } else if (tripState == "arrived" &&
+        activeJob.status != "quoted" &&
+        activeJob.status != "awaiting_approval") {
       label = "Prepare Quotation";
       subtitle = "Arrived on site — submit itemised labour & materials";
     } else if (activeJob.status == "approved") {
@@ -258,10 +296,13 @@ class _PlumberShellState extends State<PlumberShell> {
     } else if (activeJob.status == "in_progress") {
       label = "Mark Work Complete";
       subtitle = "Upload completion photos & close repair";
-    } else if (activeJob.status == "quoted") {
+    } else if (activeJob.status == "quoted" ||
+        activeJob.status == "awaiting_approval" ||
+        activeJob.status == "quotation_submitted") {
       label = "View Submitted Quote";
       subtitle = "Waiting for customer approval";
-    } else if (activeJob.status == "work_completed") {
+    } else if (activeJob.status == "work_completed" ||
+        activeJob.status == "awaiting_final_payment") {
       label = "View Job Status";
       subtitle = "Awaiting payment verification";
     }
@@ -275,6 +316,10 @@ class _PlumberShellState extends State<PlumberShell> {
   }
 
   Future<void> _signOut() async {
+    final token = GoogleServicesBootstrap.fcmToken;
+    if (token != null) {
+      await FlowGuardApiClient.deactivateDeviceToken(token).catchError((_) {});
+    }
     await SupabaseConfig.client.auth.signOut();
   }
 
@@ -755,19 +800,11 @@ class _PlumberShellState extends State<PlumberShell> {
         location: _address ?? "Kano State, Nigeria",
         avatarUrl: _avatarUrl,
         isVerifiedTechnician: _verificationStatus == "approved",
+        rating: _rating,
         bankName: _bankName,
         accountNumber: _accountNumber,
         accountName: _accountName,
         onProfileUpdated: _loadPlumberData,
-        onFeedbackTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                "Current Technician Rating: ${_rating.toStringAsFixed(1)} ★",
-              ),
-            ),
-          );
-        },
         onSignOut: _signOut,
       ),
     ];

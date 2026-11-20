@@ -45,17 +45,11 @@ export async function POST(req: NextRequest) {
     const match = (plumbers || []).find(
       (p) => normalizeNigerianDigits(String(p.phone || "")) === normalized
     );
-    if (match?.email) {
-      return NextResponse.json({ email: String(match.email).toLowerCase() });
-    }
-    const { data: accounts } = await adminSupabase
-      .from("plumber_accounts")
-      .select("email, phone");
-    const accMatch = (accounts || []).find(
-      (a) => normalizeNigerianDigits(String(a.phone || "")) === normalized
-    );
-    if (accMatch?.email) {
-      return NextResponse.json({ email: String(accMatch.email).toLowerCase() });
+    if (match) {
+      const email = match.email
+        ? String(match.email).toLowerCase()
+        : `p_${normalized}@plumber.binplumbing.local`;
+      return NextResponse.json({ email });
     }
     return NextResponse.json({ error: "Invalid sign-in details." }, { status: 404 });
   }
@@ -67,8 +61,11 @@ export async function POST(req: NextRequest) {
   const custMatch = (customers || []).find(
     (c) => normalizeNigerianDigits(String(c.phone || "")) === normalized
   );
-  if (custMatch?.email) {
-    return NextResponse.json({ email: String(custMatch.email).toLowerCase() });
+  if (custMatch) {
+    const email = custMatch.email
+      ? String(custMatch.email).toLowerCase()
+      : `c_${normalized}@customer.binplumbing.local`;
+    return NextResponse.json({ email });
   }
 
   return NextResponse.json({ error: "Invalid sign-in details." }, { status: 404 });

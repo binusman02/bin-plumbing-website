@@ -296,27 +296,39 @@ export async function plumberHasActiveJob(plumberId: string): Promise<boolean> {
  */
 export async function plumberHasOpenTrip(plumberId: string): Promise<boolean> {
   const supabase = getServiceSupabase();
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("service_requests")
-    .select("status, history, deleted_at")
+    .select("id, ticket_number, status, deleted_at")
     .eq("assigned_plumber_id", plumberId);
-  if (error) {
-    const retry = await supabase
-      .from("service_requests")
-      .select("status, history")
-      .eq("assigned_plumber_id", plumberId);
-    return (retry.data || []).some(
-      (r) =>
-        isActiveJobStatus(String(r.status)) &&
-        deriveJobTripState(Array.isArray(r.history) ? r.history : []) === "on_the_way"
-    );
-  }
-  return (data || []).some(
-    (r) =>
-      !r.deleted_at &&
-      isActiveJobStatus(String(r.status)) &&
-      deriveJobTripState(Array.isArray(r.history) ? r.history : []) === "on_the_way"
+  const activeReqs = (data || []).filter(
+    (r) => !r.deleted_at && isActiveJobStatus(String(r.status))
   );
+  if (activeReqs.length === 0) return false;
+  const histMap = await loadRequestHistories(activeReqs.map((r) => String(r.id)));
+  return activeReqs.some(
+    (r) => deriveJobTripState(histMap.get(String(r.id)) || []) === "on_the_way"
+  );
+}
+
+async function loadRequestHistories(
+  requestIds: string[]
+): Promise<Map<string, { action?: string }[]>> {
+  const map = new Map<string, { action?: string }[]>();
+  if (requestIds.length === 0) return map;
+  const supabase = getServiceSupabase();
+  const { data } = await supabase
+    .from("request_history")
+    .select("request_id, action, created_at")
+    .in("request_id", requestIds)
+    .order("created_at", { ascending: true });
+  for (const row of data || []) {
+    const rid = String(row.request_id || "");
+    if (!rid) continue;
+    const list = map.get(rid) || [];
+    list.push({ action: row.action ? String(row.action) : undefined });
+    map.set(rid, list);
+  }
+  return map;
 }
 
 /**
@@ -528,7 +540,11 @@ export async function buildTrackingSnapshot(
       )
     );
     const plumberIds = [...new Set(trackable.map((r) => String(r.assigned_plumber_id)))];
-    const [plumbers, locs] = await Promise.all([loadPlumbers(plumberIds), loadLocationRows(plumberIds)]);
+    const [plumbers, locs, histMap] = await Promise.all([
+      loadPlumbers(plumberIds),
+      loadLocationRows(plumberIds),
+      loadRequestHistories(reqs.map((r) => String(r.id))),
+    ]);
 
     const jobs = reqs.map((r) => {
       const allowed = trackable.includes(r);
@@ -538,7 +554,7 @@ export async function buildTrackingSnapshot(
         const p = plumbers.get(pid);
         if (p) tracked = toTrackedPlumber(p, locs.get(pid), [String(r.ticket_number)], nowMs);
       }
-      return buildJob(r, tracked);
+      return buildJob({ ...r, history: histMap.get(String(r.id)) || [] }, tracked);
     });
     return { serverNow: nowMs, viewer: "customer", jobs };
   }
@@ -555,7 +571,11 @@ export async function buildTrackingSnapshot(
     if (ticket) q = q.eq("ticket_number", ticket);
     const { data } = await q;
     const reqs = (data || []).filter((r) => !r.deleted_at);
-    const [plumbers, locs] = await Promise.all([loadPlumbers([actor.id]), loadLocationRows([actor.id])]);
+    const [plumbers, locs, histMap] = await Promise.all([
+      loadPlumbers([actor.id]),
+      loadLocationRows([actor.id]),
+      loadRequestHistories(reqs.map((r) => String(r.id))),
+    ]);
     const me = plumbers.get(actor.id);
     const activeTickets = reqs
       .filter((r) => isActiveJobStatus(String(r.status)))
@@ -564,7 +584,12 @@ export async function buildTrackingSnapshot(
     return {
       serverNow: nowMs,
       viewer: "plumber",
-      jobs: reqs.map((r) => buildJob(r, isActiveJobStatus(String(r.status)) ? self : null)),
+      jobs: reqs.map((r) =>
+        buildJob(
+          { ...r, history: histMap.get(String(r.id)) || [] },
+          isActiveJobStatus(String(r.status)) ? self : null
+        )
+      ),
       plumbers: self ? [self] : [],
     };
   }
