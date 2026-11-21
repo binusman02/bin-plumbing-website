@@ -4,6 +4,7 @@ import "package:geolocator/geolocator.dart";
 import "package:intl/intl.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/app_state_badges.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/plumber/plumber_job_detail_page.dart";
@@ -870,26 +871,39 @@ class _PlumberShellState extends State<PlumberShell> {
           ),
         ],
       ),
-      body: pages[_tabIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabIndex,
-        onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: "Home"),
-          NavigationDestination(icon: Icon(Icons.work_outline), label: "Jobs"),
-          NavigationDestination(
-            icon: Icon(Icons.chat_outlined),
-            label: "Messages",
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.wallet_outlined),
-            label: "Earnings",
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            label: "Profile",
-          ),
-        ],
+      body: IndexedStack(index: _tabIndex, children: pages),
+      bottomNavigationBar: ValueListenableBuilder<int>(
+        valueListenable: AppStateBadges.unreadMessagesCount,
+        builder: (context, unreadMsgs, _) => NavigationBar(
+          selectedIndex: _tabIndex,
+          onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
+          destinations: [
+            const NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              label: "Home",
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.work_outline),
+              label: "Jobs",
+            ),
+            NavigationDestination(
+              icon: Badge(
+                isLabelVisible: unreadMsgs > 0,
+                label: Text(unreadMsgs > 9 ? "9+" : "$unreadMsgs"),
+                child: const Icon(Icons.chat_outlined),
+              ),
+              label: "Messages",
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.wallet_outlined),
+              label: "Earnings",
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              label: "Profile",
+            ),
+          ],
+        ),
       ),
     );
   }

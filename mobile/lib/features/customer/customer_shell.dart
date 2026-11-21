@@ -3,6 +3,7 @@ import "package:flutter/services.dart";
 import "package:image_picker/image_picker.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/app_state_badges.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/core/service_assets.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
@@ -367,29 +368,39 @@ class _CustomerShellState extends State<CustomerShell> {
           ),
         ],
       ),
-      body: pages[_tabIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabIndex,
-        onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: "Home"),
-          NavigationDestination(
-            icon: Icon(Icons.assignment_outlined),
-            label: "Requests",
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.chat_outlined),
-            label: "Messages",
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.credit_card_outlined),
-            label: "Payments",
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            label: "Profile",
-          ),
-        ],
+      body: IndexedStack(index: _tabIndex, children: pages),
+      bottomNavigationBar: ValueListenableBuilder<int>(
+        valueListenable: AppStateBadges.unreadMessagesCount,
+        builder: (context, unreadMsgs, _) => NavigationBar(
+          selectedIndex: _tabIndex,
+          onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
+          destinations: [
+            const NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              label: "Home",
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.assignment_outlined),
+              label: "Requests",
+            ),
+            NavigationDestination(
+              icon: Badge(
+                isLabelVisible: unreadMsgs > 0,
+                label: Text(unreadMsgs > 9 ? "9+" : "$unreadMsgs"),
+                child: const Icon(Icons.chat_outlined),
+              ),
+              label: "Messages",
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.credit_card_outlined),
+              label: "Payments",
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              label: "Profile",
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -429,7 +440,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
   @override
   void initState() {
     super.initState();
-    _spotlightController = PageController(viewportFraction: 0.88);
+    _spotlightController = PageController(viewportFraction: 0.90);
   }
 
   @override
@@ -572,9 +583,10 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              height: 186,
+              height: 196,
               child: PageView.builder(
                 controller: _spotlightController,
+                padEnds: false,
                 physics: const BouncingScrollPhysics(),
                 onPageChanged: (p) => setState(() => _spotlightPage = p),
                 itemCount: spotlight.length,
@@ -646,6 +658,13 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                                   ),
                                   const SizedBox(height: 10),
                                   ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      minimumSize: const Size(0, 40),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 8,
+                                      ),
+                                    ),
                                     onPressed: () =>
                                         widget.onSelectCategory(cat.title),
                                     child: const Text(
@@ -667,20 +686,42 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                spotlight.length,
-                (i) => Container(
-                  width: _spotlightPage == i ? 18 : 6,
-                  height: 6,
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  decoration: BoxDecoration(
-                    color: _spotlightPage == i
-                        ? FlowGuardTheme.navy
-                        : FlowGuardTheme.border,
-                    borderRadius: BorderRadius.circular(999),
+              children: [
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _spotlightPage > 0
+                      ? () => _spotlightController.previousPage(
+                            duration: const Duration(milliseconds: 260),
+                            curve: Curves.easeOut,
+                          )
+                      : null,
+                  icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                ),
+                ...List.generate(
+                  spotlight.length,
+                  (i) => Container(
+                    width: _spotlightPage == i ? 18 : 6,
+                    height: 6,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: _spotlightPage == i
+                          ? FlowGuardTheme.navy
+                          : FlowGuardTheme.border,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
                 ),
-              ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _spotlightPage < spotlight.length - 1
+                      ? () => _spotlightController.nextPage(
+                            duration: const Duration(milliseconds: 260),
+                            curve: Curves.easeOut,
+                          )
+                      : null,
+                  icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                ),
+              ],
             ),
           ],
           if (activeRequests.isNotEmpty) ...[
@@ -929,15 +970,42 @@ class _CustomerPaymentsTab extends StatefulWidget {
 
 class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
   bool _uploading = false;
+  String? _selectedTicket;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncDefaultTicket();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CustomerPaymentsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncDefaultTicket();
+  }
+
+  void _syncDefaultTicket() {
+    final valid = widget.requests.any((r) => r.ticketNumber == _selectedTicket);
+    if (!valid && widget.requests.isNotEmpty) {
+      _selectedTicket =
+          (widget.requests.where((r) => r.isActive).firstOrNull ??
+                  widget.requests.first)
+              .ticketNumber;
+    }
+  }
 
   Future<void> _uploadProof() async {
-    final activeReq =
+    final activeReq = widget.requests
+            .where((r) => r.ticketNumber == _selectedTicket)
+            .firstOrNull ??
         widget.requests.where((r) => r.isActive).firstOrNull ??
-            widget.requests.firstOrNull;
+        widget.requests.firstOrNull;
     if (activeReq == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Submit a plumbing request before uploading payment proof."),
+          content: Text(
+            "Submit a plumbing request before uploading payment proof.",
+          ),
         ),
       );
       return;
@@ -1076,6 +1144,28 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
         ),
 
         const SizedBox(height: 16),
+
+        if (widget.requests.isNotEmpty) ...[
+          DropdownButtonFormField<String>(
+            initialValue: _selectedTicket,
+            decoration: const InputDecoration(
+              labelText: "Select Request / Ticket for Payment",
+            ),
+            items: widget.requests
+                .map(
+                  (r) => DropdownMenuItem(
+                    value: r.ticketNumber,
+                    child: Text(
+                      "${r.ticketNumber} • ${r.problemCategory}",
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() => _selectedTicket = v),
+          ),
+          const SizedBox(height: 14),
+        ],
 
         // Single Box directly below card: "Upload Proof of Payment"
         InkWell(

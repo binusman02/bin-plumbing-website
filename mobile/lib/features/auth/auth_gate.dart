@@ -84,11 +84,14 @@ class _RoleValidatedPortalState extends State<_RoleValidatedPortal> {
       try {
         final rows = await SupabaseConfig.client
             .from("plumbers")
-            .select("verification_status")
+            .select("verification_status, deleted_at")
             .eq("auth_user_id", widget.user.id)
             .limit(1);
-        final status = rows.isNotEmpty
-            ? (rows.first["verification_status"] ?? "pending_review").toString()
+        final activeRow = rows.isNotEmpty && rows.first["deleted_at"] == null
+            ? rows.first
+            : null;
+        final status = activeRow != null
+            ? (activeRow["verification_status"] ?? "pending_review").toString()
             : "pending_review";
         if (status != "approved") {
           setState(() {

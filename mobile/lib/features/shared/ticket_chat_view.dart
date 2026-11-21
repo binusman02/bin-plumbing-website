@@ -4,26 +4,71 @@ import "package:flutter/material.dart";
 import "package:image_picker/image_picker.dart";
 import "package:path_provider/path_provider.dart";
 import "package:record/record.dart";
+import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/app_state_badges.dart";
+import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/voice_note_widgets.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
-class _ChatContactThread {
-  final String contactName;
-  final String subtitle;
+class ConversationSummary {
+  final String conversationId;
+  final String conversationType;
   final String ticketNumber;
-  final bool isSupport;
+  final String problemCategory;
+  final String peerName;
+  final String peerRole;
+  final String? peerAvatarUrl;
+  final String ownerName;
+  final String status;
+  final String lastMessage;
+  final String? lastMessageAt;
+  final String? lastSenderRole;
+  final String? lastReceiptStatus;
+  final int unreadCount;
+  final bool online;
 
-  const _ChatContactThread({
-    required this.contactName,
-    required this.subtitle,
+  const ConversationSummary({
+    required this.conversationId,
+    required this.conversationType,
     required this.ticketNumber,
-    this.isSupport = false,
+    required this.problemCategory,
+    required this.peerName,
+    required this.peerRole,
+    this.peerAvatarUrl,
+    required this.ownerName,
+    required this.status,
+    required this.lastMessage,
+    this.lastMessageAt,
+    this.lastSenderRole,
+    this.lastReceiptStatus,
+    required this.unreadCount,
+    required this.online,
   });
+
+  factory ConversationSummary.fromJson(Map<String, dynamic> json) {
+    return ConversationSummary(
+      conversationId: (json["conversationId"] ?? "").toString(),
+      conversationType: (json["conversationType"] ?? "customer_support").toString(),
+      ticketNumber: (json["ticketNumber"] ?? "").toString(),
+      problemCategory: (json["problemCategory"] ?? "Plumbing").toString(),
+      peerName: (json["peerName"] ?? "FlowGuard Support").toString(),
+      peerRole: (json["peerRole"] ?? "admin").toString(),
+      peerAvatarUrl: json["peerAvatarUrl"]?.toString(),
+      ownerName: (json["ownerName"] ?? "FlowGuard Support").toString(),
+      status: (json["status"] ?? "open").toString(),
+      lastMessage: (json["lastMessage"] ?? "").toString(),
+      lastMessageAt: json["lastMessageAt"]?.toString(),
+      lastSenderRole: json["lastSenderRole"]?.toString(),
+      lastReceiptStatus: json["lastReceiptStatus"]?.toString(),
+      unreadCount: (json["unreadCount"] as num?)?.toInt() ?? 0,
+      online: json["online"] == true,
+    );
+  }
 }
 
-/// WhatsApp-style Contacts / People Chat List (tap a person to open conversation).
+/// Dedicated WhatsApp-style Messages tab backed by owned conversations & Supabase Realtime.
 class TicketChatView extends StatefulWidget {
   final List<ServiceRequestItem> tickets;
   final String senderRole; // "customer" | "plumber"
@@ -44,93 +89,87 @@ class TicketChatView extends StatefulWidget {
 
 class _TicketChatViewState extends State<TicketChatView> {
   String _searchQuery = "";
-  final Map<String, Map<String, dynamic>> _lastMessageByTicket = {};
-  bool _peerOnline = false;
-  Timer? _pollTimer;
+  List<ConversationSummary> _conversations = [];
+  bool _loading = true;
+  String? _error;
+  RealtimeChannel? _rtChannel;
 
   @override
   void initState() {
     super.initState();
-    _refreshPreviews();
-    _pollTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => _refreshPreviews(),
-    );
+    _loadConversations();
+    _subscribeRealtime();
+  }
+
+  @override
+  void didUpdateWidget(covariant TicketChatView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tickets.length != widget.tickets.length) {
+      _loadConversations(quiet: true);
+    }
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _rtChannel?.unsubscribe();
     super.dispose();
   }
 
-  List<_ChatContactThread> _buildContactThreads() {
-    final threads = <_ChatContactThread>[];
-    if (widget.tickets.isEmpty) return threads;
-
-    // 1. Official FlowGuard Support / Dispatch contact (linked to latest request)
-    final primaryTicket = widget.tickets.first;
-    threads.add(
-      _ChatContactThread(
-        contactName: widget.senderRole == "customer"
-            ? "FlowGuard Support"
-            : "FlowGuard Dispatch",
-        subtitle:
-            "Official Support • ${primaryTicket.ticketNumber} (${primaryTicket.problemCategory})",
-        ticketNumber: primaryTicket.ticketNumber,
-        isSupport: true,
-      ),
-    );
-
-    // 2. Direct people contacts (Assigned Plumber for Customer, Assigned Customer for Plumber)
-    final seenNames = <String>{};
-    for (final t in widget.tickets) {
-      final personName = widget.senderRole == "customer"
-          ? (t.assignedTechnician != null && t.assignedTechnician!.isNotEmpty
-              ? t.assignedTechnician!
-              : "Assigned Technician (${t.ticketNumber})")
-          : (t.customerName != null && t.customerName!.isNotEmpty
-              ? t.customerName!
-              : "Customer (${t.ticketNumber})");
-      final key = "$personName-${t.ticketNumber}";
-      if (seenNames.add(key)) {
-        threads.add(
-          _ChatContactThread(
-            contactName: personName,
-            subtitle: "${t.problemCategory} • ${t.addressInKano}",
-            ticketNumber: t.ticketNumber,
-          ),
-        );
-      }
-    }
-    return threads;
+  void _subscribeRealtime() {
+    try {
+      _rtChannel = SupabaseConfig.client
+          .channel("mobile-chat-list-${widget.senderRole}-${widget.senderId}")
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: "public",
+            table: "messages",
+            callback: (_) => _loadConversations(quiet: true),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: "public",
+            table: "messages",
+            callback: (_) => _loadConversations(quiet: true),
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
-  Future<void> _refreshPreviews() async {
-    for (final t in widget.tickets.take(6)) {
-      try {
-        final data = await FlowGuardApiClient.fetchChatMessagesWithPresence(
-          ticketNumber: t.ticketNumber,
-          role: widget.senderRole,
-        );
-        if (data == null) continue;
-        final msgs = data["messages"] as List? ?? [];
-        final presence = data["presence"] as Map<String, dynamic>? ?? {};
-        final online = widget.senderRole == "customer"
-            ? (presence["adminOnline"] == true ||
-                presence["plumberOnline"] == true)
-            : (presence["adminOnline"] == true ||
-                presence["customerOnline"] == true);
-        if (mounted) {
-          setState(() {
-            _peerOnline = online;
-            if (msgs.isNotEmpty && msgs.last is Map<String, dynamic>) {
-              _lastMessageByTicket[t.ticketNumber] =
-                  msgs.last as Map<String, dynamic>;
-            }
-          });
-        }
-      } catch (_) {}
+  Future<void> _loadConversations({bool quiet = false}) async {
+    if (!quiet && _conversations.isEmpty && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final data = await FlowGuardApiClient.fetchConversations(
+        role: widget.senderRole,
+      );
+      final raw = data["conversations"] as List? ?? [];
+      final parsed = raw
+          .whereType<Map<String, dynamic>>()
+          .map(ConversationSummary.fromJson)
+          .toList();
+      final totalUnread = (data["totalUnread"] as num?)?.toInt() ?? 0;
+      AppStateBadges.unreadMessagesCount.value = totalUnread;
+
+      if (mounted) {
+        setState(() {
+          _conversations = parsed;
+          _loading = false;
+          _error = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          if (_conversations.isEmpty) {
+            _error = "Unable to load conversations. Pull down to retry.";
+          }
+        });
+      }
     }
   }
 
@@ -145,36 +184,23 @@ class _TicketChatViewState extends State<TicketChatView> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.tickets.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            "No active chats yet. Create or accept a plumbing request to message.",
-            textAlign: TextAlign.center,
-            style: TextStyle(color: FlowGuardTheme.mutedText),
-          ),
-        ),
-      );
-    }
-
-    final threads = _buildContactThreads().where((c) {
+    final filtered = _conversations.where((c) {
       if (_searchQuery.trim().isEmpty) return true;
       final q = _searchQuery.toLowerCase();
-      return c.contactName.toLowerCase().contains(q) ||
-          c.subtitle.toLowerCase().contains(q) ||
-          c.ticketNumber.toLowerCase().contains(q);
+      return c.peerName.toLowerCase().contains(q) ||
+          c.ticketNumber.toLowerCase().contains(q) ||
+          c.problemCategory.toLowerCase().contains(q) ||
+          c.lastMessage.toLowerCase().contains(q);
     }).toList();
 
     return Column(
       children: [
-        // WhatsApp-style search bar
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: TextField(
             onChanged: (v) => setState(() => _searchQuery = v),
             decoration: InputDecoration(
-              hintText: "Search people or chats...",
+              hintText: "Search conversations or ticket...",
               prefixIcon: const Icon(Icons.search_rounded),
               filled: true,
               fillColor: Colors.white,
@@ -191,153 +217,261 @@ class _TicketChatViewState extends State<TicketChatView> {
         ),
         Expanded(
           child: RefreshIndicator(
-            onRefresh: _refreshPreviews,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              itemCount: threads.length,
-              separatorBuilder: (_, __) => const Divider(
-                height: 1,
-                indent: 78,
-                endIndent: 16,
-              ),
-              itemBuilder: (context, idx) {
-                final item = threads[idx];
-                final lastMsg = _lastMessageByTicket[item.ticketNumber];
-                final previewText = lastMsg != null
-                    ? (lastMsg["message"]?.toString().isNotEmpty == true
-                        ? lastMsg["message"].toString()
-                        : "Attachment")
-                    : item.subtitle;
-                final timeLabel = _formatShortTime(
-                  (lastMsg?["createdAt"] ?? lastMsg?["created_at"])?.toString(),
-                );
-                final isMe = lastMsg?["senderRole"] == widget.senderRole ||
-                    lastMsg?["sender_role"] == widget.senderRole;
-                final receipt =
-                    (lastMsg?["receipt_status"] ?? lastMsg?["status"] ?? "sent")
-                        .toString();
-
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => WhatsAppConversationPage(
-                          contactName: item.contactName,
-                          subtitle: item.subtitle,
-                          ticketNumber: item.ticketNumber,
-                          senderRole: widget.senderRole,
-                          senderName: widget.senderName,
-                          isSupport: item.isSupport,
-                        ),
-                      ),
-                    );
-                    _refreshPreviews();
-                  },
-                  leading: Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 25,
-                        backgroundColor: item.isSupport
-                            ? FlowGuardTheme.navy
-                            : const Color(0xFFE2E8F0),
-                        child: item.isSupport
-                            ? ClipOval(
-                                child: Image.asset(
-                                  "assets/images/flowguard-icon.jpg",
-                                  width: 50,
-                                  height: 50,
-                                  fit: BoxFit.cover,
-                                ),
-                              )
-                            : Text(
-                                item.contactName.isNotEmpty
-                                    ? item.contactName[0].toUpperCase()
-                                    : "U",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 18,
-                                  color: FlowGuardTheme.navy,
-                                ),
+            onRefresh: () => _loadConversations(),
+            child: _loading && _conversations.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null && _conversations.isEmpty
+                    ? ListView(
+                        children: [
+                          const SizedBox(height: 80),
+                          Center(
+                            child: Text(
+                              _error!,
+                              style: const TextStyle(
+                                color: FlowGuardTheme.mutedText,
                               ),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 13,
-                          height: 13,
-                          decoration: BoxDecoration(
-                            color: _peerOnline
-                                ? const Color(0xFF22C55E)
-                                : const Color(0xFF94A3B8),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.contactName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            color: FlowGuardTheme.navy,
-                          ),
-                        ),
-                      ),
-                      if (timeLabel.isNotEmpty)
-                        Text(
-                          timeLabel,
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: FlowGuardTheme.mutedText,
-                          ),
-                        ),
-                    ],
-                  ),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Row(
-                      children: [
-                        if (lastMsg != null && isMe) ...[
-                          Icon(
-                            receipt == "sent"
-                                ? Icons.done_rounded
-                                : Icons.done_all_rounded,
-                            size: 15,
-                            color: receipt == "read"
-                                ? const Color(0xFF0284C7)
-                                : FlowGuardTheme.mutedText,
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            previewText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: FlowGuardTheme.mutedText,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
+                        ],
+                      )
+                    : filtered.isEmpty
+                        ? ListView(
+                            children: const [
+                              SizedBox(height: 80),
+                              Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 28),
+                                child: Text(
+                                  "No conversations yet. Submit or accept a plumbing request to chat with your technician or support.",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: FlowGuardTheme.mutedText,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, __) => const Divider(
+                              height: 1,
+                              indent: 78,
+                              endIndent: 16,
+                            ),
+                            itemBuilder: (context, idx) {
+                              final item = filtered[idx];
+                              final isSupport = item.peerRole == "admin";
+                              final timeLabel =
+                                  _formatShortTime(item.lastMessageAt);
+                              final isMe =
+                                  item.lastSenderRole == widget.senderRole;
+                              final hasUnread = item.unreadCount > 0;
+
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 6,
+                                ),
+                                onTap: () async {
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => WhatsAppConversationPage(
+                                        conversation: item,
+                                        senderRole: widget.senderRole,
+                                        senderName: widget.senderName,
+                                      ),
+                                    ),
+                                  );
+                                  _loadConversations(quiet: true);
+                                },
+                                leading: Stack(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 25,
+                                      backgroundColor: isSupport
+                                          ? FlowGuardTheme.navy
+                                          : const Color(0xFFE2E8F0),
+                                      child: isSupport
+                                          ? ClipOval(
+                                              child: Image.asset(
+                                                "assets/images/flowguard-icon.jpg",
+                                                width: 50,
+                                                height: 50,
+                                                fit: BoxFit.cover,
+                                              ),
+                                            )
+                                          : item.peerAvatarUrl != null &&
+                                                  item.peerAvatarUrl!.isNotEmpty
+                                              ? ClipOval(
+                                                  child: Image.network(
+                                                    FlowGuardApiClient
+                                                        .authenticatedFileUrl(
+                                                      item.peerAvatarUrl!,
+                                                    ),
+                                                    width: 50,
+                                                    height: 50,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder:
+                                                        (_, __, ___) => Text(
+                                                      item.peerName.isNotEmpty
+                                                          ? item.peerName[0]
+                                                              .toUpperCase()
+                                                          : "U",
+                                                      style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        fontSize: 18,
+                                                        color: FlowGuardTheme
+                                                            .navy,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )
+                                              : Text(
+                                                  item.peerName.isNotEmpty
+                                                      ? item.peerName[0]
+                                                          .toUpperCase()
+                                                      : "U",
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w800,
+                                                    fontSize: 18,
+                                                    color: FlowGuardTheme.navy,
+                                                  ),
+                                                ),
+                                    ),
+                                    Positioned(
+                                      bottom: 0,
+                                      right: 0,
+                                      child: Container(
+                                        width: 13,
+                                        height: 13,
+                                        decoration: BoxDecoration(
+                                          color: item.online
+                                              ? const Color(0xFF22C55E)
+                                              : const Color(0xFF94A3B8),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        item.peerName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontWeight: hasUnread
+                                              ? FontWeight.w900
+                                              : FontWeight.w800,
+                                          fontSize: 15,
+                                          color: FlowGuardTheme.navy,
+                                        ),
+                                      ),
+                                    ),
+                                    if (timeLabel.isNotEmpty)
+                                      Text(
+                                        timeLabel,
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: hasUnread
+                                              ? FontWeight.w800
+                                              : FontWeight.w500,
+                                          color: hasUnread
+                                              ? const Color(0xFF059669)
+                                              : FlowGuardTheme.mutedText,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                subtitle: Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "${item.ticketNumber} • ${item.problemCategory}",
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: FlowGuardTheme.navy,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Row(
+                                        children: [
+                                          if (isMe &&
+                                              item.lastReceiptStatus !=
+                                                  null) ...[
+                                            Icon(
+                                              item.lastReceiptStatus == "sent"
+                                                  ? Icons.done_rounded
+                                                  : Icons.done_all_rounded,
+                                              size: 15,
+                                              color: item.lastReceiptStatus ==
+                                                      "read"
+                                                  ? const Color(0xFF0284C7)
+                                                  : FlowGuardTheme.mutedText,
+                                            ),
+                                            const SizedBox(width: 4),
+                                          ],
+                                          Expanded(
+                                            child: Text(
+                                              item.lastMessage,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: hasUnread
+                                                    ? FontWeight.w700
+                                                    : FontWeight.w400,
+                                                color: hasUnread
+                                                    ? FlowGuardTheme.navy
+                                                    : FlowGuardTheme.mutedText,
+                                              ),
+                                            ),
+                                          ),
+                                          if (hasUnread)
+                                            Container(
+                                              margin: const EdgeInsets.only(
+                                                left: 8,
+                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF10B981),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                "${item.unreadCount}",
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
           ),
         ),
       ],
@@ -345,23 +479,17 @@ class _TicketChatViewState extends State<TicketChatView> {
   }
 }
 
-/// Full-screen WhatsApp conversation page with Back button, photos, and Voice Note recording.
+/// Real-time WhatsApp conversation screen with optimistic sending, failure retry, voice notes & attachments.
 class WhatsAppConversationPage extends StatefulWidget {
-  final String contactName;
-  final String subtitle;
-  final String ticketNumber;
+  final ConversationSummary conversation;
   final String senderRole;
   final String senderName;
-  final bool isSupport;
 
   const WhatsAppConversationPage({
     super.key,
-    required this.contactName,
-    required this.subtitle,
-    required this.ticketNumber,
+    required this.conversation,
     required this.senderRole,
     required this.senderName,
-    this.isSupport = false,
   });
 
   @override
@@ -373,19 +501,20 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   List<Map<String, dynamic>> _messages = [];
   bool _loading = true;
   bool _sending = false;
-  bool _peerOnline = false;
+  late bool _peerOnline;
   bool _hasText = false;
   bool _recordingVoice = false;
   int _recordSeconds = 0;
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioRecorder _voiceRecorder = AudioRecorder();
-  Timer? _pollTimer;
+  RealtimeChannel? _rtChannel;
   Timer? _recordTimer;
 
   @override
   void initState() {
     super.initState();
+    _peerOnline = widget.conversation.online;
     _inputController.addListener(() {
       final next = _inputController.text.trim().isNotEmpty;
       if (next != _hasText && mounted) {
@@ -393,15 +522,12 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       }
     });
     _loadMessages();
-    _pollTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _loadMessages(quiet: true),
-    );
+    _subscribeRealtime();
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _rtChannel?.unsubscribe();
     _recordTimer?.cancel();
     _voiceRecorder.dispose();
     _inputController.dispose();
@@ -409,11 +535,61 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     super.dispose();
   }
 
+  void _subscribeRealtime() {
+    try {
+      _rtChannel = SupabaseConfig.client
+          .channel(
+            "conv-${widget.conversation.ticketNumber}-${widget.conversation.conversationType}",
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: "public",
+            table: "messages",
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: "ticket_number",
+              value: widget.conversation.ticketNumber,
+            ),
+            callback: (_) => _loadMessages(quiet: true),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: "public",
+            table: "messages",
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: "ticket_number",
+              value: widget.conversation.ticketNumber,
+            ),
+            callback: (_) => _loadMessages(quiet: true),
+          )
+          .subscribe();
+    } catch (_) {}
+  }
+
+  List<Map<String, dynamic>> _filterForConversation(
+    List<Map<String, dynamic>> all,
+  ) {
+    final isDirect =
+        widget.conversation.conversationType == "customer_plumber";
+    return all.where((m) {
+      final s = (m["senderRole"] ?? m["sender_role"] ?? "").toString();
+      final r = (m["recipientRole"] ?? m["recipient_role"] ?? "").toString();
+      if (isDirect) {
+        return (s == "customer" && r == "plumber") ||
+            (s == "plumber" && r == "customer");
+      }
+      return s == "admin" || r == "admin" || (s == widget.senderRole && r != "plumber" && r != "customer");
+    }).toList();
+  }
+
   Future<void> _loadMessages({bool quiet = false}) async {
-    if (!quiet) setState(() => _loading = true);
+    if (!quiet && _messages.isEmpty && mounted) {
+      setState(() => _loading = true);
+    }
     try {
       final data = await FlowGuardApiClient.fetchChatMessagesWithPresence(
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
       if (data == null) {
@@ -421,22 +597,29 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         return;
       }
       final rawMsgs = data["messages"] as List? ?? [];
+      final serverList = _filterForConversation(
+        rawMsgs.whereType<Map<String, dynamic>>().toList(),
+      );
+      final failedLocals = _messages
+          .where((m) => m["_localState"] == "failed")
+          .toList();
+
       final presence = data["presence"] as Map<String, dynamic>? ?? {};
-      final otherOnline = widget.senderRole == "customer"
-          ? (presence["adminOnline"] == true ||
-              presence["plumberOnline"] == true)
-          : (presence["adminOnline"] == true ||
-              presence["customerOnline"] == true);
+      final otherOnline = widget.conversation.peerRole == "admin"
+          ? (presence["adminOnline"] == true)
+          : widget.senderRole == "customer"
+              ? (presence["plumberOnline"] == true)
+              : (presence["customerOnline"] == true);
 
       if (mounted) {
         setState(() {
-          _messages = rawMsgs.whereType<Map<String, dynamic>>().toList();
+          _messages = [...serverList, ...failedLocals];
           _peerOnline = otherOnline;
           _loading = false;
         });
       }
       await FlowGuardApiClient.markChatRead(
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
     } catch (_) {
@@ -444,40 +627,62 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     }
   }
 
-  Future<void> _sendText() async {
-    final text = _inputController.text.trim();
+  Future<void> _sendText({String? retryText, String? tempId}) async {
+    final text = (retryText ?? _inputController.text).trim();
     if (text.isEmpty) return;
 
-    // Optimistic append for instant WhatsApp feel
-    final optimistic = <String, dynamic>{
-      "senderRole": widget.senderRole,
-      "senderName": widget.senderName,
-      "message": text,
-      "createdAt": DateTime.now().toUtc().toIso8601String(),
-      "receipt_status": "sent",
-    };
+    final localId = tempId ?? "temp-${DateTime.now().millisecondsSinceEpoch}";
+    if (tempId == null) {
+      _inputController.clear();
+    }
+
     setState(() {
-      _messages = [..._messages, optimistic];
-      _sending = true;
+      _messages = [
+        ..._messages.where((m) => m["_localId"] != localId),
+        {
+          "_localId": localId,
+          "_localState": "sending",
+          "senderRole": widget.senderRole,
+          "senderName": widget.senderName,
+          "message": text,
+          "createdAt": DateTime.now().toUtc().toIso8601String(),
+          "receipt_status": "sending",
+        },
+      ];
     });
-    _inputController.clear();
     _scrollToBottom();
 
     try {
       await FlowGuardApiClient.sendChatMessage(
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         message: text,
         actorRole: widget.senderRole,
+        recipientRole: widget.conversation.peerRole,
       );
-      await _loadMessages(quiet: true);
-    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Could not send message: $e")),
-        );
+        setState(() {
+          _messages = _messages.where((m) => m["_localId"] != localId).toList();
+        });
       }
-    } finally {
-      if (mounted) setState(() => _sending = false);
+      await _loadMessages(quiet: true);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _messages = _messages.map((m) {
+            if (m["_localId"] == localId) {
+              return {
+                ...m,
+                "_localState": "failed",
+                "receipt_status": "failed",
+              };
+            }
+            return m;
+          }).toList();
+        });
+        if (retryText == null && _inputController.text.isEmpty) {
+          _inputController.text = text;
+        }
+      }
     }
   }
 
@@ -495,13 +700,14 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       final attachment = await FlowGuardApiClient.uploadChatAttachment(
         bytes: bytes,
         filename: picked.name,
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
       await FlowGuardApiClient.sendChatMessage(
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         message: "Photo",
         actorRole: widget.senderRole,
+        recipientRole: widget.conversation.peerRole,
         attachment: attachment,
       );
       await _loadMessages(quiet: true);
@@ -570,13 +776,14 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       final attachment = await FlowGuardApiClient.uploadChatAttachment(
         bytes: bytes,
         filename: filename,
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
       await FlowGuardApiClient.sendChatMessage(
-        ticketNumber: widget.ticketNumber,
+        ticketNumber: widget.conversation.ticketNumber,
         message: "Voice Note (${_recordSeconds}s)",
         actorRole: widget.senderRole,
+        recipientRole: widget.conversation.peerRole,
         attachment: attachment,
       );
       await _loadMessages(quiet: true);
@@ -613,6 +820,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isSupport = widget.conversation.peerRole == "admin";
     return Scaffold(
       appBar: AppBar(
         backgroundColor: FlowGuardTheme.navy,
@@ -623,7 +831,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
             CircleAvatar(
               radius: 18,
               backgroundColor: FlowGuardTheme.gold,
-              child: widget.isSupport
+              child: isSupport
                   ? ClipOval(
                       child: Image.asset(
                         "assets/images/flowguard-icon.jpg",
@@ -633,8 +841,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                       ),
                     )
                   : Text(
-                      widget.contactName.isNotEmpty
-                          ? widget.contactName[0].toUpperCase()
+                      widget.conversation.peerName.isNotEmpty
+                          ? widget.conversation.peerName[0].toUpperCase()
                           : "U",
                       style: const TextStyle(
                         fontWeight: FontWeight.w900,
@@ -648,7 +856,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    widget.contactName,
+                    widget.conversation.peerName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -658,9 +866,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                     ),
                   ),
                   Text(
-                    _peerOnline
-                        ? "Online • ${widget.ticketNumber}"
-                        : widget.subtitle,
+                    "${_peerOnline ? "Online" : "Offline"} • ${widget.conversation.ticketNumber} • Owner: ${widget.conversation.ownerName}",
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -707,6 +913,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                     msg["status"] ??
                                     "sent")
                                 .toString();
+                            final isFailed = status == "failed";
+                            final isSending = status == "sending";
                             final createdAt = (msg["createdAt"] ??
                                     msg["created_at"] ??
                                     "")
@@ -740,9 +948,11 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                       MediaQuery.of(context).size.width * 0.78,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: isMe
-                                      ? const Color(0xFFD9FDD3)
-                                      : Colors.white,
+                                  color: isFailed
+                                      ? const Color(0xFFFEE2E2)
+                                      : isMe
+                                          ? const Color(0xFFD9FDD3)
+                                          : Colors.white,
                                   borderRadius: BorderRadius.only(
                                     topLeft: const Radius.circular(14),
                                     topRight: const Radius.circular(14),
@@ -807,23 +1017,50 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                       mainAxisAlignment: MainAxisAlignment.end,
                                       children: [
                                         Text(
-                                          _formatTime(createdAt),
-                                          style: const TextStyle(
+                                          isFailed
+                                              ? "Not sent"
+                                              : _formatTime(createdAt),
+                                          style: TextStyle(
                                             fontSize: 10,
-                                            color: Color(0xFF667781),
+                                            color: isFailed
+                                                ? const Color(0xFFB91C1C)
+                                                : const Color(0xFF667781),
                                           ),
                                         ),
                                         if (isMe) ...[
                                           const SizedBox(width: 4),
-                                          Icon(
-                                            status == "sent"
-                                                ? Icons.done_rounded
-                                                : Icons.done_all_rounded,
-                                            size: 14,
-                                            color: status == "read"
-                                                ? const Color(0xFF0284C7)
-                                                : const Color(0xFF667781),
-                                          ),
+                                          if (isFailed)
+                                            InkWell(
+                                              onTap: () => _sendText(
+                                                retryText: text,
+                                                tempId: msg["_localId"]
+                                                    ?.toString(),
+                                              ),
+                                              child: const Text(
+                                                "Tap to Retry",
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: Color(0xFFB91C1C),
+                                                ),
+                                              ),
+                                            )
+                                          else if (isSending)
+                                            const Icon(
+                                              Icons.schedule_rounded,
+                                              size: 13,
+                                              color: Color(0xFF667781),
+                                            )
+                                          else
+                                            Icon(
+                                              status == "sent"
+                                                  ? Icons.done_rounded
+                                                  : Icons.done_all_rounded,
+                                              size: 14,
+                                              color: status == "read"
+                                                  ? const Color(0xFF0284C7)
+                                                  : const Color(0xFF667781),
+                                            ),
                                         ],
                                       ],
                                     ),
@@ -835,8 +1072,6 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                         ),
             ),
           ),
-
-          // WhatsApp composer bar with Photo + Voice Note recording
           Container(
             color: const Color(0xFFF0F2F5),
             padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
@@ -884,9 +1119,18 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                 : Row(
                     children: [
                       IconButton(
+                        tooltip: "Send photo",
                         onPressed: _sending ? null : _sendPhoto,
                         icon: const Icon(
                           Icons.camera_alt_outlined,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: "Record voice note",
+                        onPressed: _sending ? null : _startVoiceRecording,
+                        icon: const Icon(
+                          Icons.mic_none_rounded,
                           color: FlowGuardTheme.navy,
                         ),
                       ),
@@ -896,7 +1140,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _sendText(),
                           decoration: InputDecoration(
-                            hintText: "Message or tap mic...",
+                            hintText: "Type a message...",
                             filled: true,
                             fillColor: Colors.white,
                             contentPadding: const EdgeInsets.symmetric(
@@ -915,9 +1159,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                         radius: 22,
                         backgroundColor: FlowGuardTheme.navy,
                         child: IconButton(
-                          onPressed: _sending
-                              ? null
-                              : (_hasText ? _sendText : _startVoiceRecording),
+                          tooltip: "Send message",
+                          onPressed:
+                              (_sending || !_hasText) ? null : () => _sendText(),
                           icon: _sending
                               ? const SizedBox(
                                   width: 16,
@@ -927,10 +1171,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                     color: Colors.white,
                                   ),
                                 )
-                              : Icon(
-                                  _hasText
-                                      ? Icons.send_rounded
-                                      : Icons.mic_rounded,
+                              : const Icon(
+                                  Icons.send_rounded,
                                   color: Colors.white,
                                   size: 19,
                                 ),

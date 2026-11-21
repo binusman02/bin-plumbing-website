@@ -537,6 +537,21 @@ class FlowGuardApiClient {
     throw Exception(_extractError(body, "File upload failed."));
   }
 
+  static Future<Map<String, dynamic>> fetchConversations({
+    required String role,
+  }) async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/mobile/conversations?role=$role",
+    );
+    final res = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    return {"conversations": [], "totalUnread": 0};
+  }
+
   static Future<Map<String, dynamic>?> fetchChatMessagesWithPresence({
     required String ticketNumber,
     required String role,
@@ -557,6 +572,7 @@ class FlowGuardApiClient {
     required String ticketNumber,
     required String message,
     required String actorRole,
+    String? recipientRole,
     Map<String, dynamic>? attachment,
   }) async {
     final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/chat/message");
@@ -568,6 +584,7 @@ class FlowGuardApiClient {
             "ticketNumber": ticketNumber,
             "message": message,
             "actorRole": actorRole,
+            if (recipientRole != null) "recipientRole": recipientRole,
             if (attachment != null) "attachment": attachment,
           }),
         )

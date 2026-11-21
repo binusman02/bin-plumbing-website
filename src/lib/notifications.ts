@@ -259,23 +259,33 @@ export async function listNotificationsForRecipient(params: {
     const limit = Math.min(Math.max(params.limit || 30, 1), 100);
     const offset = Math.max(params.offset || 0, 0);
 
+    let listQuery = supabase
+      .from("notifications")
+      .select("*")
+      .eq("recipient_role", params.recipientRole)
+      .in("recipient_id", targetIds)
+      .is("deleted_at", null);
+
+    let countQuery = supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("recipient_role", params.recipientRole)
+      .in("recipient_id", targetIds)
+      .is("read_at", null)
+      .is("archived_at", null)
+      .is("deleted_at", null);
+
+    // Separate Messages from Notifications: chat messages never appear in Customer/Plumber bell centre
+    if (params.recipientRole !== "admin") {
+      listQuery = listQuery.neq("type", "new_message");
+      countQuery = countQuery.neq("type", "new_message");
+    }
+
     const [listRes, countRes] = await Promise.all([
-      supabase
-        .from("notifications")
-        .select("*")
-        .eq("recipient_role", params.recipientRole)
-        .in("recipient_id", targetIds)
-        .is("deleted_at", null)
+      listQuery
         .order("created_at", { ascending: false })
         .range(offset, offset + limit),
-      supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("recipient_role", params.recipientRole)
-        .in("recipient_id", targetIds)
-        .is("read_at", null)
-        .is("archived_at", null)
-        .is("deleted_at", null),
+      countQuery,
     ]);
 
     if (listRes.error || !listRes.data) {

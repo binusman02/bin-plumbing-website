@@ -2,6 +2,7 @@ import "dart:async";
 import "package:firebase_messaging/firebase_messaging.dart";
 import "package:flutter/material.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/app_state_badges.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -30,11 +31,15 @@ class _NotificationsButtonState extends State<NotificationsButton> {
     super.initState();
     _refreshCount();
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 15),
+      const Duration(seconds: 45),
       (_) => _refreshCount(),
     );
     if (GoogleServicesBootstrap.firebaseReady) {
       _fcmSub = FirebaseMessaging.onMessage.listen((msg) {
+        final type = (msg.data["type"] ?? "").toString();
+        if (type == "new_message") {
+          return;
+        }
         _refreshCount();
         final title = msg.notification?.title;
         final body = msg.notification?.body;
@@ -68,8 +73,10 @@ class _NotificationsButtonState extends State<NotificationsButton> {
         role: widget.role,
         limit: 20,
       );
+      final count = (data["unreadCount"] as num?)?.toInt() ?? 0;
+      AppStateBadges.unreadNotificationsCount.value = count;
       if (mounted) {
-        setState(() => _unreadCount = (data["unreadCount"] as num?)?.toInt() ?? 0);
+        setState(() => _unreadCount = count);
       }
     } catch (_) {}
   }

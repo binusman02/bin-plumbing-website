@@ -2,6 +2,8 @@ import "package:firebase_core/firebase_core.dart";
 import "package:firebase_messaging/firebase_messaging.dart";
 import "package:google_sign_in/google_sign_in.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
+import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/app_flavor.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 
 class GoogleServicesBootstrap {
@@ -26,6 +28,16 @@ class GoogleServicesBootstrap {
         sound: true,
       );
       fcmToken = await messaging.getToken();
+      messaging.onTokenRefresh.listen((newToken) {
+        fcmToken = newToken;
+        if (SupabaseConfig.client.auth.currentSession != null) {
+          FlowGuardApiClient.registerDeviceToken(
+            fcmToken: newToken,
+            appFlavor:
+                AppFlavorConfig.isTechnician ? "technician" : "customer",
+          ).catchError((_) {});
+        }
+      });
     } catch (_) {
       firebaseReady = false;
     }
