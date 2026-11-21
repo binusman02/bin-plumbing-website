@@ -1,7 +1,9 @@
+import "package:flutter/foundation.dart";
+import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
-import "package:flutter_map/flutter_map.dart";
-import "package:geolocator/geolocator.dart";
+import "package:geolocator/geolocator.dart" as geo;
 import "package:latlong2/latlong.dart";
+import "package:mapbox_maps_flutter/mapbox_maps_flutter.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
 class FlowGuardGoogleMap extends StatefulWidget {
@@ -16,6 +18,13 @@ class FlowGuardGoogleMap extends StatefulWidget {
   final bool allowFullscreen;
 
   static const LatLng _kanoCenter = LatLng(12.0022, 8.5920);
+  static const String _mapboxAccessToken = String.fromEnvironment(
+    "MAPBOX_ACCESS_TOKEN",
+    defaultValue: "",
+  );
+  static const String _streetStyleUri = "mapbox://styles/mapbox/streets-v12";
+  static const String _satelliteStyleUri =
+      "mapbox://styles/mapbox/satellite-streets-v12";
 
   const FlowGuardGoogleMap({
     super.key,
@@ -35,10 +44,18 @@ class FlowGuardGoogleMap extends StatefulWidget {
 }
 
 class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
-  final MapController _mapController = MapController();
+  MapboxMap? _mapboxMap;
+  CircleAnnotationManager? _circleManager;
+  PolylineAnnotationManager? _polylineManager;
   LatLng? _myLocation;
   bool _locatingMe = false;
   bool _satellite = false;
+
+  @override
+  void initState() {
+    super.initState();
+    MapboxOptions.setAccessToken(FlowGuardGoogleMap._mapboxAccessToken);
+  }
 
   LatLng get _target {
     if (widget.plumberLat != null && widget.plumberLng != null) {
@@ -53,34 +70,155 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
     return FlowGuardGoogleMap._kanoCenter;
   }
 
+  double get _targetZoom =>
+      (widget.customerLat != null || widget.plumberLat != null) ? 15.0 : 12.5;
+
   @override
   void didUpdateWidget(covariant FlowGuardGoogleMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final changed = oldWidget.customerLat != widget.customerLat ||
+    final coordsChanged = oldWidget.customerLat != widget.customerLat ||
         oldWidget.customerLng != widget.customerLng ||
         oldWidget.plumberLat != widget.plumberLat ||
         oldWidget.plumberLng != widget.plumberLng;
-    if (changed) {
-      try {
-        _mapController.move(
-          _target,
-          (widget.customerLat != null || widget.plumberLat != null)
-              ? 15.0
-              : 12.5,
-        );
-      } catch (_) {}
+    final routeChanged = oldWidget.routePoints.length != widget.routePoints.length;
+
+    if (coordsChanged) {
+      _moveCamera(_target, _targetZoom);
     }
+    if (coordsChanged || routeChanged) {
+      _syncAnnotations();
+    }
+  }
+
+  Future<void> _moveCamera(LatLng target, double zoom) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    try {
+      await map.flyTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(target.longitude, target.latitude),
+          ),
+          zoom: zoom,
+        ),
+        MapAnimationOptions(duration: 450),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _onMapCreated(MapboxMap mapboxMap) async {
+    _mapboxMap = mapboxMap;
+    _circleManager = await mapboxMap.annotations.createCircleAnnotationManager();
+    _polylineManager =
+        await mapboxMap.annotations.createPolylineAnnotationManager();
+    if (widget.onPickLocation != null) {
+      mapboxMap.addInteraction(
+        TapInteraction.onMap((ctx) {
+          final coords = ctx.point.coordinates;
+          widget.onPickLocation!(
+            coords.lat.toDouble(),
+            coords.lng.toDouble(),
+          );
+        }),
+      );
+    }
+    await _syncAnnotations();
+  }
+
+  Future<void> _syncAnnotations() async {
+    final circles = _circleManager;
+    final lines = _polylineManager;
+    if (circles == null || lines == null) return;
+
+    try {
+      await circles.deleteAll();
+      await lines.deleteAll();
+
+      if (widget.routePoints.length >= 2) {
+        await lines.create(
+          PolylineAnnotationOptions(
+            geometry: LineString(
+              coordinates: widget.routePoints
+                  .map((p) => Position(p.longitude, p.latitude))
+                  .toList(),
+            ),
+            lineColor: FlowGuardTheme.navy.toARGB32(),
+            lineWidth: 5.0,
+          ),
+        );
+      }
+
+      if (widget.customerLat != null && widget.customerLng != null) {
+        await circles.create(
+          CircleAnnotationOptions(
+            geometry: Point(
+              coordinates: Position(widget.customerLng!, widget.customerLat!),
+            ),
+            circleColor: FlowGuardTheme.navy.toARGB32(),
+            circleRadius: 10.0,
+            circleStrokeColor: Colors.white.toARGB32(),
+            circleStrokeWidth: 3.0,
+          ),
+        );
+      }
+
+      if (widget.plumberLat != null && widget.plumberLng != null) {
+        await circles.create(
+          CircleAnnotationOptions(
+            geometry: Point(
+              coordinates: Position(widget.plumberLng!, widget.plumberLat!),
+            ),
+            circleColor: FlowGuardTheme.gold.toARGB32(),
+            circleRadius: 11.0,
+            circleStrokeColor: FlowGuardTheme.navy.toARGB32(),
+            circleStrokeWidth: 3.0,
+          ),
+        );
+      }
+
+      if (_myLocation != null &&
+          widget.customerLat == null &&
+          widget.plumberLat == null) {
+        await circles.create(
+          CircleAnnotationOptions(
+            geometry: Point(
+              coordinates: Position(
+                _myLocation!.longitude,
+                _myLocation!.latitude,
+              ),
+            ),
+            circleColor: const Color(0xFF2563EB).toARGB32(),
+            circleRadius: 9.0,
+            circleStrokeColor: Colors.white.toARGB32(),
+            circleStrokeWidth: 2.5,
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleStyle() async {
+    final next = !_satellite;
+    setState(() => _satellite = next);
+    try {
+      await _mapboxMap?.loadStyleURI(
+        next
+            ? FlowGuardGoogleMap._satelliteStyleUri
+            : FlowGuardGoogleMap._streetStyleUri,
+      );
+      await _syncAnnotations();
+    } catch (_) {}
   }
 
   Future<void> _centerOnMyLocation() async {
     setState(() => _locatingMe = true);
     try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
+      var perm = await geo.Geolocator.checkPermission();
+      if (perm == geo.LocationPermission.denied) {
+        perm = await geo.Geolocator.requestPermission();
       }
-      if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) {
+      if (perm == geo.LocationPermission.denied ||
+          perm == geo.LocationPermission.deniedForever) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Location permission is required.")),
@@ -88,25 +226,24 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         }
         return;
       }
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
+      final pos = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.high,
         ),
       );
       final point = LatLng(pos.latitude, pos.longitude);
       if (mounted) {
         setState(() => _myLocation = point);
       }
-      _mapController.move(point, 15.5);
+      await _moveCamera(point, 15.5);
+      await _syncAnnotations();
       if (widget.onPickLocation != null) {
-        widget.onPickLocation!(point.latitude, point.longitude);
+        widget.onPickLocation!(pos.latitude, pos.longitude);
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Turn on device GPS to show current location."),
-          ),
+          const SnackBar(content: Text("Unable to fetch current location.")),
         );
       }
     } finally {
@@ -114,103 +251,24 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
     }
   }
 
-  List<Marker> _buildMarkers() {
-    final markers = <Marker>[];
-    if (_myLocation != null) {
-      markers.add(
-        Marker(
-          point: _myLocation!,
-          width: 24,
-          height: 24,
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF2563EB),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 3),
-              boxShadow: const [
-                BoxShadow(color: Color(0x33000000), blurRadius: 6),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    if (widget.customerLat != null && widget.customerLng != null) {
-      markers.add(
-        Marker(
-          point: LatLng(widget.customerLat!, widget.customerLng!),
-          width: 44,
-          height: 44,
-          child: const Icon(
-            Icons.location_on_rounded,
-            color: FlowGuardTheme.navy,
-            size: 38,
-          ),
-        ),
-      );
-    }
-    if (widget.plumberLat != null && widget.plumberLng != null) {
-      markers.add(
-        Marker(
-          point: LatLng(widget.plumberLat!, widget.plumberLng!),
-          width: 48,
-          height: 48,
-          child: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: FlowGuardTheme.gold,
-              shape: BoxShape.circle,
-              border: Border.all(color: FlowGuardTheme.navy, width: 2.5),
-              boxShadow: const [
-                BoxShadow(color: Color(0x33000000), blurRadius: 6),
-              ],
-            ),
-            child: const Icon(
-              Icons.engineering_rounded,
-              color: FlowGuardTheme.navy,
-              size: 22,
-            ),
-          ),
-        ),
-      );
-    }
-    return markers;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final initialZoom =
-        (widget.customerLat != null || widget.plumberLat != null) ? 15.0 : 12.5;
-
-    final mapWidget = FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        initialCenter: _target,
-        initialZoom: initialZoom,
-        onTap: widget.onPickLocation == null
-            ? null
-            : (_, point) =>
-                widget.onPickLocation!(point.latitude, point.longitude),
-      ),
-      children: [
-        TileLayer(
-          urlTemplate: _satellite
-              ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-          userAgentPackageName: "com.flowguard.plumbing",
+    final mapWidget = MapWidget(
+      key: const ValueKey("flowguard-mapbox-widget"),
+      styleUri: _satellite
+          ? FlowGuardGoogleMap._satelliteStyleUri
+          : FlowGuardGoogleMap._streetStyleUri,
+      viewport: CameraViewportState(
+        center: Point(
+          coordinates: Position(_target.longitude, _target.latitude),
         ),
-        if (widget.routePoints.length >= 2)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: widget.routePoints,
-                color: FlowGuardTheme.navy,
-                strokeWidth: 5,
-              ),
-            ],
-          ),
-        MarkerLayer(markers: _buildMarkers()),
-      ],
+        zoom: _targetZoom,
+      ),
+      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+        Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+      },
+      onMapCreated: _onMapCreated,
+      onStyleLoadedListener: (_) => _syncAnnotations(),
     );
 
     return ClipRRect(
@@ -233,7 +291,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
                 borderRadius: BorderRadius.circular(12),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => setState(() => _satellite = !_satellite),
+                  onTap: _toggleStyle,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -327,24 +385,18 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
             Positioned(
               bottom: 12,
               right: 12,
-              child: Material(
-                color: Colors.white,
-                elevation: 2,
-                shape: const CircleBorder(),
-                child: IconButton(
-                  tooltip: "My current location",
-                  onPressed: _locatingMe ? null : _centerOnMyLocation,
-                  icon: _locatingMe
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(
-                          Icons.my_location_rounded,
-                          color: FlowGuardTheme.navy,
-                        ),
-                ),
+              child: FloatingActionButton.small(
+                heroTag: null,
+                backgroundColor: Colors.white,
+                foregroundColor: FlowGuardTheme.navy,
+                onPressed: _locatingMe ? null : _centerOnMyLocation,
+                child: _locatingMe
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location_rounded),
               ),
             ),
           ],
