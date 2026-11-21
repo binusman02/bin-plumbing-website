@@ -150,17 +150,25 @@ class _NotificationCentreSheet extends StatefulWidget {
 }
 
 class _NotificationCentreSheetState extends State<_NotificationCentreSheet> {
+  static final Map<String, List<NotificationItem>> _cachedByRole = {};
   bool _loading = true;
   List<NotificationItem> _items = [];
 
   @override
   void initState() {
     super.initState();
+    final cached = _cachedByRole[widget.role];
+    if (cached != null) {
+      _items = List<NotificationItem>.from(cached);
+      _loading = false;
+    }
     _load();
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (_items.isEmpty && mounted) {
+      setState(() => _loading = true);
+    }
     try {
       final data = await FlowGuardApiClient.fetchNotifications(
         role: widget.role,
@@ -175,6 +183,10 @@ class _NotificationCentreSheetState extends State<_NotificationCentreSheet> {
           }
         }
       }
+      _cachedByRole[widget.role] = list;
+      final unread = (data["unreadCount"] as num?)?.toInt() ??
+          list.where((e) => !e.isRead).length;
+      AppStateBadges.unreadNotificationsCount.value = unread;
       if (mounted) {
         setState(() {
           _items = list;
@@ -187,6 +199,7 @@ class _NotificationCentreSheetState extends State<_NotificationCentreSheet> {
   }
 
   Future<void> _markAllRead() async {
+    AppStateBadges.unreadNotificationsCount.value = 0;
     try {
       await FlowGuardApiClient.markNotificationRead(
         role: widget.role,

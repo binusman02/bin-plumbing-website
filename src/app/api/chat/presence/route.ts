@@ -92,6 +92,14 @@ export async function POST(request: Request) {
     } else {
       // Strictly use verified actor.role and actor.id — never trust body.userId
       await updateChatPresence(actor.role, actor.id);
+      // Mark incoming undelivered messages as delivered (NEVER read) when actor is online
+      const nowIso = new Date().toISOString();
+      const sb = getServiceSupabase();
+      await sb
+        .from("messages")
+        .update({ delivered_at: nowIso })
+        .eq("recipient_role", actor.role)
+        .is("delivered_at", null);
     }
 
     return NextResponse.json(

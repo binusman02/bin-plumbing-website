@@ -76,15 +76,15 @@ export async function createNotification(input: {
       return null;
     }
 
-    // Fire-and-forget FCM push notification to registered mobile devices
-    void dispatchFcmPush({
+    // Await FCM push delivery so Vercel serverless functions don't freeze before HTTP completes
+    await dispatchFcmPush({
       recipientRole: input.recipientRole,
       recipientId: input.recipientId,
       title: input.title,
       body: input.body || "",
       destination: input.destination,
       type: input.type,
-    });
+    }).catch(() => {});
 
     return data as NotificationRecord;
   } catch {

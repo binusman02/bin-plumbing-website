@@ -26,10 +26,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const peerRole =
+      body?.peerRole === "admin" || body?.peerRole === "plumber" || body?.peerRole === "customer"
+        ? body.peerRole
+        : undefined;
+
     const updated = await markTicketMessagesReadForActor({
       actorId: actor.id,
       actorRole: actor.role,
       ticketNumber: ctx.ticketNumber,
+      peerRole,
     });
 
     return NextResponse.json({ success: true, updated });

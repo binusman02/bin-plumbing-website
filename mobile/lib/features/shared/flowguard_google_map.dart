@@ -38,6 +38,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   final MapController _mapController = MapController();
   LatLng? _myLocation;
   bool _locatingMe = false;
+  bool _satellite = false;
 
   LatLng get _target {
     if (widget.plumberLat != null && widget.plumberLng != null) {
@@ -193,8 +194,9 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
       ),
       children: [
         TileLayer(
-          urlTemplate:
-              "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          urlTemplate: _satellite
+              ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              : "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
           userAgentPackageName: "com.flowguard.plumbing",
         ),
         if (widget.routePoints.length >= 2)
@@ -222,6 +224,48 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         child: Stack(
           children: [
             mapWidget,
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Material(
+                color: Colors.white,
+                elevation: 2,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => setState(() => _satellite = !_satellite),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _satellite
+                              ? Icons.map_outlined
+                              : Icons.satellite_alt_rounded,
+                          size: 16,
+                          color: FlowGuardTheme.navy,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _satellite ? "Street" : "Satellite",
+                          maxLines: 1,
+                          softWrap: false,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
             if (widget.allowFullscreen)
               Positioned(
                 top: 10,

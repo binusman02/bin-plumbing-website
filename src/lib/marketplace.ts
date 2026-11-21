@@ -2472,106 +2472,87 @@ export async function markTicketMessagesReadForActor(params: {
   actorId: string;
   actorRole: "admin" | "customer" | "plumber";
   ticketNumber: string;
+  peerRole?: "admin" | "customer" | "plumber";
 }): Promise<number> {
   const supabase = getServiceSupabase();
   const nowIso = new Date().toISOString();
   const recipientId = params.actorRole === "admin" ? "admin" : params.actorId;
   let updated = 0;
 
-  // 1. Update per-recipient receipts in message_receipts
+  const { data: rows } = await supabase
+    .from("messages")
+    .select("id, sender_role, is_internal, read_by, admin_read, delivered_at")
+    .eq("ticket_number", params.ticketNumber);
+
+  const eligibleRows = (rows || []).filter((m) => {
+    if (params.actorRole === "customer" && m.is_internal) return false;
+    if (m.sender_role === params.actorRole) return false;
+    if (params.peerRole && m.sender_role !== params.peerRole) return false;
+    return true;
+  });
+
+  const eligibleIds = eligibleRows.map((m) => String(m.id));
+  if (eligibleIds.length === 0) return 0;
+
+  // 1. Batch-update per-recipient receipts in message_receipts
   try {
-    const { data: ticketMsgs } = await supabase
-      .from("messages")
-      .select("id, is_internal")
-      .eq("ticket_number", params.ticketNumber);
+    const { data: unreadReceipts } = await supabase
+      .from("message_receipts")
+      .select("id, delivered_at")
+      .in("message_id", eligibleIds)
+      .eq("recipient_role", params.actorRole)
+      .eq("recipient_id", recipientId)
+      .is("read_at", null);
 
-    const eligibleIds = (ticketMsgs || [])
-      .filter((m) => !(params.actorRole === "customer" && m.is_internal))
-      .map((m) => String(m.id));
+    if (unreadReceipts && unreadReceipts.length > 0) {
+      const undeliveredIds = unreadReceipts
+        .filter((r) => !r.delivered_at)
+        .map((r) => String(r.id));
+      const alreadyDeliveredIds = unreadReceipts
+        .filter((r) => Boolean(r.delivered_at))
+        .map((r) => String(r.id));
 
-    if (eligibleIds.length > 0) {
-      const { data: unreadReceipts } = await supabase
-        .from("message_receipts")
-        .select("id, delivered_at")
-        .in("message_id", eligibleIds)
-        .eq("recipient_role", params.actorRole)
-        .eq("recipient_id", recipientId)
-        .is("read_at", null);
-
-      if (unreadReceipts && unreadReceipts.length > 0) {
-        for (const r of unreadReceipts) {
-          await supabase
-            .from("message_receipts")
-            .update({
-              read_at: nowIso,
-              delivered_at: r.delivered_at || nowIso,
-              updated_at: nowIso,
-            })
-            .eq("id", r.id);
-          updated += 1;
-        }
+      if (undeliveredIds.length > 0) {
+        await supabase
+          .from("message_receipts")
+          .update({ read_at: nowIso, delivered_at: nowIso, updated_at: nowIso })
+          .in("id", undeliveredIds);
       }
+      if (alreadyDeliveredIds.length > 0) {
+        await supabase
+          .from("message_receipts")
+          .update({ read_at: nowIso, updated_at: nowIso })
+          .in("id", alreadyDeliveredIds);
+      }
+      updated += unreadReceipts.length;
     }
   } catch {
     // Fallback to legacy messages table below
   }
 
   // 2. Keep legacy messages.read_by / admin_read synced for this viewerRole only
-  const { data: rows } = await supabase
-    .from("messages")
-    .select("id, sender_role, is_internal, read_by, admin_read")
-    .eq("ticket_number", params.ticketNumber);
-
-  const ticketMsgIds: string[] = [];
-  if (rows) {
-    for (const m of rows) {
-      if (params.actorRole === "customer" && m.is_internal) continue;
-      ticketMsgIds.push(String(m.id));
-      if (m.sender_role === params.actorRole) continue;
-      const readBy: string[] = Array.isArray(m.read_by) ? [...m.read_by] : [];
-      const needsAdminRead = params.actorRole === "admin" && m.admin_read === false;
-      if (!readBy.includes(params.actorRole) || needsAdminRead) {
-        if (!readBy.includes(params.actorRole)) readBy.push(params.actorRole);
-        await supabase
+  const updatePromises: PromiseLike<unknown>[] = [];
+  for (const m of eligibleRows) {
+    const readBy: string[] = Array.isArray(m.read_by) ? [...m.read_by] : [];
+    const needsAdminRead = params.actorRole === "admin" && m.admin_read === false;
+    if (!readBy.includes(params.actorRole) || needsAdminRead) {
+      if (!readBy.includes(params.actorRole)) readBy.push(params.actorRole);
+      updatePromises.push(
+        supabase
           .from("messages")
           .update({
             read_by: readBy,
+            read_at: nowIso,
+            delivered_at: m.delivered_at || nowIso,
             ...(params.actorRole === "admin" ? { admin_read: true } : {}),
           })
-          .eq("id", m.id);
-        if (updated === 0) updated += 1;
-      }
+          .eq("id", m.id)
+      );
+      if (updated === 0) updated += 1;
     }
   }
-
-  // 3. Also mark any unread message notifications for this ticket/recipient as read
-  try {
-    const targetRecipientIds =
-      params.actorRole === "admin"
-        ? Array.from(new Set(["admin", params.actorId]))
-        : [params.actorId];
-    const entityTargets = Array.from(
-      new Set([...ticketMsgIds, params.ticketNumber])
-    );
-    if (entityTargets.length > 0) {
-      await supabase
-        .from("notifications")
-        .update({ read_at: nowIso })
-        .eq("recipient_role", params.actorRole)
-        .in("recipient_id", targetRecipientIds)
-        .is("read_at", null)
-        .in("entity_id", entityTargets);
-    }
-    await supabase
-      .from("notifications")
-      .update({ read_at: nowIso })
-      .eq("recipient_role", params.actorRole)
-      .in("recipient_id", targetRecipientIds)
-      .is("read_at", null)
-      .eq("entity_type", "message")
-      .ilike("destination", `%ticket=${encodeURIComponent(params.ticketNumber)}%`);
-  } catch {
-    // Non-blocking notification read sync
+  if (updatePromises.length > 0) {
+    await Promise.all(updatePromises);
   }
 
   return updated;

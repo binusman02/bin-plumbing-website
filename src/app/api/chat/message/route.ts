@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
+import { dispatchFcmPush } from "@/lib/fcm-push";
 import {
   deleteJobMessageById,
   editJobMessageById,
@@ -75,6 +76,15 @@ export async function POST(request: Request) {
       isInternal: false,
       replyToId: typeof body?.replyToId === "string" ? body.replyToId : null,
     });
+
+    await dispatchFcmPush({
+      recipientRole,
+      recipientId: recipientId || "admin",
+      title: `${actor.name} • ${ctx.ticketNumber}`,
+      body: message || "Sent an attachment",
+      destination: `/messages?ticket=${encodeURIComponent(ctx.ticketNumber)}`,
+      type: "new_message",
+    }).catch(() => {});
 
     return NextResponse.json({ success: true, message: created });
   } catch (err) {

@@ -624,10 +624,11 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
         }
       }
-      await FlowGuardApiClient.markChatRead(
+      FlowGuardApiClient.markChatRead(
         ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
-      );
+        peerRole: widget.conversation.peerRole,
+      ).catchError((_) {});
     } catch (_) {
       if (mounted && !quiet) setState(() => _loading = false);
     }
@@ -1059,7 +1060,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                             )
                                           else
                                             Icon(
-                                              status == "sent"
+                                              (status == "sent" && !_peerOnline)
                                                   ? Icons.done_rounded
                                                   : Icons.done_all_rounded,
                                               size: 14,

@@ -600,13 +600,18 @@ class FlowGuardApiClient {
   static Future<void> markChatRead({
     required String ticketNumber,
     required String role,
+    String? peerRole,
   }) async {
     final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/chat/read");
     await http
         .post(
           uri,
           headers: _authHeaders(),
-          body: jsonEncode({"ticketNumber": ticketNumber, "viewerRole": role}),
+          body: jsonEncode({
+            "ticketNumber": ticketNumber,
+            "viewerRole": role,
+            if (peerRole != null) "peerRole": peerRole,
+          }),
         )
         .timeout(const Duration(seconds: 10));
   }

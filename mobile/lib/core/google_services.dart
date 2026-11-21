@@ -6,6 +6,13 @@ import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/app_flavor.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 
+@pragma("vm:entry-point")
+Future<void> flowguardBackgroundMessageHandler(RemoteMessage message) async {
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {}
+}
+
 class GoogleServicesBootstrap {
   static bool firebaseReady = false;
   static String? fcmToken;
@@ -21,7 +28,13 @@ class GoogleServicesBootstrap {
     try {
       await Firebase.initializeApp();
       firebaseReady = true;
+      FirebaseMessaging.onBackgroundMessage(flowguardBackgroundMessageHandler);
       final messaging = FirebaseMessaging.instance;
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
       await messaging.requestPermission(
         alert: true,
         badge: true,

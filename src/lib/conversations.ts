@@ -248,11 +248,19 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
       }
 
       const lastSender = last ? String(last.sender_role || "") : null;
+      const otherRead =
+        last != null &&
+        (last.read_at != null ||
+          (Array.isArray(last.read_by) &&
+            last.read_by.some((r) => String(r) !== lastSender)));
+      const directPeerOnline =
+        actor.role === "customer"
+          ? presence.plumberOnline || pRow?.is_online === true
+          : presence.customerOnline;
       const receipt: "sent" | "delivered" | "read" | null = last
-        ? last.read_at != null ||
-          (Array.isArray(last.read_by) && last.read_by.length > 0)
+        ? otherRead
           ? "read"
-          : last.delivered_at != null
+          : last.delivered_at != null || directPeerOnline
             ? "delivered"
             : "sent"
         : null;
@@ -346,11 +354,15 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
       }
 
       const lastSender = last ? String(last.sender_role || "") : null;
+      const otherRead =
+        last != null &&
+        (last.read_at != null ||
+          (Array.isArray(last.read_by) &&
+            last.read_by.some((r) => String(r) !== lastSender)));
       const receipt: "sent" | "delivered" | "read" | null = last
-        ? last.read_at != null ||
-          (Array.isArray(last.read_by) && last.read_by.length > 0)
+        ? otherRead
           ? "read"
-          : last.delivered_at != null
+          : last.delivered_at != null || presence.adminOnline
             ? "delivered"
             : "sent"
         : null;
