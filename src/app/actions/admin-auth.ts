@@ -47,6 +47,15 @@ export async function loginAdmin(formData: FormData) {
     return { error: "This account is not authorised for admin access." };
   }
 
+  if (data.user.app_metadata?.role !== "admin") {
+    await adminSupabase.auth.admin
+      .updateUserById(data.user.id, {
+        app_metadata: { ...(data.user.app_metadata || {}), role: "admin" },
+      })
+      .catch(() => {});
+    await supabase.auth.refreshSession().catch(() => {});
+  }
+
   const cookieStore = await cookies();
   cookieStore.delete("bin_customer_session_phone");
   cookieStore.delete(CUSTOMER_SESSION_COOKIE);
