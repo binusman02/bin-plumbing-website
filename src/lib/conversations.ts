@@ -116,15 +116,20 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
     ),
   ];
 
+  let msgQuery = supabase
+    .from("messages")
+    .select(
+      "id, ticket_number, sender_role, recipient_role, message, attachment, read_by, delivered_at, read_at, is_internal, deleted_for_everyone, created_at"
+    )
+    .in("ticket_number", tickets)
+    .order("created_at", { ascending: true });
+
+  if (actor.role === "customer") {
+    msgQuery = msgQuery.eq("is_internal", false);
+  }
+
   const [msgRes, plumberRes, customerRes] = await Promise.all([
-    supabase
-      .from("messages")
-      .select(
-        "id, ticket_number, sender_role, recipient_role, message, attachment, read_by, delivered_at, read_at, is_internal, deleted_for_everyone, created_at"
-      )
-      .in("ticket_number", tickets)
-      .eq("is_internal", false)
-      .order("created_at", { ascending: true }),
+    msgQuery,
     plumberIds.length > 0
       ? supabase
           .from("plumbers")
@@ -202,6 +207,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         cRow?.full_name || req.customer_name || "Customer"
       );
       const directMsgs = reqMsgs.filter((m) => {
+        if (m.is_internal) return false;
         const s = String(m.sender_role || "");
         const r = String(m.recipient_role || "");
         return (

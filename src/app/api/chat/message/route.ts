@@ -37,7 +37,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const recipientRole: "admin" | "customer" | "plumber" =
+    const canUseInternal = actor.role === "plumber" || actor.role === "admin";
+    let isInternal = canUseInternal ? Boolean(body?.isInternal) : false;
+    let replyToId =
+      typeof body?.replyToId === "string" && body.replyToId.trim().length > 0
+        ? body.replyToId.trim()
+        : null;
+
+    if (replyToId) {
+      const supabase = getServiceSupabase();
+      const { data: parentMsg } = await supabase
+        .from("messages")
+        .select("id, ticket_number, is_internal")
+        .eq("id", replyToId)
+        .maybeSingle();
+
+      if (!parentMsg || String(parentMsg.ticket_number) !== ctx.ticketNumber) {
+        replyToId = null;
+      } else if (parentMsg.is_internal) {
+        if (canUseInternal) {
+          isInternal = true;
+        } else {
+          // Customers cannot reply to or reference internal messages
+          replyToId = null;
+          isInternal = false;
+        }
+      }
+    }
+
+    let recipientRole: "admin" | "customer" | "plumber" =
       body?.recipientRole === "customer" ||
       body?.recipientRole === "plumber" ||
       body?.recipientRole === "admin"
@@ -49,6 +77,10 @@ export async function POST(request: Request) {
           : actor.role === "plumber"
             ? "customer"
             : "customer";
+
+    if (isInternal) {
+      recipientRole = actor.role === "plumber" ? "admin" : "plumber";
+    }
 
     const recipientId =
       recipientRole === "customer"
@@ -73,18 +105,26 @@ export async function POST(request: Request) {
       ],
       message,
       attachment: body?.attachment,
-      isInternal: false,
-      replyToId: typeof body?.replyToId === "string" ? body.replyToId : null,
+      isInternal,
+      replyToId,
     });
 
-    await dispatchFcmPush({
-      recipientRole,
-      recipientId: recipientId || "admin",
-      title: `${actor.name} • ${ctx.ticketNumber}`,
-      body: message || "Sent an attachment",
-      destination: `/messages?ticket=${encodeURIComponent(ctx.ticketNumber)}`,
-      type: "new_message",
-    }).catch(() => {});
+    if (
+      !isInternal ||
+      recipientRole === "admin" ||
+      (recipientRole === "plumber" && Boolean(recipientId))
+    ) {
+      await dispatchFcmPush({
+        recipientRole,
+        recipientId: recipientId || "admin",
+        title: isInternal
+          ? `Private • ${actor.name} (${ctx.ticketNumber})`
+          : `${actor.name} • ${ctx.ticketNumber}`,
+        body: message || "Sent an attachment",
+        destination: `/messages?ticket=${encodeURIComponent(ctx.ticketNumber)}`,
+        type: "new_message",
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ success: true, message: created });
   } catch (err) {

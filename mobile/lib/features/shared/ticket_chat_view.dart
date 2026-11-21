@@ -532,6 +532,53 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   Timer? _recordTimer;
   Timer? _rtDebounce;
   String? _threadError;
+  Map<String, dynamic>? _replyToMsg;
+  bool _isInternal = false;
+  final Map<String, GlobalKey> _msgKeys = {};
+
+  bool get _canUsePrivateToggle =>
+      widget.senderRole == "plumber" || widget.senderRole == "admin";
+
+  bool get _replyIsPrivate =>
+      _replyToMsg != null &&
+      (_replyToMsg!["is_internal"] == true ||
+          _replyToMsg!["isInternal"] == true);
+
+  void _setReplyTo(Map<String, dynamic> msg) {
+    final priv = msg["is_internal"] == true || msg["isInternal"] == true;
+    setState(() {
+      _replyToMsg = msg;
+      if (priv && _canUsePrivateToggle) {
+        _isInternal = true;
+      }
+    });
+  }
+
+  void _scrollToMessageById(String targetId) {
+    final key = _msgKeys[targetId];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut,
+        alignment: 0.3,
+      );
+      return;
+    }
+    final idx = _messages.indexWhere((m) => m["id"]?.toString() == targetId);
+    if (idx >= 0 && _scrollController.hasClients) {
+      final ratio =
+          _messages.length <= 1 ? 0.0 : idx / (_messages.length - 1);
+      final targetOffset =
+          _scrollController.position.maxScrollExtent * ratio.clamp(0.0, 1.0);
+      _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut,
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -605,6 +652,13 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     return all.where((m) {
       final s = (m["senderRole"] ?? m["sender_role"] ?? "").toString();
       final r = (m["recipientRole"] ?? m["recipient_role"] ?? "").toString();
+      final isPriv = m["is_internal"] == true || m["isInternal"] == true;
+      // Never expose internal messages to customers
+      if (widget.senderRole == "customer" && isPriv) return false;
+      // In the plumber's thread, include admin messages (public and private) so replies to admin are possible
+      if (widget.senderRole == "plumber" && (s == "admin" || r == "admin")) {
+        return true;
+      }
       if (isDirect) {
         return (s == "customer" && r == "plumber") ||
             (s == "plumber" && r == "customer");
@@ -686,16 +740,30 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     }
   }
 
+  String _effectiveRecipientRole(bool sendInternal) {
+    if (sendInternal) {
+      return widget.senderRole == "plumber" ? "admin" : "plumber";
+    }
+    return widget.conversation.peerRole;
+  }
+
   Future<void> _sendText({String? retryText, String? tempId}) async {
     final text = (retryText ?? _inputController.text).trim();
     if (text.isEmpty) return;
 
+    final sendInternal =
+        _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
+    final replyId = _replyToMsg?["id"]?.toString();
     final localId = tempId ?? "temp-${DateTime.now().millisecondsSinceEpoch}";
     if (tempId == null) {
       _inputController.clear();
     }
 
     setState(() {
+      if (tempId == null) {
+        _replyToMsg = null;
+        if (!_canUsePrivateToggle) _isInternal = false;
+      }
       _messages = [
         ..._messages.where((m) => m["_localId"] != localId),
         {
@@ -704,6 +772,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           "senderRole": widget.senderRole,
           "senderName": widget.senderName,
           "message": text,
+          "is_internal": sendInternal,
+          if (replyId != null && replyId.isNotEmpty) "reply_to_id": replyId,
           "createdAt": DateTime.now().toUtc().toIso8601String(),
           "receipt_status": "sending",
         },
@@ -716,7 +786,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         ticketNumber: widget.conversation.ticketNumber,
         message: text,
         actorRole: widget.senderRole,
-        recipientRole: widget.conversation.peerRole,
+        recipientRole: _effectiveRecipientRole(sendInternal),
+        isInternal: sendInternal,
+        replyToId: replyId,
       );
       if (mounted) {
         setState(() {
@@ -762,13 +834,19 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
+      final sendInternal =
+          _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
+      final replyId = _replyToMsg?["id"]?.toString();
       await FlowGuardApiClient.sendChatMessage(
         ticketNumber: widget.conversation.ticketNumber,
         message: "Photo",
         actorRole: widget.senderRole,
-        recipientRole: widget.conversation.peerRole,
+        recipientRole: _effectiveRecipientRole(sendInternal),
         attachment: attachment,
+        isInternal: sendInternal,
+        replyToId: replyId,
       );
+      if (mounted) setState(() => _replyToMsg = null);
       await _loadMessages(quiet: true);
       _scrollToBottom();
     } catch (e) {
@@ -838,13 +916,19 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
+      final sendInternal =
+          _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
+      final replyId = _replyToMsg?["id"]?.toString();
       await FlowGuardApiClient.sendChatMessage(
         ticketNumber: widget.conversation.ticketNumber,
         message: "Voice Note (${_recordSeconds}s)",
         actorRole: widget.senderRole,
-        recipientRole: widget.conversation.peerRole,
+        recipientRole: _effectiveRecipientRole(sendInternal),
         attachment: attachment,
+        isInternal: sendInternal,
+        replyToId: replyId,
       );
+      if (mounted) setState(() => _replyToMsg = null);
       await _loadMessages(quiet: true);
       _scrollToBottom();
     } catch (e) {
@@ -988,9 +1072,30 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                           itemCount: _messages.length,
                           itemBuilder: (_, idx) {
                             final msg = _messages[idx];
+                            final msgId = (msg["id"] ??
+                                    msg["_localId"] ??
+                                    "idx-$idx")
+                                .toString();
+                            final itemKey = _msgKeys.putIfAbsent(
+                              msgId,
+                              () => GlobalKey(),
+                            );
                             final isMe =
                                 msg["senderRole"] == widget.senderRole ||
                                     msg["sender_role"] == widget.senderRole;
+                            final isPrivate = msg["is_internal"] == true ||
+                                msg["isInternal"] == true;
+                            final replyToId = (msg["reply_to_id"] ??
+                                    msg["replyToId"] ??
+                                    "")
+                                .toString();
+                            final quotedMsg = replyToId.isEmpty
+                                ? null
+                                : _messages
+                                    .where(
+                                      (m) => m["id"]?.toString() == replyToId,
+                                    )
+                                    .firstOrNull;
                             final status = (msg["receipt_status"] ??
                                     msg["status"] ??
                                     "sent")
@@ -1017,54 +1122,168 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                             .toString()
                                             .startsWith("audio/"));
 
-                            return Align(
-                              alignment: isMe
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 8, 10, 6),
-                                constraints: BoxConstraints(
-                                  maxWidth:
-                                      MediaQuery.of(context).size.width * 0.78,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isFailed
-                                      ? const Color(0xFFFEE2E2)
-                                      : isMe
-                                          ? const Color(0xFFD9FDD3)
-                                          : Colors.white,
-                                  borderRadius: BorderRadius.only(
-                                    topLeft: const Radius.circular(14),
-                                    topRight: const Radius.circular(14),
-                                    bottomLeft: Radius.circular(isMe ? 14 : 2),
-                                    bottomRight: Radius.circular(isMe ? 2 : 14),
+                            return Dismissible(
+                              key: ValueKey("swipe-$msgId-$idx"),
+                              direction: DismissDirection.startToEnd,
+                              confirmDismiss: (_) async {
+                                _setReplyTo(msg);
+                                return false;
+                              },
+                              background: const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Padding(
+                                  padding: EdgeInsets.only(left: 16),
+                                  child: Icon(
+                                    Icons.reply_rounded,
+                                    color: FlowGuardTheme.navy,
                                   ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x12000000),
-                                      blurRadius: 3,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (!isMe)
-                                      Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 2),
-                                        child: Text(
-                                          senderName,
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w800,
-                                            color: FlowGuardTheme.navy,
+                              ),
+                              child: Align(
+                                key: itemKey,
+                                alignment: isMe
+                                    ? Alignment.centerRight
+                                    : Alignment.centerLeft,
+                                child: Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 8, 10, 6),
+                                  constraints: BoxConstraints(
+                                    maxWidth:
+                                        MediaQuery.of(context).size.width *
+                                            0.78,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isFailed
+                                        ? const Color(0xFFFEE2E2)
+                                        : isPrivate
+                                            ? const Color(0xFFFEF3C7)
+                                            : isMe
+                                                ? const Color(0xFFD9FDD3)
+                                                : Colors.white,
+                                    border: isPrivate
+                                        ? Border.all(
+                                            color: const Color(0xFFF59E0B),
+                                            width: 1,
+                                          )
+                                        : null,
+                                    borderRadius: BorderRadius.only(
+                                      topLeft: const Radius.circular(14),
+                                      topRight: const Radius.circular(14),
+                                      bottomLeft:
+                                          Radius.circular(isMe ? 14 : 2),
+                                      bottomRight:
+                                          Radius.circular(isMe ? 2 : 14),
+                                    ),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x12000000),
+                                        blurRadius: 3,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (!isMe || isPrivate)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 2),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (isPrivate) ...[
+                                                const Icon(
+                                                  Icons.lock_rounded,
+                                                  size: 12,
+                                                  color: Color(0xFF92400E),
+                                                ),
+                                                const SizedBox(width: 4),
+                                              ],
+                                              Text(
+                                                isPrivate && isMe
+                                                    ? "Private (admin only)"
+                                                    : isPrivate
+                                                        ? "$senderName • Private"
+                                                        : senderName,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: isPrivate
+                                                      ? const Color(0xFF92400E)
+                                                      : FlowGuardTheme.navy,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                      ),
+                                      if (replyToId.isNotEmpty)
+                                        InkWell(
+                                          onTap: () =>
+                                              _scrollToMessageById(replyToId),
+                                          child: Container(
+                                            width: double.infinity,
+                                            margin: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
+                                            padding: const EdgeInsets.fromLTRB(
+                                              8,
+                                              5,
+                                              8,
+                                              5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.05),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: const Border(
+                                                left: BorderSide(
+                                                  color: FlowGuardTheme.navy,
+                                                  width: 3,
+                                                ),
+                                              ),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  (quotedMsg?["senderName"] ??
+                                                          quotedMsg?[
+                                                              "sender_name"] ??
+                                                          "Original message")
+                                                      .toString(),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontSize: 10.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: FlowGuardTheme.navy,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  quotedMsg == null
+                                                      ? "Tap to view original"
+                                                      : (quotedMsg["message"] ??
+                                                              "Attachment")
+                                                          .toString(),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontSize: 11.5,
+                                                    color:
+                                                        FlowGuardTheme.mutedText,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
                                     if (rawUrl.isNotEmpty && isVoice)
                                       VoiceNoteBubblePlayer(rawUrl: rawUrl)
                                     else if (rawUrl.isNotEmpty)
@@ -1154,11 +1373,98 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                   ],
                                 ),
                               ),
+                            ),
                             );
                           },
                         ),
             ),
           ),
+          if (_replyToMsg != null)
+            Container(
+              color: const Color(0xFFE2E8F0),
+              padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+              child: Row(
+                children: [
+                  Container(
+                    width: 3,
+                    height: 34,
+                    color: _replyIsPrivate
+                        ? const Color(0xFFD97706)
+                        : FlowGuardTheme.navy,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            if (_replyIsPrivate) ...[
+                              const Icon(
+                                Icons.lock_rounded,
+                                size: 12,
+                                color: Color(0xFF92400E),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Text(
+                              "Replying to ${(_replyToMsg!["senderName"] ?? _replyToMsg!["sender_name"] ?? "User")}",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: FlowGuardTheme.navy,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          (_replyToMsg!["message"] ?? "Attachment").toString(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: FlowGuardTheme.mutedText,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () => setState(() => _replyToMsg = null),
+                  ),
+                ],
+              ),
+            ),
+          if (_canUsePrivateToggle)
+            Container(
+              color: const Color(0xFFF0F2F5),
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              child: Row(
+                children: [
+                  FilterChip(
+                    avatar: Icon(
+                      Icons.lock_rounded,
+                      size: 15,
+                      color: (_isInternal || _replyIsPrivate)
+                          ? const Color(0xFF92400E)
+                          : FlowGuardTheme.mutedText,
+                    ),
+                    label: const Text(
+                      "Private (admin only)",
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                    selected: _isInternal || _replyIsPrivate,
+                    selectedColor: const Color(0xFFFEF3C7),
+                    onSelected: _replyIsPrivate
+                        ? null
+                        : (val) => setState(() => _isInternal = val),
+                  ),
+                ],
+              ),
+            ),
           Container(
             color: const Color(0xFFF0F2F5),
             padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),

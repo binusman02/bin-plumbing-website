@@ -584,6 +584,8 @@ class FlowGuardApiClient {
     required String actorRole,
     String? recipientRole,
     Map<String, dynamic>? attachment,
+    bool isInternal = false,
+    String? replyToId,
   }) async {
     final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/chat/message");
     final res = await http
@@ -596,6 +598,9 @@ class FlowGuardApiClient {
             "actorRole": actorRole,
             if (recipientRole != null) "recipientRole": recipientRole,
             if (attachment != null) "attachment": attachment,
+            "isInternal": isInternal,
+            if (replyToId != null && replyToId.isNotEmpty)
+              "replyToId": replyToId,
           }),
         )
         .timeout(const Duration(seconds: 15));
