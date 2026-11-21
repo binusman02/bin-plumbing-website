@@ -111,10 +111,18 @@ export async function PATCH(request: Request) {
             : undefined,
       });
       if (typeof body?.phone === "string" && body.phone.trim()) {
-        await supabase
+        const { error: phoneErr } = await supabase
           .from("customers")
           .update({ phone: body.phone.trim() })
           .eq("id", actor.id);
+        if (phoneErr) {
+          return NextResponse.json({ error: phoneErr.message }, { status: 400 });
+        }
+      }
+      if (typeof body?.email === "string" && body.email.trim() && actor.authUserId) {
+        await supabase.auth.admin
+          .updateUserById(actor.authUserId, { email: body.email.trim() })
+          .catch(() => {});
       }
       return NextResponse.json({ success: true, profile: updated });
     }
@@ -172,6 +180,11 @@ export async function PATCH(request: Request) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
+      if (typeof body?.email === "string" && body.email.trim() && actor.authUserId) {
+        await supabase.auth.admin
+          .updateUserById(actor.authUserId, { email: body.email.trim() })
+          .catch(() => {});
+      }
       const safeData: Record<string, unknown> = { ...data };
       delete safeData.password_hash;
       safeData.bank_name = nextBank.bankName;
@@ -206,6 +219,12 @@ export async function POST(request: Request) {
     const newPassword =
       typeof body?.newPassword === "string" ? body.newPassword : "";
 
+    if (!currentPassword) {
+      return NextResponse.json(
+        { error: "Current password is required." },
+        { status: 400 }
+      );
+    }
     if (newPassword.length < 8) {
       return NextResponse.json(
         { error: "New password must be at least 8 characters." },
@@ -223,7 +242,6 @@ export async function POST(request: Request) {
 
     if (
       row?.password_hash &&
-      currentPassword &&
       !verifyCustomerPassword(currentPassword, String(row.password_hash))
     ) {
       return NextResponse.json(

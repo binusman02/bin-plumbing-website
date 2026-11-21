@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { validateLocationInput } from "@/lib/live-location";
-import { saveLiveLocation, setSharing } from "@/lib/live-location-server";
+import {
+  plumberHasOpenTrip,
+  saveLiveLocation,
+  setSharing,
+} from "@/lib/live-location-server";
 
 export async function POST(request: Request) {
   try {
     const actor = await resolvePortalActor("plumber");
-    if (!actor || actor.role !== "plumber") {
+    if (!actor || actor.role !== "plumber" || !actor.isApproved) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -14,6 +18,14 @@ export async function POST(request: Request) {
     if (body?.stopSharing === true) {
       await setSharing(actor.id, false);
       return NextResponse.json({ success: true, sharing: false });
+    }
+
+    const hasTrip = await plumberHasOpenTrip(actor.id);
+    if (!hasTrip) {
+      return NextResponse.json(
+        { error: "No active trip in progress." },
+        { status: 403 }
+      );
     }
 
     const validated = validateLocationInput({

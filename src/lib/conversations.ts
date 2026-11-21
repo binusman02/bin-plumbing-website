@@ -69,7 +69,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
       ? supabase
           .from("service_requests")
           .select(
-            "id, ticket_number, problem_category, status, customer_id, customer_name, assigned_plumber_id, assigned_technician, created_at, updated_at, deleted_at"
+            "id, ticket_number, category_slug, status, customer_id, customer_name, assigned_plumber_id, assigned_technician, created_at, updated_at, deleted_at"
           )
           .eq("customer_id", actor.id)
           .order("updated_at", { ascending: false })
@@ -77,17 +77,23 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
       : supabase
           .from("service_requests")
           .select(
-            "id, ticket_number, problem_category, status, customer_id, customer_name, assigned_plumber_id, assigned_technician, created_at, updated_at, deleted_at"
+            "id, ticket_number, category_slug, status, customer_id, customer_name, assigned_plumber_id, assigned_technician, created_at, updated_at, deleted_at"
           )
           .eq("assigned_plumber_id", actor.id)
           .order("updated_at", { ascending: false })
           .limit(50);
 
-  const [{ data: reqRows }, presence, supportOwner] = await Promise.all([
+  const [{ data: reqRows }, presence, supportOwner, { data: catRows }] = await Promise.all([
     reqQuery,
     getChatPresenceStatus(),
     resolveDefaultSupportOwner(),
+    supabase.from("service_categories").select("slug, name"),
   ]);
+
+  const catNameBySlug = new Map<string, string>();
+  for (const c of (catRows || []) as Record<string, unknown>[]) {
+    if (c.slug) catNameBySlug.set(String(c.slug), String(c.name || c.slug));
+  }
 
   const activeReqs = (reqRows || []).filter((r) => !r.deleted_at);
   if (activeReqs.length === 0) {
@@ -177,6 +183,9 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
   for (const req of activeReqs) {
     const ticket = String(req.ticket_number);
     const reqId = String(req.id);
+    const catTitle =
+      catNameBySlug.get(String(req.category_slug || "")) ||
+      String(req.category_slug || "Plumbing Service");
     const reqMsgs = msgsByTicket.get(ticket) || [];
     const reqClosed = req.status === "completed" || req.status === "cancelled";
 
@@ -253,7 +262,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         conversationType: "customer_plumber",
         requestId: reqId,
         ticketNumber: ticket,
-        problemCategory: String(req.problem_category || "Plumbing Service"),
+        problemCategory: catTitle,
         requestStatus: String(req.status || "new"),
         peerName: actor.role === "customer" ? plumberName : customerName,
         peerRole: actor.role === "customer" ? "plumber" : "customer",
@@ -267,7 +276,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         status: reqClosed ? "closed" : "open",
         lastMessage: last
           ? String(last.message || "Attachment")
-          : `Job ${ticket} • ${req.problem_category || "Plumbing"}`,
+          : `Job ${ticket} • ${catTitle}`,
         lastMessageAt: last
           ? String(last.created_at)
           : String(req.updated_at || req.created_at),
@@ -351,7 +360,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         conversationType: supportType,
         requestId: reqId,
         ticketNumber: ticket,
-        problemCategory: String(req.problem_category || "Support"),
+        problemCategory: catTitle,
         requestStatus: String(req.status || "new"),
         peerName:
           actor.role === "customer"

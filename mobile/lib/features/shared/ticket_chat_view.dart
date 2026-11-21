@@ -579,7 +579,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         return (s == "customer" && r == "plumber") ||
             (s == "plumber" && r == "customer");
       }
-      return s == "admin" || r == "admin" || (s == widget.senderRole && r != "plumber" && r != "customer");
+      return (s == widget.senderRole && r == "admin") ||
+          (s == "admin" && r == widget.senderRole) ||
+          (s == widget.senderRole && r != "plumber" && r != "customer");
     }).toList();
   }
 
@@ -612,11 +614,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               : (presence["customerOnline"] == true);
 
       if (mounted) {
+        final hadNone = _messages.isEmpty;
         setState(() {
           _messages = [...serverList, ...failedLocals];
           _peerOnline = otherOnline;
           _loading = false;
         });
+        if (hadNone && serverList.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+        }
       }
       await FlowGuardApiClient.markChatRead(
         ticketNumber: widget.conversation.ticketNumber,

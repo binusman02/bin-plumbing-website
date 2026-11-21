@@ -90,15 +90,28 @@ export async function GET(
       let authorizedViaRequestPhoto = false;
       if (safeName.startsWith("req-")) {
         const encoded = encodeURIComponent(safeName);
+        const targetPath = `/api/chat/file/${encoded}`;
         const { data: matchingReqs } = await adminSupabase
           .from("service_requests")
           .select("id, photos")
-          .contains("photos", [`/api/chat/file/${encoded}`])
+          .filter("photos", "cs", JSON.stringify([targetPath]))
           .limit(1);
         const matchedReq = matchingReqs?.[0];
         if (matchedReq) {
           const ctx = await verifyTicketAccess(actor, String(matchedReq.id));
           if (ctx) authorizedViaRequestPhoto = true;
+        }
+        if (!authorizedViaRequestPhoto) {
+          const { data: payRow } = await adminSupabase
+            .from("payments")
+            .select("ticket_number")
+            .eq("proof_storage_path", targetPath)
+            .limit(1)
+            .maybeSingle();
+          if (payRow?.ticket_number) {
+            const ctx = await verifyTicketAccess(actor, String(payRow.ticket_number));
+            if (ctx) authorizedViaRequestPhoto = true;
+          }
         }
       }
 

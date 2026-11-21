@@ -65,32 +65,33 @@ export async function resolvePortalActor(
     }
 
     if (user) {
-      // 1. Admin check via admin_users table
-      if (!preferredRole || preferredRole === "admin") {
-        const { data: adminRow } = await adminSupabase
-          .from("admin_users")
-          .select("id, email, full_name, role, is_active")
-          .eq("auth_user_id", user.id)
-          .eq("is_active", true)
-          .maybeSingle();
+      // 1. Admin check via admin_users table (always check first so admins are never auto-healed as customers)
+      const { data: adminRow } = await adminSupabase
+        .from("admin_users")
+        .select("id, email, full_name, role, is_active")
+        .eq("auth_user_id", user.id)
+        .eq("is_active", true)
+        .maybeSingle();
 
-        if (adminRow) {
-          return {
-            role: "admin",
-            id: String(adminRow.id),
-            authUserId: user.id,
-            email: String(adminRow.email || user.email || ""),
-            name: String(adminRow.full_name || "Administrator"),
-            adminRole: String(adminRow.role || "admin"),
-          };
+      if (adminRow) {
+        if (preferredRole && preferredRole !== "admin") {
+          return null;
         }
-        if (preferredRole === "admin") return null;
+        return {
+          role: "admin",
+          id: String(adminRow.id),
+          authUserId: user.id,
+          email: String(adminRow.email || user.email || ""),
+          name: String(adminRow.full_name || "Administrator"),
+          adminRole: String(adminRow.role || "admin"),
+        };
       }
+      if (preferredRole === "admin") return null;
 
       const metaRole = getVerifiedAppRole(user);
 
       // 2. Plumber via Supabase Auth (linked strictly by auth_user_id)
-      if ((!preferredRole || preferredRole === "plumber") && metaRole === "plumber") {
+      if ((!preferredRole || preferredRole === "plumber") && (metaRole === "plumber" || !metaRole)) {
         const userEmail = (user.email || "").toLowerCase().trim();
         const { data: byAuth } = await adminSupabase
           .from("plumbers")
@@ -112,6 +113,7 @@ export async function resolvePortalActor(
             isApproved: plumberStatus === "approved" || match.is_approved === true,
           };
         }
+        if (preferredRole === "plumber") return null;
       }
 
       // 3. Customer via Supabase Auth (linked by auth_user_id, with auto-heal for mobile signups)
@@ -149,10 +151,11 @@ export async function resolvePortalActor(
               }
             }
             if (!byAuth) {
-              const newId = `cust-${Date.now().toString(36)}`;
+              const newId = crypto.randomUUID();
               const fullName =
                 String(user.user_metadata?.full_name || userEmail.split("@")[0] || "Customer");
-              const phone = String(user.user_metadata?.phone || user.phone || "");
+              const rawPhone = String(user.user_metadata?.phone || user.phone || "").trim();
+              const phone = rawPhone || `g-${user.id.slice(0, 12)}`;
               const { data: created } = await adminSupabase
                 .from("customers")
                 .insert({

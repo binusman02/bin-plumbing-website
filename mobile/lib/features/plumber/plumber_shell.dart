@@ -214,11 +214,23 @@ class _PlumberShellState extends State<PlumberShell> {
     if (_plumberId == null) return;
     final next = !_isAvailable;
     setState(() => _isAvailable = next);
-    await SupabaseConfig.client
-        .from("plumbers")
-        .update({"is_available": next})
-        .eq("id", _plumberId!);
-    await _checkGpsStatus();
+    try {
+      await SupabaseConfig.client
+          .from("plumbers")
+          .update({"is_available": next})
+          .eq("id", _plumberId!);
+      if (!next) {
+        await FlowGuardApiClient.stopLiveLocation().catchError((_) {});
+      }
+      await _checkGpsStatus();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isAvailable = !next);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not update duty status.")),
+        );
+      }
+    }
   }
 
   void _openJobDetail(ServiceRequestItem job) {
@@ -239,6 +251,10 @@ class _PlumberShellState extends State<PlumberShell> {
     if (link == null || link.isEmpty) return;
     if (link.contains("chat") || link.contains("message")) {
       setState(() => _tabIndex = 2);
+      return;
+    }
+    if (link.contains("earnings") || link.contains("payment")) {
+      setState(() => _tabIndex = 3);
       return;
     }
     final matchingJob = _jobs.where((j) => link.contains(j.ticketNumber)).firstOrNull;
@@ -273,39 +289,34 @@ class _PlumberShellState extends State<PlumberShell> {
     String title = "${activeJob.ticketNumber} • ${activeJob.problemCategory}";
     String subtitle = activeJob.addressInKano;
 
-    if (activeJob.status == "new" ||
-        activeJob.status == "pending" ||
-        activeJob.status == "contacted") {
-      label = "Review Assignment";
-      subtitle = "New job assigned at ${activeJob.addressInKano}";
-    } else if (tripState == "on_the_way") {
-      label = "Arrived at Property";
-      subtitle = "Live trip in progress to ${activeJob.addressInKano}";
-    } else if ((activeJob.status == "scheduled" ||
-            activeJob.status == "inspection_required") &&
-        tripState == "idle") {
-      label = "Start Trip";
-      subtitle = "Begin navigation & live GPS tracking to customer";
-    } else if (tripState == "arrived" &&
-        activeJob.status != "quoted" &&
-        activeJob.status != "awaiting_approval") {
-      label = "Prepare Quotation";
-      subtitle = "Arrived on site — submit itemised labour & materials";
+    if (activeJob.status == "in_progress") {
+      label = "Mark Work Complete";
+      subtitle = "Upload completion photos & close repair";
+    } else if (activeJob.status == "work_completed" ||
+        activeJob.status == "awaiting_final_payment") {
+      label = "View Job Status";
+      subtitle = "Awaiting payment verification";
     } else if (activeJob.status == "approved") {
       label = "Start Work";
       subtitle = "Customer approved quotation — ready for repair";
-    } else if (activeJob.status == "in_progress") {
-      label = "Mark Work Complete";
-      subtitle = "Upload completion photos & close repair";
     } else if (activeJob.status == "quoted" ||
         activeJob.status == "awaiting_approval" ||
         activeJob.status == "quotation_submitted") {
       label = "View Submitted Quote";
       subtitle = "Waiting for customer approval";
-    } else if (activeJob.status == "work_completed" ||
-        activeJob.status == "awaiting_final_payment") {
-      label = "View Job Status";
-      subtitle = "Awaiting payment verification";
+    } else if (tripState == "on_the_way") {
+      label = "Arrived at Property";
+      subtitle = "Live trip in progress to ${activeJob.addressInKano}";
+    } else if (tripState == "arrived") {
+      label = "Prepare Quotation";
+      subtitle = "Arrived on site — submit itemised labour & materials";
+    } else if (activeJob.status == "scheduled" ||
+        activeJob.status == "inspection_required") {
+      label = "Start Trip";
+      subtitle = "Begin navigation & live GPS tracking to customer";
+    } else {
+      label = "Review Assignment";
+      subtitle = "New job assigned at ${activeJob.addressInKano}";
     }
 
     return _DynamicCta(
@@ -435,42 +446,51 @@ class _PlumberShellState extends State<PlumberShell> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Hello, $_plumberName",
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: FlowGuardTheme.navy,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Hello, $_plumberName",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: FlowGuardTheme.navy,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 3),
-                          Row(
-                            children: [
-                              Icon(
-                                _gpsStatus == "Location active"
-                                    ? Icons.gps_fixed_rounded
-                                    : Icons.gps_not_fixed_rounded,
-                                size: 14,
-                                color: _gpsStatus == "Location active"
-                                    ? const Color(0xFF059669)
-                                    : FlowGuardTheme.mutedText,
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                _gpsStatus,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: FlowGuardTheme.mutedText,
+                            const SizedBox(height: 3),
+                            Row(
+                              children: [
+                                Icon(
+                                  _gpsStatus == "Location active"
+                                      ? Icons.gps_fixed_rounded
+                                      : Icons.gps_not_fixed_rounded,
+                                  size: 14,
+                                  color: _gpsStatus == "Location active"
+                                      ? const Color(0xFF059669)
+                                      : FlowGuardTheme.mutedText,
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                                const SizedBox(width: 5),
+                                Expanded(
+                                  child: Text(
+                                    _gpsStatus,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: FlowGuardTheme.mutedText,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 8),
                       InkWell(
                         onTap: _toggleDuty,
                         borderRadius: BorderRadius.circular(999),

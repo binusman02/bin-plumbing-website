@@ -69,10 +69,25 @@ class _RoleValidatedPortalState extends State<_RoleValidatedPortal> {
       _statusMessage = null;
     });
 
-    final role = (widget.user.appMetadata["role"] ?? "customer").toString();
+    final rawRole = widget.user.appMetadata["role"]?.toString();
+    String role = rawRole ?? "";
+
+    // If app_metadata.role isn't set, verify against admin_users / plumbers before assuming customer
+    if (role.isEmpty) {
+      try {
+        final adminRows = await SupabaseConfig.client
+            .from("admin_users")
+            .select("id")
+            .eq("auth_user_id", widget.user.id)
+            .limit(1);
+        if (adminRows.isNotEmpty) {
+          role = "admin";
+        }
+      } catch (_) {}
+    }
 
     if (AppFlavorConfig.isTechnician) {
-      if (role != "plumber") {
+      if (role.isNotEmpty && role != "plumber") {
         setState(() {
           _checking = false;
           _statusMessage =
@@ -109,7 +124,7 @@ class _RoleValidatedPortalState extends State<_RoleValidatedPortal> {
         return;
       }
     } else {
-      if (role != "customer") {
+      if (role == "plumber" || role == "admin") {
         setState(() {
           _checking = false;
           _statusMessage = role == "plumber"
@@ -307,6 +322,15 @@ class _SignInScreenState extends State<SignInScreen> {
         identifier: raw,
         expectedRole: AppFlavorConfig.expectedRole,
       );
+      if (email.endsWith(".local")) {
+        if (mounted) {
+          setState(
+            () => _errorMessage =
+                "This phone account has no email address. Contact FlowGuard Support to reset your password.",
+          );
+        }
+        return;
+      }
       await SupabaseConfig.client.auth.resetPasswordForEmail(email);
       if (mounted) {
         setState(() => _infoMessage = "Password reset link sent to $email.");
@@ -515,47 +539,50 @@ class _SignInScreenState extends State<SignInScreen> {
                             )
                           : Text(_createAccountMode ? "Create Account" : "Sign In"),
                     ),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: _loading ? null : _signInWithGoogle,
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        side: const BorderSide(color: FlowGuardTheme.border),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                    if (!AppFlavorConfig.isTechnician) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _loading ? null : _signInWithGoogle,
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                          side: const BorderSide(color: FlowGuardTheme.border),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 22,
-                            height: 22,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              "G",
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 14,
-                                color: Color(0xFF4285F4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 22,
+                              height: 22,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                "G",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                  color: Color(0xFF4285F4),
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          const Text(
-                            "Continue with Google",
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: FlowGuardTheme.navy,
+                            const SizedBox(width: 10),
+                            const Text(
+                              "Continue with Google",
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: FlowGuardTheme.navy,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 10),
                     if (AppFlavorConfig.isCustomer)
                       TextButton(

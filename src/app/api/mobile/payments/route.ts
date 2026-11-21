@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     if (actor.role === "plumber") {
       const { data: reqs } = await supabase
         .from("service_requests")
-        .select("ticket_number, problem_category, status")
+        .select("ticket_number, category_slug, status")
         .eq("assigned_plumber_id", actor.id);
       const tickets = (reqs || []).map((r) => String(r.ticket_number));
       let payments: Record<string, unknown>[] = [];

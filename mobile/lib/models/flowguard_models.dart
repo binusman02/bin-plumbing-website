@@ -74,10 +74,20 @@ class ServiceRequestItem {
     final photoList = rawPhotos is List
         ? rawPhotos.map((p) => p.toString()).toList()
         : <String>[];
+    final rawCategory =
+        (json["problem_category"] ?? json["category_slug"] ?? "").toString();
+    final formattedCategory = rawCategory.contains("-") &&
+            !rawCategory.contains(" ")
+        ? rawCategory
+            .split("-")
+            .where((s) => s.isNotEmpty)
+            .map((w) => w[0].toUpperCase() + w.substring(1))
+            .join(" ")
+        : rawCategory;
     return ServiceRequestItem(
       id: (json["id"] ?? "").toString(),
       ticketNumber: (json["ticket_number"] ?? "").toString(),
-      problemCategory: (json["problem_category"] ?? "").toString(),
+      problemCategory: formattedCategory,
       propertyType: (json["property_type"] ?? "Residential").toString(),
       addressInKano: (json["address"] ?? json["address_in_kano"] ?? "").toString(),
       description: (json["issue_description"] ?? json["description"] ?? "").toString(),
@@ -127,6 +137,10 @@ class QuotationData {
     final other = (json["other_charges"] as num?)?.toDouble() ?? 0;
     final total = (json["total_amount"] as num?)?.toDouble() ??
         (labour + materials + transport + other);
+    final rawNotes = json["notes"]?.toString();
+    final cleanNotes = rawNotes
+        ?.replaceAll(RegExp(r"\s*<!--BP_QUOTE_ITEMS:[\s\S]*?-->"), "")
+        .trim();
     return QuotationData(
       id: (json["id"] ?? "").toString(),
       ticketNumber: (json["ticket_number"] ?? "").toString(),
@@ -137,7 +151,7 @@ class QuotationData {
       totalAmount: total,
       approvalStatus:
           (json["customer_approval_status"] ?? "pending").toString(),
-      notes: json["notes"]?.toString(),
+      notes: (cleanNotes != null && cleanNotes.isNotEmpty) ? cleanNotes : null,
     );
   }
 }

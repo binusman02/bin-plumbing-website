@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     if (!ticketNumber.startsWith("GENERAL-")) {
       const { data: reqRow } = await supabase
         .from("service_requests")
-        .select("assigned_plumber_id, address_in_kano, problem_category")
+        .select("assigned_plumber_id, address_in_kano, category_slug")
         .eq("ticket_number", ticketNumber)
         .maybeSingle();
       if (reqRow) {

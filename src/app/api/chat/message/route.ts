@@ -64,6 +64,12 @@ export async function POST(request: Request) {
       senderId: actor.id,
       recipientRole,
       recipientId,
+      recipients: [
+        {
+          recipientId: recipientId || "admin",
+          recipientRole,
+        },
+      ],
       message,
       attachment: body?.attachment,
       isInternal: false,

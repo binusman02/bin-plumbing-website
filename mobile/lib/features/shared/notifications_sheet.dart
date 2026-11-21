@@ -187,12 +187,14 @@ class _NotificationCentreSheetState extends State<_NotificationCentreSheet> {
   }
 
   Future<void> _markAllRead() async {
-    await FlowGuardApiClient.markNotificationRead(
-      role: widget.role,
-      markAll: true,
-    );
-    await _load();
-    widget.onUpdated();
+    try {
+      await FlowGuardApiClient.markNotificationRead(
+        role: widget.role,
+        markAll: true,
+      );
+      await _load();
+      widget.onUpdated();
+    } catch (_) {}
   }
 
   @override

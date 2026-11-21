@@ -35,6 +35,7 @@ export interface TrackedJob {
   status: string;
   hasAssignedPlumber: boolean;
   assignedTechnician?: string;
+  plumberPhone?: string;
   /** Fixed property destination. */
   destination: { lat: number; lng: number } | null;
   /** Present only when the viewer is authorised to see it AND the job is active. */

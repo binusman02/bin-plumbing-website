@@ -293,13 +293,22 @@ class _VoiceNoteBubblePlayerState extends State<VoiceNoteBubblePlayer> {
   }
 
   Future<void> _toggle() async {
-    if (_playing) {
-      await _player.pause();
-      setState(() => _playing = false);
-    } else {
-      final url = FlowGuardApiClient.authenticatedFileUrl(widget.rawUrl);
-      await _player.play(UrlSource(url));
-      setState(() => _playing = true);
+    try {
+      if (_playing) {
+        await _player.pause();
+        if (mounted) setState(() => _playing = false);
+      } else {
+        final url = FlowGuardApiClient.authenticatedFileUrl(widget.rawUrl);
+        await _player.play(UrlSource(url));
+        if (mounted) setState(() => _playing = true);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _playing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not play this voice note.")),
+        );
+      }
     }
   }
 

@@ -29,6 +29,7 @@ class _CustomerShellState extends State<CustomerShell> {
   bool _loading = true;
   List<ServiceCategoryItem> _categories = [];
   List<ServiceRequestItem> _requests = [];
+  List<Map<String, dynamic>> _payments = [];
   BankDetailsData? _bankDetails;
   String _customerId = "";
   String _customerName = "Customer";
@@ -72,6 +73,9 @@ class _CustomerShellState extends State<CustomerShell> {
           payAndBank["bankDetails"] as Map<String, dynamic>,
         );
       }
+      final rawPayments = payAndBank["payments"] as List? ?? [];
+      final parsedPayments =
+          rawPayments.whereType<Map<String, dynamic>>().toList();
 
       final profileResp = await FlowGuardApiClient.fetchProfile(
         role: "customer",
@@ -121,6 +125,7 @@ class _CustomerShellState extends State<CustomerShell> {
         setState(() {
           _categories = parsedCategories;
           _requests = reqList;
+          _payments = parsedPayments;
           _bankDetails = bank;
           _customerId = customerId;
           _customerName = displayName;
@@ -280,6 +285,7 @@ class _CustomerShellState extends State<CustomerShell> {
       _CustomerPaymentsTab(
         bankDetails: _bankDetails,
         requests: _requests,
+        payments: _payments,
         onUploaded: _loadCustomerData,
       ),
       FlowGuardProfileView(
@@ -329,11 +335,22 @@ class _CustomerShellState extends State<CustomerShell> {
           NotificationsButton(
             role: "customer",
             onNavigateLink: (link) {
-              if (link != null && link.contains("messages")) {
+              if (link == null || link.isEmpty) return;
+              if (link.contains("messages")) {
                 setState(() => _tabIndex = 2);
-              } else {
-                setState(() => _tabIndex = 1);
+                return;
               }
+              if (link.contains("payments")) {
+                setState(() => _tabIndex = 3);
+                return;
+              }
+              final match =
+                  _requests.where((r) => link.contains(r.ticketNumber)).firstOrNull;
+              if (match != null) {
+                _openRequestDetail(match);
+                return;
+              }
+              setState(() => _tabIndex = 1);
             },
           ),
           Padding(
@@ -515,7 +532,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
             ),
             const SizedBox(height: 6),
             SizedBox(
-              height: 92,
+              height: 100,
               child: ScrollConfiguration(
                 behavior: ScrollConfiguration.of(context)
                     .copyWith(scrollbars: false),
@@ -956,11 +973,13 @@ class _RequestSummaryCard extends StatelessWidget {
 class _CustomerPaymentsTab extends StatefulWidget {
   final BankDetailsData? bankDetails;
   final List<ServiceRequestItem> requests;
+  final List<Map<String, dynamic>> payments;
   final Future<void> Function() onUploaded;
 
   const _CustomerPaymentsTab({
     this.bankDetails,
     required this.requests,
+    required this.payments,
     required this.onUploaded,
   });
 
@@ -1147,6 +1166,7 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
 
         if (widget.requests.isNotEmpty) ...[
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _selectedTicket,
             decoration: const InputDecoration(
               labelText: "Select Request / Ticket for Payment",
@@ -1223,6 +1243,90 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
             ),
           ),
         ),
+
+        if (widget.payments.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          const Text(
+            "Payment History & Verification",
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: FlowGuardTheme.navy,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...widget.payments.map((p) {
+            final status = (p["verification_status"] ?? "pending").toString();
+            final ticket = (p["ticket_number"] ?? "").toString();
+            final total = (p["total_payment"] as num?)?.toDouble() ?? 0;
+            final isVerified = status == "verified";
+            final isRejected = status == "rejected";
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: FlowGuardTheme.border),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ticket,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "₦${total.toStringAsFixed(0)} • ${status.toUpperCase()}",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isVerified
+                          ? const Color(0xFFD1FAE5)
+                          : isRejected
+                              ? const Color(0xFFFEE2E2)
+                              : const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      isVerified
+                          ? "Verified"
+                          : isRejected
+                              ? "Rejected"
+                              : "Pending",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: isVerified
+                            ? const Color(0xFF065F46)
+                            : isRejected
+                                ? const Color(0xFF991B1B)
+                                : const Color(0xFF92400E),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ],
     );
   }

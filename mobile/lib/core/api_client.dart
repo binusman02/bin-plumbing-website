@@ -320,7 +320,7 @@ class FlowGuardApiClient {
     final uri = Uri.parse(
       "${SupabaseConfig.webBaseUrl}/api/mobile/tracking/location",
     );
-    await http
+    final res = await http
         .post(
           uri,
           headers: _authHeaders(),
@@ -334,6 +334,9 @@ class FlowGuardApiClient {
           }),
         )
         .timeout(const Duration(seconds: 10));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_extractError(res.body, "Location rejected."));
+    }
   }
 
   static Future<void> stopLiveLocation() async {

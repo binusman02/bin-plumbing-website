@@ -303,7 +303,6 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       return;
     }
     await _performAction("start_trip");
-    await _startGpsStream();
   }
 
   Future<void> _handleArrived() async {
@@ -527,6 +526,48 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                         ..._job.photos
                             .where((p) => VoiceNoteBubblePlayer.isAudioUrl(p))
                             .map((v) => VoiceNoteBubblePlayer(rawUrl: v)),
+                        if (_job.photos
+                            .any((p) => !VoiceNoteBubblePlayer.isAudioUrl(p))) ...[
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: 82,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _job.photos
+                                  .where(
+                                    (p) => !VoiceNoteBubblePlayer.isAudioUrl(p),
+                                  )
+                                  .length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 8),
+                              itemBuilder: (_, idx) {
+                                final imgs = _job.photos
+                                    .where(
+                                      (p) =>
+                                          !VoiceNoteBubblePlayer.isAudioUrl(p),
+                                    )
+                                    .toList();
+                                return ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(
+                                    FlowGuardApiClient.authenticatedFileUrl(
+                                      imgs[idx],
+                                    ),
+                                    width: 82,
+                                    height: 82,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      width: 82,
+                                      height: 82,
+                                      color: const Color(0xFFF1F5F9),
+                                      child: const Icon(Icons.image_outlined),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 14),
                         Row(
                           children: [

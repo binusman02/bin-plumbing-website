@@ -255,6 +255,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                   children: [
                     if (_step == 0) ...[
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: _selectedCategory,
                         decoration: const InputDecoration(
                           labelText: "Plumbing Category",
@@ -273,6 +274,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                         children: [
                           Expanded(
                             child: DropdownButtonFormField<String>(
+                              isExpanded: true,
                               initialValue: _priority,
                               decoration: const InputDecoration(
                                 labelText: "Priority",
@@ -295,6 +297,7 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: DropdownButtonFormField<String>(
+                              isExpanded: true,
                               initialValue: _propertyType,
                               decoration: const InputDecoration(
                                 labelText: "Property",

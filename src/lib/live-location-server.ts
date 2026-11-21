@@ -446,7 +446,7 @@ function toTrackedPlumber(
   };
 }
 
-const PLUMBER_COLUMNS = "id, full_name, avatar_url, is_available, verification_status, deleted_at";
+const PLUMBER_COLUMNS = "id, full_name, phone, avatar_url, is_available, verification_status, deleted_at";
 
 async function loadPlumbers(ids?: string[]): Promise<Map<string, Record<string, unknown>>> {
   const supabase = getServiceSupabase();
@@ -457,7 +457,7 @@ async function loadPlumbers(ids?: string[]): Promise<Map<string, Record<string, 
   const { data, error } = await q;
   let rows = data as Record<string, unknown>[] | null;
   if (error) {
-    let retry = supabase.from("plumbers").select("id, full_name, avatar_url, is_available, verification_status");
+    let retry = supabase.from("plumbers").select("id, full_name, phone, avatar_url, is_available, verification_status");
     if (ids) retry = retry.in("id", ids);
     rows = (await retry).data as Record<string, unknown>[] | null;
   }
@@ -492,6 +492,7 @@ function buildJob(
     status,
     hasAssignedPlumber,
     assignedTechnician: req.assigned_technician ? String(req.assigned_technician) : undefined,
+    plumberPhone: (req.plumber_phone ? String(req.plumber_phone) : undefined),
     destination,
     plumber,
     tripState,
@@ -549,12 +550,19 @@ export async function buildTrackingSnapshot(
     const jobs = reqs.map((r) => {
       const allowed = trackable.includes(r);
       let tracked: TrackedPlumber | null = null;
+      let pPhone: string | undefined;
       if (allowed) {
         const pid = String(r.assigned_plumber_id);
         const p = plumbers.get(pid);
-        if (p) tracked = toTrackedPlumber(p, locs.get(pid), [String(r.ticket_number)], nowMs);
+        if (p) {
+          tracked = toTrackedPlumber(p, locs.get(pid), [String(r.ticket_number)], nowMs);
+          if (p.phone) pPhone = String(p.phone);
+        }
       }
-      return buildJob({ ...r, history: histMap.get(String(r.id)) || [] }, tracked);
+      return buildJob(
+        { ...r, history: histMap.get(String(r.id)) || [], plumber_phone: pPhone },
+        tracked
+      );
     });
     return { serverNow: nowMs, viewer: "customer", jobs };
   }
