@@ -571,11 +571,21 @@ class _PlumberShellState extends State<PlumberShell> {
                               foregroundColor: Colors.white,
                               side: const BorderSide(color: Color(0xFF475569)),
                             ),
-                            child: Text(cta.buttonLabel),
+                            child: Text(
+                              cta.buttonLabel,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           )
                         : ElevatedButton(
                             onPressed: cta.onTap,
-                            child: Text(cta.buttonLabel),
+                            child: Text(
+                              cta.buttonLabel,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                   ),
                 ],

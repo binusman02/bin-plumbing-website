@@ -699,19 +699,41 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
                         children: [
                           Expanded(
                             child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 12,
+                                ),
+                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _decideQuote("rejected"),
-                              child: const Text("Decline", maxLines: 1),
+                              child: const Text(
+                                "Decline",
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 12,
+                                ),
+                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _decideQuote("approved"),
-                              child: const Text("Approve Quote", maxLines: 1),
+                              child: const Text(
+                                "Approve Quote",
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ),
                         ],
@@ -774,18 +796,40 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 12,
+                              ),
+                            ),
                             onPressed: () => _uploadReceipt(ImageSource.camera),
-                            icon: const Icon(Icons.camera_alt_outlined),
-                            label: const Text("Snap Receipt", maxLines: 1),
+                            icon: const Icon(Icons.camera_alt_outlined, size: 17),
+                            label: const Text(
+                              "Snap Receipt",
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 12,
+                              ),
+                            ),
                             onPressed: () =>
                                 _uploadReceipt(ImageSource.gallery),
-                            icon: const Icon(Icons.upload_file_outlined),
-                            label: const Text("Upload Receipt", maxLines: 1),
+                            icon: const Icon(Icons.upload_file_outlined, size: 17),
+                            label: const Text(
+                              "Upload Receipt",
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
                       ],

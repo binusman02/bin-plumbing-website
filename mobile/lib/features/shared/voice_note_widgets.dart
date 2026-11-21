@@ -221,7 +221,9 @@ class _VoiceNoteRecorderBoxState extends State<VoiceNoteRecorderBox> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    "Prefer to speak instead of type?",
+                    "Voice Note",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: FlowGuardTheme.navy,
@@ -229,7 +231,9 @@ class _VoiceNoteRecorderBoxState extends State<VoiceNoteRecorderBox> {
                     ),
                   ),
                   Text(
-                    "Record a quick voice note describing the plumbing issue",
+                    "Optional audio description",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 11,
                       color: FlowGuardTheme.mutedText,
@@ -241,7 +245,12 @@ class _VoiceNoteRecorderBoxState extends State<VoiceNoteRecorderBox> {
             OutlinedButton.icon(
               onPressed: _startRecording,
               icon: const Icon(Icons.mic_rounded, size: 16),
-              label: const Text("Record", maxLines: 1),
+              label: const Text(
+                "Record",
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ],

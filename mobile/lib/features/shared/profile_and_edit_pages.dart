@@ -240,6 +240,8 @@ class FlowGuardProfileView extends StatelessWidget {
                       label: const Text(
                         "Edit Profile",
                         maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 13),
                       ),
                     ),
@@ -260,6 +262,8 @@ class FlowGuardProfileView extends StatelessWidget {
                       label: const Text(
                         "Change Photo",
                         maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 13),
                       ),
                     ),

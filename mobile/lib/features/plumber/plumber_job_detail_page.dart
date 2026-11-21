@@ -575,11 +575,22 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                                 _job.customerPhone!.isNotEmpty)
                               Expanded(
                                 child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 12,
+                                    ),
+                                  ),
                                   onPressed: () => launchUrl(
                                     Uri.parse("tel:${_job.customerPhone}"),
                                   ),
                                   icon: const Icon(Icons.phone_outlined, size: 18),
-                                  label: const Text("Call Customer"),
+                                  label: const Text(
+                                    "Call Customer",
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                             if (_job.customerPhone != null &&
@@ -587,6 +598,12 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                               const SizedBox(width: 10),
                             Expanded(
                               child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 12,
+                                  ),
+                                ),
                                 onPressed: () {
                                   Navigator.pop(context);
                                   widget.onOpenChat();
@@ -595,7 +612,12 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                                   Icons.chat_bubble_outline,
                                   size: 18,
                                 ),
-                                label: const Text("Chat"),
+                                label: const Text(
+                                  "Chat",
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ),
                           ],
@@ -958,7 +980,12 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(buttonLabel),
+                : Text(
+                    buttonLabel,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
           ),
         ],
       ),

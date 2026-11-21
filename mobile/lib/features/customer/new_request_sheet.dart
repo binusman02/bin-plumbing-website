@@ -355,6 +355,8 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                                   ? "GPS Pinned (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})"
                                   : "Use Current GPS Location",
                           maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -510,6 +512,8 @@ class _NewRequestSheetState extends State<NewRequestSheet> {
                                 : Text(
                                     _step < 2 ? "Continue" : "Submit Request",
                                     maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                           ),
                         ),
