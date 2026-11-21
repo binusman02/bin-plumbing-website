@@ -36,6 +36,7 @@ class _CustomerShellState extends State<CustomerShell> {
   String _customerPhone = "";
   String? _savedAddress;
   String? _avatarUrl;
+  String? _loadError;
 
   @override
   void initState() {
@@ -44,17 +45,26 @@ class _CustomerShellState extends State<CustomerShell> {
   }
 
   Future<void> _loadCustomerData() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
       final client = SupabaseConfig.client;
 
-      final catRows = await client
-          .from("service_categories")
-          .select("*")
-          .eq("is_active", true)
-          .order("sort_order", ascending: true);
+      final results = await Future.wait<dynamic>([
+        (() async => await client
+            .from("service_categories")
+            .select("*")
+            .eq("is_active", true)
+            .order("sort_order", ascending: true))(),
+        FlowGuardApiClient.fetchPaymentsAndBank(role: "customer"),
+        FlowGuardApiClient.fetchProfile(role: "customer"),
+      ]);
 
+      final catRows = results[0] as List<dynamic>;
       final parsedCategories = catRows
+          .whereType<Map<String, dynamic>>()
           .where(
             (r) =>
                 r["visible"] != false &&
@@ -64,9 +74,7 @@ class _CustomerShellState extends State<CustomerShell> {
           .map((r) => ServiceCategoryItem.fromJson(r))
           .toList();
 
-      final payAndBank = await FlowGuardApiClient.fetchPaymentsAndBank(
-        role: "customer",
-      );
+      final payAndBank = results[1] as Map<String, dynamic>;
       BankDetailsData? bank;
       if (payAndBank["bankDetails"] is Map<String, dynamic>) {
         bank = BankDetailsData.fromSettingsValue(
@@ -77,9 +85,7 @@ class _CustomerShellState extends State<CustomerShell> {
       final parsedPayments =
           rawPayments.whereType<Map<String, dynamic>>().toList();
 
-      final profileResp = await FlowGuardApiClient.fetchProfile(
-        role: "customer",
-      );
+      final profileResp = results[2] as Map<String, dynamic>?;
       final profileMap = profileResp?["profile"] as Map<String, dynamic>?;
 
       String customerId = profileMap?["id"]?.toString() ?? "";
@@ -133,10 +139,16 @@ class _CustomerShellState extends State<CustomerShell> {
           _savedAddress = savedAddr;
           _avatarUrl = avatarUrl;
           _loading = false;
+          _loadError = null;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadError = "Unable to load your dashboard. Check your connection.";
+        });
+      }
     }
   }
 
@@ -385,7 +397,29 @@ class _CustomerShellState extends State<CustomerShell> {
           ),
         ],
       ),
-      body: IndexedStack(index: _tabIndex, children: pages),
+      body: Column(
+        children: [
+          if (_loadError != null)
+            MaterialBanner(
+              backgroundColor: const Color(0xFFFEF2F2),
+              content: Text(
+                _loadError!,
+                style: const TextStyle(
+                  color: Color(0xFF991B1B),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _loadCustomerData,
+                  child: const Text("Retry"),
+                ),
+              ],
+            ),
+          Expanded(child: IndexedStack(index: _tabIndex, children: pages)),
+        ],
+      ),
       bottomNavigationBar: ValueListenableBuilder<int>(
         valueListenable: AppStateBadges.unreadMessagesCount,
         builder: (context, unreadMsgs, _) => NavigationBar(

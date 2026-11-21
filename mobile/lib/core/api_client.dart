@@ -31,13 +31,20 @@ class FlowGuardApiClient {
 
   static String authenticatedFileUrl(String rawUrl) {
     if (rawUrl.isEmpty) return "";
-    final full = rawUrl.startsWith("http")
+    return rawUrl.startsWith("http")
         ? rawUrl
         : "${SupabaseConfig.webBaseUrl}${rawUrl.startsWith("/") ? "" : "/"}$rawUrl";
+  }
+
+  static Map<String, String>? fileAuthHeaders(String resolvedUrl) {
+    if (resolvedUrl.isEmpty) return null;
     final token = _accessToken;
-    if (token == null || token.isEmpty) return full;
-    final sep = full.contains("?") ? "&" : "?";
-    return "$full${sep}token=${Uri.encodeQueryComponent(token)}";
+    if (token == null || token.isEmpty) return null;
+    if (resolvedUrl.startsWith(SupabaseConfig.webBaseUrl) ||
+        resolvedUrl.startsWith("/")) {
+      return {"Authorization": "Bearer $token"};
+    }
+    return null;
   }
 
   static Future<String> resolveLoginIdentifier({

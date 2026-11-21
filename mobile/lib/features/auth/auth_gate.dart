@@ -109,28 +109,45 @@ class _RoleValidatedPortalState extends State<_RoleValidatedPortal> {
             ? (activeRow["verification_status"] ?? "pending_review").toString()
             : "pending_review";
         if (status != "approved") {
-          setState(() {
-            _checking = false;
-            _statusMessage =
-                "Your technician application status is '$status'. Access unlocks once approved by an administrator.";
-          });
+          if (mounted) {
+            setState(() {
+              _checking = false;
+              _statusMessage =
+                  "Your technician application status is '$status'. Access unlocks once approved by an administrator.";
+            });
+          }
           return;
         }
       } catch (_) {
-        setState(() {
-          _checking = false;
-          _statusMessage = "Unable to verify technician approval status.";
-        });
+        if (mounted) {
+          setState(() {
+            _checking = false;
+            _statusMessage = "Unable to verify technician approval status.";
+          });
+        }
         return;
       }
     } else {
+      // No role in app_metadata: make sure this is not a technician account.
+      if (role.isEmpty) {
+        try {
+          final plumberRows = await SupabaseConfig.client
+              .from("plumbers")
+              .select("id")
+              .eq("auth_user_id", widget.user.id)
+              .limit(1);
+          if (plumberRows.isNotEmpty) role = "plumber";
+        } catch (_) {}
+      }
       if (role == "plumber" || role == "admin") {
-        setState(() {
-          _checking = false;
-          _statusMessage = role == "plumber"
-              ? "Please use the FlowGuard Technician app for plumber accounts."
-              : "Please use the Admin Web Portal for administrator accounts.";
-        });
+        if (mounted) {
+          setState(() {
+            _checking = false;
+            _statusMessage = role == "plumber"
+                ? "Please use the FlowGuard Technician app for plumber accounts."
+                : "Please use the Admin Web Portal for administrator accounts.";
+          });
+        }
         return;
       }
     }
@@ -265,6 +282,11 @@ class _SignInScreenState extends State<SignInScreen> {
       if (_createAccountMode && AppFlavorConfig.isCustomer) {
         final fullName = _nameController.text.trim();
         final phone = _phoneController.text.trim();
+        if (!identifier.contains("@")) {
+          setState(() => _errorMessage =
+              "Create your account with an email address. You can sign in with your phone number afterwards.");
+          return;
+        }
         if (fullName.length < 2 || phone.length < 10) {
           setState(() => _errorMessage = "Enter your full name and phone number.");
           return;

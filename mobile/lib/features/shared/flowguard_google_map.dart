@@ -196,7 +196,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         TileLayer(
           urlTemplate: _satellite
               ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              : "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+              : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
           userAgentPackageName: "com.flowguard.plumbing",
         ),
         if (widget.routePoints.length >= 2)

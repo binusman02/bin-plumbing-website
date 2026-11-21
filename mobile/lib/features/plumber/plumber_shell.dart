@@ -43,6 +43,7 @@ class _PlumberShellState extends State<PlumberShell> {
   List<ServiceRequestItem> _jobs = [];
   Map<String, String> _tripStates = {};
   List<Map<String, dynamic>> _earningsLedger = [];
+  String? _loadError;
 
   @override
   void initState() {
@@ -51,12 +52,18 @@ class _PlumberShellState extends State<PlumberShell> {
   }
 
   Future<void> _loadPlumberData() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
       final client = SupabaseConfig.client;
-      final profileResp = await FlowGuardApiClient.fetchProfile(
-        role: "plumber",
-      );
+      final initialResults = await Future.wait([
+        FlowGuardApiClient.fetchProfile(role: "plumber"),
+        FlowGuardApiClient.fetchPaymentsAndBank(role: "plumber"),
+      ]);
+      final profileResp = initialResults[0];
+      final payData = initialResults[1] ?? <String, dynamic>{};
       final row = profileResp?["profile"] as Map<String, dynamic>?;
 
       if (row != null) {
@@ -136,9 +143,6 @@ class _PlumberShellState extends State<PlumberShell> {
           }
         }
 
-        final payData = await FlowGuardApiClient.fetchPaymentsAndBank(
-          role: "plumber",
-        );
         final rawPayments = payData["payments"] as List? ?? [];
         for (final p in rawPayments) {
           if (p is! Map<String, dynamic>) continue;
@@ -165,12 +169,16 @@ class _PlumberShellState extends State<PlumberShell> {
           _earningsLedger = ledger;
           _verifiedEarnings = earningsTotal;
           _loading = false;
+          _loadError = null;
         });
       }
       await _checkGpsStatus();
     } catch (_) {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _loadError = "Unable to load technician data. Check your connection.";
+        });
       }
     }
   }
@@ -901,7 +909,29 @@ class _PlumberShellState extends State<PlumberShell> {
           ),
         ],
       ),
-      body: IndexedStack(index: _tabIndex, children: pages),
+      body: Column(
+        children: [
+          if (_loadError != null)
+            MaterialBanner(
+              backgroundColor: const Color(0xFFFEF2F2),
+              content: Text(
+                _loadError!,
+                style: const TextStyle(
+                  color: Color(0xFF991B1B),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _loadPlumberData,
+                  child: const Text("Retry"),
+                ),
+              ],
+            ),
+          Expanded(child: IndexedStack(index: _tabIndex, children: pages)),
+        ],
+      ),
       bottomNavigationBar: ValueListenableBuilder<int>(
         valueListenable: AppStateBadges.unreadMessagesCount,
         builder: (context, unreadMsgs, _) => NavigationBar(

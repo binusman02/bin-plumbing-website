@@ -44,12 +44,14 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   String _gpsMessage = "GPS standby";
   bool _gpsError = false;
   StreamSubscription<Position>? _gpsSub;
+  bool _disposed = false;
   List<dynamic> _history = [];
   final List<String> _uploadedPhotoNames = [];
+  String? _loadError;
 
-  final _labourCtrl = TextEditingController(text: "15000");
+  final _labourCtrl = TextEditingController();
   final _materialsCtrl = TextEditingController(text: "0");
-  final _transportCtrl = TextEditingController(text: "2500");
+  final _transportCtrl = TextEditingController();
   final _otherCtrl = TextEditingController(text: "0");
   final _notesCtrl = TextEditingController();
 
@@ -62,6 +64,11 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
 
   @override
   void dispose() {
+    _disposed = true;
+    if (_gpsSub != null) {
+      // Leaving the page ends sharing so the customer never sees a stale pin.
+      FlowGuardApiClient.stopLiveLocation().catchError((_) {});
+    }
     _gpsSub?.cancel();
     _labourCtrl.dispose();
     _materialsCtrl.dispose();
@@ -72,7 +79,10 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   }
 
   Future<void> _loadJobDetails() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
       final client = SupabaseConfig.client;
       final reqRow = await client
@@ -136,13 +146,19 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
         });
       }
 
+      if (_disposed || !mounted) return;
       if (_tripState == "on_the_way" && _job.isActive) {
         await _startGpsStream();
       } else {
         await _stopGpsStream(disableSharing: false);
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadError = "Unable to load job details. Check your connection.";
+        });
+      }
     }
   }
 
@@ -190,7 +206,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
 
   Future<void> _startGpsStream() async {
     final ok = await _ensureLocationPermission();
-    if (!ok) return;
+    if (!ok || _disposed || !mounted) return;
 
     await _gpsSub?.cancel();
     if (mounted) {
@@ -209,10 +225,17 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       await _pushLocation(initial);
     } catch (_) {}
 
+    if (_disposed || !mounted) return;
     _gpsSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
+      locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 15,
+        // Foreground service keeps tracking alive when the screen locks.
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: "FlowGuard trip in progress",
+          notificationText: "Sharing your live location with the customer",
+          enableWakeLock: true,
+        ),
       ),
     ).listen(
       (pos) => _pushLocation(pos),
@@ -265,7 +288,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       if (mounted) {
         setState(() {
           _gpsError = true;
-          _gpsMessage = "Offline — GPS update queued for retry";
+          _gpsMessage = "Offline — will resend on the next GPS update";
         });
       }
     }
@@ -306,8 +329,25 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   }
 
   Future<void> _handleArrived() async {
-    await _stopGpsStream(disableSharing: true);
-    await _performAction("arrived");
+    // Only stop tracking once the server has accepted "arrived".
+    setState(() => _busy = true);
+    try {
+      await FlowGuardApiClient.performJobAction(
+        ticketOrId: _job.ticketNumber,
+        action: "arrived",
+      );
+      await _stopGpsStream(disableSharing: true);
+      await _loadJobDetails();
+      widget.onUpdated();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Update failed: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   double _parseNum(TextEditingController c) =>
@@ -408,6 +448,35 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
                 children: [
+                  if (_loadError != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFFECACA)),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _loadError!,
+                              style: const TextStyle(
+                                color: Color(0xFF991B1B),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _loadJobDetails,
+                            child: const Text("Retry"),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   // Header Card
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -552,6 +621,11 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                                   child: Image.network(
                                     FlowGuardApiClient.authenticatedFileUrl(
                                       imgs[idx],
+                                    ),
+                                    headers: FlowGuardApiClient.fileAuthHeaders(
+                                      FlowGuardApiClient.authenticatedFileUrl(
+                                        imgs[idx],
+                                      ),
                                     ),
                                     width: 82,
                                     height: 82,
@@ -913,10 +987,22 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
               child: ElevatedButton(
                 onPressed: _busy
                     ? null
-                    : () => _performAction(
+                    : () {
+                        if (_uploadedPhotoNames.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Upload at least one work photo before marking complete.",
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        _performAction(
                           "complete_work",
                           photos: _uploadedPhotoNames,
-                        ),
+                        );
+                      },
                 child: const Text("Mark Work Complete", maxLines: 1),
               ),
             ),

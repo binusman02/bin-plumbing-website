@@ -20,18 +20,20 @@ Unified **Customer + Technician (Plumber)** Android & iOS codebase connected dir
    - Enable **Google** provider in **Supabase → Authentication → Providers** and pass your Google OAuth Web Client ID via `--dart-define=GOOGLE_WEB_CLIENT_ID=...`.
 
 ## 3. Running & Building
+This app has two flavors: `customer` and `technician`. Always pass `--flavor customer` or `--flavor technician`.
+Maps use OpenStreetMap-style tiles via `flutter_map` (no Google Maps key needed). Run commands from the project root.
 From `mobile/`:
 
 ```powershell
 flutter pub get
 
-flutter run `
+flutter run --flavor customer `
   --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co `
   --dart-define=SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY `
   --dart-define=GOOGLE_WEB_CLIENT_ID=YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com `
   --dart-define=WEB_BASE_URL=https://flowguard-ng.vercel.app
 
-flutter build apk --release `
+flutter build apk --release --flavor customer `
   --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co `
   --dart-define=SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY `
   --dart-define=GOOGLE_WEB_CLIENT_ID=YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com `

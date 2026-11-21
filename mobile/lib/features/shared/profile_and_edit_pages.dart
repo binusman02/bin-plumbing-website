@@ -159,6 +159,11 @@ class FlowGuardProfileView extends StatelessWidget {
                               FlowGuardApiClient.authenticatedFileUrl(
                                 avatarUrl!,
                               ),
+                              headers: FlowGuardApiClient.fileAuthHeaders(
+                                FlowGuardApiClient.authenticatedFileUrl(
+                                  avatarUrl!,
+                                ),
+                              ),
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Image.asset(
                                 "assets/images/flowguard-icon.jpg",

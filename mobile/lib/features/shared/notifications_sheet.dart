@@ -25,6 +25,7 @@ class _NotificationsButtonState extends State<NotificationsButton> {
   int _unreadCount = 0;
   Timer? _pollTimer;
   StreamSubscription<RemoteMessage>? _fcmSub;
+  StreamSubscription<RemoteMessage>? _openedSub;
 
   @override
   void initState() {
@@ -35,6 +36,13 @@ class _NotificationsButtonState extends State<NotificationsButton> {
       (_) => _refreshCount(),
     );
     if (GoogleServicesBootstrap.firebaseReady) {
+      // Notification tapped while app was in background / closed.
+      FirebaseMessaging.instance.getInitialMessage().then((msg) {
+        if (msg != null && mounted) _handleTap(msg);
+      });
+      _openedSub = FirebaseMessaging.onMessageOpenedApp.listen((msg) {
+        if (mounted) _handleTap(msg);
+      });
       _fcmSub = FirebaseMessaging.onMessage.listen((msg) {
         final type = (msg.data["type"] ?? "").toString();
         if (type == "new_message") {
@@ -64,7 +72,15 @@ class _NotificationsButtonState extends State<NotificationsButton> {
   void dispose() {
     _pollTimer?.cancel();
     _fcmSub?.cancel();
+    _openedSub?.cancel();
     super.dispose();
+  }
+
+  void _handleTap(RemoteMessage msg) {
+    final link = (msg.data["link"] ?? msg.data["destination"] ?? msg.data["url"])
+        ?.toString();
+    _refreshCount();
+    widget.onNavigateLink?.call(link);
   }
 
   Future<void> _refreshCount() async {

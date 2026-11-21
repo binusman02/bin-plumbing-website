@@ -2,6 +2,7 @@ import "dart:async";
 import "dart:io";
 import "package:audioplayers/audioplayers.dart";
 import "package:flutter/material.dart";
+import "package:http/http.dart" as http;
 import "package:path_provider/path_provider.dart";
 import "package:record/record.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
@@ -286,6 +287,8 @@ class VoiceNoteBubblePlayer extends StatefulWidget {
 class _VoiceNoteBubblePlayerState extends State<VoiceNoteBubblePlayer> {
   final AudioPlayer _player = AudioPlayer();
   bool _playing = false;
+  bool _downloading = false;
+  String? _cachedFilePath;
 
   @override
   void initState() {
@@ -302,18 +305,47 @@ class _VoiceNoteBubblePlayerState extends State<VoiceNoteBubblePlayer> {
   }
 
   Future<void> _toggle() async {
+    if (_downloading) return;
     try {
       if (_playing) {
         await _player.pause();
         if (mounted) setState(() => _playing = false);
       } else {
         final url = FlowGuardApiClient.authenticatedFileUrl(widget.rawUrl);
-        await _player.play(UrlSource(url));
-        if (mounted) setState(() => _playing = true);
+        String? localPath = _cachedFilePath;
+        if (localPath == null || !File(localPath).existsSync()) {
+          if (mounted) setState(() => _downloading = true);
+          final res = await http
+              .get(
+                Uri.parse(url),
+                headers: FlowGuardApiClient.fileAuthHeaders(url),
+              )
+              .timeout(const Duration(seconds: 20));
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            throw Exception("Audio download failed (${res.statusCode})");
+          }
+          final dir = await getTemporaryDirectory();
+          final file = File(
+            "${dir.path}/fg_voice_${url.hashCode.abs()}.m4a",
+          );
+          await file.writeAsBytes(res.bodyBytes, flush: true);
+          localPath = file.path;
+          _cachedFilePath = localPath;
+        }
+        await _player.play(DeviceFileSource(localPath));
+        if (mounted) {
+          setState(() {
+            _downloading = false;
+            _playing = true;
+          });
+        }
       }
     } catch (_) {
       if (mounted) {
-        setState(() => _playing = false);
+        setState(() {
+          _downloading = false;
+          _playing = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not play this voice note.")),
         );

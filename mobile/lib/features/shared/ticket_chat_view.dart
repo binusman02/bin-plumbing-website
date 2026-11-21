@@ -220,20 +220,33 @@ class _TicketChatViewState extends State<TicketChatView> {
             onRefresh: () => _loadConversations(),
             child: _loading && _conversations.isEmpty
                 ? const Center(child: CircularProgressIndicator())
-                : _error != null && _conversations.isEmpty
-                    ? ListView(
-                        children: [
-                          const SizedBox(height: 80),
-                          Center(
-                            child: Text(
-                              _error!,
-                              style: const TextStyle(
-                                color: FlowGuardTheme.mutedText,
+                    : _error != null && _conversations.isEmpty
+                        ? ListView(
+                            children: [
+                              const SizedBox(height: 80),
+                              Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        _error!,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: FlowGuardTheme.mutedText,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      OutlinedButton(
+                                        onPressed: _loadConversations,
+                                        child: const Text("Retry"),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ],
-                      )
+                            ],
+                          )
                     : filtered.isEmpty
                         ? ListView(
                             children: const [
@@ -307,6 +320,13 @@ class _TicketChatViewState extends State<TicketChatView> {
                                                     FlowGuardApiClient
                                                         .authenticatedFileUrl(
                                                       item.peerAvatarUrl!,
+                                                    ),
+                                                    headers: FlowGuardApiClient
+                                                        .fileAuthHeaders(
+                                                      FlowGuardApiClient
+                                                          .authenticatedFileUrl(
+                                                        item.peerAvatarUrl!,
+                                                      ),
                                                     ),
                                                     width: 50,
                                                     height: 50,
@@ -510,6 +530,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   final AudioRecorder _voiceRecorder = AudioRecorder();
   RealtimeChannel? _rtChannel;
   Timer? _recordTimer;
+  Timer? _rtDebounce;
+  String? _threadError;
 
   @override
   void initState() {
@@ -527,12 +549,20 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   @override
   void dispose() {
+    _rtDebounce?.cancel();
     _rtChannel?.unsubscribe();
     _recordTimer?.cancel();
     _voiceRecorder.dispose();
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _scheduleRealtimeReload() {
+    _rtDebounce?.cancel();
+    _rtDebounce = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) _loadMessages(quiet: true);
+    });
   }
 
   void _subscribeRealtime() {
@@ -550,7 +580,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               column: "ticket_number",
               value: widget.conversation.ticketNumber,
             ),
-            callback: (_) => _loadMessages(quiet: true),
+            callback: (_) => _scheduleRealtimeReload(),
           )
           .onPostgresChanges(
             event: PostgresChangeEvent.update,
@@ -561,7 +591,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               column: "ticket_number",
               value: widget.conversation.ticketNumber,
             ),
-            callback: (_) => _loadMessages(quiet: true),
+            callback: (_) => _scheduleRealtimeReload(),
           )
           .subscribe();
     } catch (_) {}
@@ -587,7 +617,10 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   Future<void> _loadMessages({bool quiet = false}) async {
     if (!quiet && _messages.isEmpty && mounted) {
-      setState(() => _loading = true);
+      setState(() {
+        _loading = true;
+        _threadError = null;
+      });
     }
     try {
       final data = await FlowGuardApiClient.fetchChatMessagesWithPresence(
@@ -595,7 +628,12 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         role: widget.senderRole,
       );
       if (data == null) {
-        if (mounted && !quiet) setState(() => _loading = false);
+        if (mounted && !quiet) {
+          setState(() {
+            _loading = false;
+            _threadError = "Unable to load messages. Check your connection.";
+          });
+        }
         return;
       }
       final rawMsgs = data["messages"] as List? ?? [];
@@ -619,18 +657,32 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           _messages = [...serverList, ...failedLocals];
           _peerOnline = otherOnline;
           _loading = false;
+          _threadError = null;
         });
         if (hadNone && serverList.isNotEmpty) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
         }
       }
-      FlowGuardApiClient.markChatRead(
-        ticketNumber: widget.conversation.ticketNumber,
-        role: widget.senderRole,
-        peerRole: widget.conversation.peerRole,
-      ).catchError((_) {});
+      final hasUnreadFromOther = serverList.any((m) {
+        final sender = (m["senderRole"] ?? m["sender_role"] ?? "").toString();
+        if (sender == widget.senderRole) return false;
+        final readBy = m["read_by"] is List ? (m["read_by"] as List) : const [];
+        return m["read_at"] == null && !readBy.contains(widget.senderRole);
+      });
+      if (hasUnreadFromOther) {
+        FlowGuardApiClient.markChatRead(
+          ticketNumber: widget.conversation.ticketNumber,
+          role: widget.senderRole,
+          peerRole: widget.conversation.peerRole,
+        ).catchError((_) {});
+      }
     } catch (_) {
-      if (mounted && !quiet) setState(() => _loading = false);
+      if (mounted && !quiet) {
+        setState(() {
+          _loading = false;
+          _threadError = "Unable to load messages. Check your connection.";
+        });
+      }
     }
   }
 
@@ -900,7 +952,30 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               color: const Color(0xFFEFEAE2),
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : _messages.isEmpty
+                  : _threadError != null && _messages.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _threadError!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: FlowGuardTheme.mutedText,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                OutlinedButton(
+                                  onPressed: () => _loadMessages(),
+                                  child: const Text("Retry"),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : _messages.isEmpty
                       ? const Center(
                           child: Text(
                             "Send a message or voice note to start chatting.",
@@ -1002,6 +1077,11 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                           child: Image.network(
                                             FlowGuardApiClient
                                                 .authenticatedFileUrl(rawUrl),
+                                            headers: FlowGuardApiClient
+                                                .fileAuthHeaders(
+                                              FlowGuardApiClient
+                                                  .authenticatedFileUrl(rawUrl),
+                                            ),
                                             height: 160,
                                             fit: BoxFit.cover,
                                             errorBuilder: (_, __, ___) =>

@@ -45,6 +45,8 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   int _reviewRating = 5;
   final _reviewController = TextEditingController();
   bool _reviewSubmitted = false;
+  bool _paymentSubmitted = false;
+  String? _paymentStatus;
   Timer? _pollTimer;
 
   static const List<String> _stages = [
@@ -77,7 +79,29 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   }
 
   Future<void> _loadDetails() async {
-    await Future.wait([_refreshRequestRow(), _loadQuote(), _refreshTracking()]);
+    await Future.wait([
+      _refreshRequestRow(),
+      _loadQuote(),
+      _refreshTracking(),
+      _loadExistingPayment(),
+    ]);
+  }
+
+  Future<void> _loadExistingPayment() async {
+    try {
+      final rows = await SupabaseConfig.client
+          .from("payments")
+          .select("id, verification_status")
+          .eq("ticket_number", _request.ticketNumber)
+          .limit(1);
+      if (rows.isNotEmpty && mounted) {
+        setState(() {
+          _paymentSubmitted = true;
+          _paymentStatus =
+              rows.first["verification_status"]?.toString() ?? "submitted";
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _refreshRequestRow() async {
@@ -89,6 +113,7 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
           .maybeSingle();
       if (row != null && mounted) {
         setState(() => _request = ServiceRequestItem.fromJson(row));
+        if (!_request.isActive) _pollTimer?.cancel();
       }
     } catch (_) {}
   }
@@ -233,6 +258,14 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   }
 
   Future<void> _uploadReceipt(ImageSource source) async {
+    if (_paymentSubmitted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Payment proof has already been submitted for this ticket."),
+        ),
+      );
+      return;
+    }
     final picker = ImagePicker();
     final file = await picker.pickImage(source: source, imageQuality: 80);
     if (file == null || !mounted) return;
@@ -248,6 +281,12 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
         amount: _quote?.totalAmount,
         proofUrl: url,
       );
+      if (mounted) {
+        setState(() {
+          _paymentSubmitted = true;
+          _paymentStatus = "pending";
+        });
+      }
       widget.onUpdated();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -304,8 +343,7 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
     );
     final showPaymentCard = !isCancelled &&
         (_request.status == "awaiting_final_payment" ||
-            _request.status == "work_completed" ||
-            _quote?.approvalStatus == "approved");
+            _request.status == "work_completed");
     final canCancel = [
       "new",
       "pending",
@@ -589,6 +627,11 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
                             FlowGuardApiClient.authenticatedFileUrl(
                               imagePhotos[i],
                             ),
+                            headers: FlowGuardApiClient.fileAuthHeaders(
+                              FlowGuardApiClient.authenticatedFileUrl(
+                                imagePhotos[i],
+                              ),
+                            ),
                             width: 86,
                             height: 86,
                             fit: BoxFit.cover,
@@ -792,7 +835,26 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
+                    if (_paymentSubmitted)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Text(
+                          "Payment proof already submitted (${_paymentStatus ?? "pending"}).",
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF065F46),
+                          ),
+                        ),
+                      )
+                    else
+                      Row(
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
