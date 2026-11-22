@@ -98,8 +98,8 @@ export async function generateSupportReply(params: {
 
   const googleProvider = createGoogleGenerativeAI({ apiKey });
   const system = await buildSystemPrompt(params.ticketContext);
-  const candidates = ["gemini-2.5-flash", "gemini-2.0-flash"] as const;
-  let lastReason = "unknown";
+  const candidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite"] as const;
+  const reasons: string[] = [];
 
   for (const modelId of candidates) {
     try {
@@ -107,7 +107,12 @@ export async function generateSupportReply(params: {
         model: googleProvider(modelId),
         system,
         messages: cleanMessages,
-        maxOutputTokens: 400,
+        maxOutputTokens: 300,
+        providerOptions: {
+          google: {
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        },
         abortSignal: AbortSignal.timeout(12000),
       });
 
@@ -115,11 +120,12 @@ export async function generateSupportReply(params: {
       if (text) {
         return { text, model: modelId, fallback: false };
       }
-      lastReason = "empty_text";
+      reasons.push(`${modelId}: empty_text`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      lastReason = msg.slice(0, 120);
-      console.error(`[ai-assistant] ${modelId} failed:`, lastReason);
+      const short = `${modelId}: ${msg.slice(0, 90)}`;
+      reasons.push(short);
+      console.error("[ai-assistant] failed:", short);
     }
   }
 
@@ -127,7 +133,7 @@ export async function generateSupportReply(params: {
     text: buildFallbackReply(lastUser, params.ticketContext),
     model: "fallback-error",
     fallback: true,
-    reason: lastReason,
+    reason: reasons.join(" | "),
   };
 }
 
