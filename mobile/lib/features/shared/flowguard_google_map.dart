@@ -1,3 +1,5 @@
+import "dart:convert";
+
 import "package:flutter/foundation.dart";
 import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
@@ -18,6 +20,12 @@ class FlowGuardGoogleMap extends StatefulWidget {
   final bool allowFullscreen;
   final bool followMe;
   final bool enable3D;
+  final bool showPlumberMarker;
+  final double followZoom;
+  final bool showStyleControls;
+  final bool showDefaultCenterButton;
+  final int recenterTrigger;
+  final double borderRadius;
 
   static const LatLng _kanoCenter = LatLng(12.0022, 8.5920);
   static const String _mapboxAccessToken = String.fromEnvironment(
@@ -41,6 +49,12 @@ class FlowGuardGoogleMap extends StatefulWidget {
     this.allowFullscreen = false,
     this.followMe = false,
     this.enable3D = false,
+    this.showPlumberMarker = true,
+    this.followZoom = 16.2,
+    this.showStyleControls = true,
+    this.showDefaultCenterButton = true,
+    this.recenterTrigger = 0,
+    this.borderRadius = 18.0,
   });
 
   @override
@@ -48,9 +62,13 @@ class FlowGuardGoogleMap extends StatefulWidget {
 }
 
 class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
+  static const String _routeSourceId = "flowguard-route-source";
+  static const String _routeLayerId = "flowguard-route-layer";
+
   MapboxMap? _mapboxMap;
   CircleAnnotationManager? _circleManager;
-  PolylineAnnotationManager? _polylineManager;
+  CircleAnnotation? _customerAnnotation;
+  CircleAnnotation? _plumberAnnotation;
   late final ViewportController _viewportController;
   LatLng? _myLocation;
   bool _locatingMe = false;
@@ -87,22 +105,40 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   double get _targetZoom =>
       (widget.customerLat != null || widget.plumberLat != null) ? 15.5 : 12.5;
 
+  bool _routeChanged(List<LatLng> prev, List<LatLng> next) {
+    if (identical(prev, next)) return false;
+    if (prev.length != next.length) return true;
+    if (prev.isEmpty) return false;
+    return prev.first != next.first || prev.last != next.last;
+  }
+
   @override
   void didUpdateWidget(covariant FlowGuardGoogleMap oldWidget) {
     super.didUpdateWidget(oldWidget);
     final coordsChanged = oldWidget.customerLat != widget.customerLat ||
         oldWidget.customerLng != widget.customerLng ||
         oldWidget.plumberLat != widget.plumberLat ||
-        oldWidget.plumberLng != widget.plumberLng;
-    final routeChanged = oldWidget.routePoints.length != widget.routePoints.length;
+        oldWidget.plumberLng != widget.plumberLng ||
+        oldWidget.showPlumberMarker != widget.showPlumberMarker;
+    final routeChanged = _routeChanged(oldWidget.routePoints, widget.routePoints);
 
-    if (oldWidget.followMe != widget.followMe && widget.followMe) {
+    final firstCoordAppearance =
+        (oldWidget.customerLat == null && widget.customerLat != null) ||
+        (oldWidget.plumberLat == null && widget.plumberLat != null);
+
+    if (oldWidget.recenterTrigger != widget.recenterTrigger && widget.followMe) {
       _engageFollowPuck();
-    } else if (coordsChanged && !widget.followMe) {
+    } else if (oldWidget.followMe != widget.followMe && widget.followMe) {
+      _engageFollowPuck();
+    } else if (firstCoordAppearance && !widget.followMe) {
       _moveCamera(_target, _targetZoom);
     }
-    if (coordsChanged || routeChanged) {
-      _syncAnnotations();
+
+    if (coordsChanged) {
+      _syncCircleAnnotations();
+    }
+    if (routeChanged) {
+      _syncRouteSource();
     }
   }
 
@@ -153,7 +189,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
     try {
       _viewportController.moveTo(
         FollowPuckViewportState(
-          zoom: 16.2,
+          zoom: widget.followZoom,
           pitch: _is3D ? 50.0 : 0.0,
           bearing: const FollowPuckViewportStateBearingHeading(),
         ),
@@ -164,8 +200,8 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
     _circleManager = await mapboxMap.annotations.createCircleAnnotationManager();
-    _polylineManager =
-        await mapboxMap.annotations.createPolylineAnnotationManager();
+    _customerAnnotation = null;
+    _plumberAnnotation = null;
     if (widget.onPickLocation != null) {
       mapboxMap.addInteraction(
         TapInteraction.onMap((ctx) {
@@ -178,58 +214,113 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
       );
     }
     await _enableLocationPuck(engageFollow: widget.followMe);
-    await _syncAnnotations();
+    await _syncCircleAnnotations();
+    await _syncRouteSource();
   }
 
-  Future<void> _syncAnnotations() async {
+  Future<void> _syncCircleAnnotations() async {
     final circles = _circleManager;
-    final lines = _polylineManager;
-    if (circles == null || lines == null) return;
+    if (circles == null) return;
 
     try {
-      await circles.deleteAll();
-      await lines.deleteAll();
-
-      if (widget.routePoints.length >= 2) {
-        await lines.create(
-          PolylineAnnotationOptions(
-            geometry: LineString(
-              coordinates: widget.routePoints
-                  .map((p) => Position(p.longitude, p.latitude))
-                  .toList(),
-            ),
-            lineColor: FlowGuardTheme.navy.toARGB32(),
-            lineWidth: 5.0,
-          ),
-        );
-      }
-
       if (widget.customerLat != null && widget.customerLng != null) {
-        await circles.create(
-          CircleAnnotationOptions(
-            geometry: Point(
-              coordinates: Position(widget.customerLng!, widget.customerLat!),
-            ),
-            circleColor: FlowGuardTheme.navy.toARGB32(),
-            circleRadius: 10.0,
-            circleStrokeColor: Colors.white.toARGB32(),
-            circleStrokeWidth: 3.0,
-          ),
+        final pt = Point(
+          coordinates: Position(widget.customerLng!, widget.customerLat!),
         );
+        if (_customerAnnotation == null) {
+          _customerAnnotation = await circles.create(
+            CircleAnnotationOptions(
+              geometry: pt,
+              circleColor: FlowGuardTheme.navy.toARGB32(),
+              circleRadius: 10.0,
+              circleStrokeColor: Colors.white.toARGB32(),
+              circleStrokeWidth: 3.0,
+            ),
+          );
+        } else {
+          _customerAnnotation!.geometry = pt;
+          await circles.update(_customerAnnotation!);
+        }
+      } else if (_customerAnnotation != null) {
+        await circles.delete(_customerAnnotation!);
+        _customerAnnotation = null;
       }
 
-      if (widget.plumberLat != null && widget.plumberLng != null) {
-        await circles.create(
-          CircleAnnotationOptions(
-            geometry: Point(
-              coordinates: Position(widget.plumberLng!, widget.plumberLat!),
-            ),
-            circleColor: FlowGuardTheme.gold.toARGB32(),
-            circleRadius: 11.0,
-            circleStrokeColor: FlowGuardTheme.navy.toARGB32(),
-            circleStrokeWidth: 3.0,
-          ),
+      if (widget.showPlumberMarker &&
+          widget.plumberLat != null &&
+          widget.plumberLng != null) {
+        final pt = Point(
+          coordinates: Position(widget.plumberLng!, widget.plumberLat!),
         );
+        if (_plumberAnnotation == null) {
+          _plumberAnnotation = await circles.create(
+            CircleAnnotationOptions(
+              geometry: pt,
+              circleColor: FlowGuardTheme.gold.toARGB32(),
+              circleRadius: 11.0,
+              circleStrokeColor: FlowGuardTheme.navy.toARGB32(),
+              circleStrokeWidth: 3.0,
+            ),
+          );
+        } else {
+          _plumberAnnotation!.geometry = pt;
+          await circles.update(_plumberAnnotation!);
+        }
+      } else if (_plumberAnnotation != null) {
+        await circles.delete(_plumberAnnotation!);
+        _plumberAnnotation = null;
+      }
+    } catch (_) {}
+  }
+
+  String _routeGeoJson(List<LatLng> points) {
+    if (points.length < 2) {
+      return jsonEncode({
+        "type": "FeatureCollection",
+        "features": const [],
+      });
+    }
+    return jsonEncode({
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": const {},
+          "geometry": {
+            "type": "LineString",
+            "coordinates":
+                points.map((p) => [p.longitude, p.latitude]).toList(),
+          },
+        },
+      ],
+    });
+  }
+
+  Future<void> _syncRouteSource() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    final geoJson = _routeGeoJson(widget.routePoints);
+    try {
+      final exists = await map.styleSourceExists(_routeSourceId);
+      if (!exists) {
+        await map.addSource(
+          GeoJsonSource(id: _routeSourceId, data: geoJson),
+        );
+        final layerExists = await map.styleLayerExists(_routeLayerId);
+        if (!layerExists) {
+          await map.addLayer(
+            LineLayer(
+              id: _routeLayerId,
+              sourceId: _routeSourceId,
+              lineColor: FlowGuardTheme.navy.toARGB32(),
+              lineWidth: 6.0,
+              lineCap: LineCap.ROUND,
+              lineJoin: LineJoin.ROUND,
+            ),
+          );
+        }
+      } else {
+        await map.setStyleSourceProperty(_routeSourceId, "data", geoJson);
       }
     } catch (_) {}
   }
@@ -243,7 +334,8 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
             ? FlowGuardGoogleMap._satelliteStyleUri
             : FlowGuardGoogleMap._streetStyleUri,
       );
-      await _syncAnnotations();
+      await _syncCircleAnnotations();
+      await _syncRouteSource();
     } catch (_) {}
   }
 
@@ -300,6 +392,8 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
 
   @override
   Widget build(BuildContext context) {
+    final missingToken = FlowGuardGoogleMap._mapboxAccessToken.trim().isEmpty;
+
     final mapWidget = MapWidget(
       key: const ValueKey("flowguard-mapbox-widget"),
       styleUri: _satellite
@@ -308,7 +402,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
       viewportController: _viewportController,
       viewport: widget.followMe
           ? FollowPuckViewportState(
-              zoom: 16.2,
+              zoom: widget.followZoom,
               pitch: _is3D ? 50.0 : 0.0,
               bearing: const FollowPuckViewportStateBearingHeading(),
             )
@@ -323,93 +417,133 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
       },
       onMapCreated: _onMapCreated,
-      onStyleLoadedListener: (_) => _syncAnnotations(),
+      onStyleLoadedListener: (_) {
+        _syncCircleAnnotations();
+        _syncRouteSource();
+      },
     );
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(widget.borderRadius),
       child: Container(
         height: widget.height,
         decoration: BoxDecoration(
-          border: Border.all(color: FlowGuardTheme.border),
-          borderRadius: BorderRadius.circular(18),
+          border: widget.borderRadius > 0
+              ? Border.all(color: FlowGuardTheme.border)
+              : null,
+          borderRadius: BorderRadius.circular(widget.borderRadius),
         ),
         child: Stack(
           children: [
             mapWidget,
-            Positioned(
-              top: 10,
-              right: 10,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Material(
-                    color: _is3D ? FlowGuardTheme.navy : Colors.white,
-                    elevation: 2,
-                    borderRadius: BorderRadius.circular(12),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: _toggle3D,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
+            if (missingToken)
+              Positioned(
+                top: 12,
+                left: 12,
+                right: 12,
+                child: Material(
+                  color: Colors.red.shade700,
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline_rounded,
+                          color: Colors.white,
+                          size: 20,
                         ),
-                        child: Text(
-                          _is3D ? "3D" : "2D",
-                          maxLines: 1,
-                          softWrap: false,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: _is3D ? Colors.white : FlowGuardTheme.navy,
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "Mapbox token missing. Build with --dart-define=MAPBOX_ACCESS_TOKEN=pk....",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            if (widget.showStyleControls)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Material(
+                      color: _is3D ? FlowGuardTheme.navy : Colors.white,
+                      elevation: 2,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _toggle3D,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            _is3D ? "3D" : "2D",
+                            maxLines: 1,
+                            softWrap: false,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: _is3D ? Colors.white : FlowGuardTheme.navy,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Material(
-                    color: Colors.white,
-                    elevation: 2,
-                    borderRadius: BorderRadius.circular(12),
-                    child: InkWell(
+                    const SizedBox(width: 6),
+                    Material(
+                      color: Colors.white,
+                      elevation: 2,
                       borderRadius: BorderRadius.circular(12),
-                      onTap: _toggleStyle,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _satellite
-                                  ? Icons.map_outlined
-                                  : Icons.satellite_alt_rounded,
-                              size: 16,
-                              color: FlowGuardTheme.navy,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              _satellite ? "Street" : "Satellite",
-                              maxLines: 1,
-                              softWrap: false,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _toggleStyle,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _satellite
+                                    ? Icons.map_outlined
+                                    : Icons.satellite_alt_rounded,
+                                size: 16,
                                 color: FlowGuardTheme.navy,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 5),
+                              Text(
+                                _satellite ? "Street" : "Satellite",
+                                maxLines: 1,
+                                softWrap: false,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: FlowGuardTheme.navy,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
             if (widget.allowFullscreen)
               Positioned(
                 top: 10,
@@ -437,6 +571,8 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
                               allowFullscreen: false,
                               followMe: widget.followMe,
                               enable3D: _is3D,
+                              showPlumberMarker: widget.showPlumberMarker,
+                              borderRadius: 0.0,
                             ),
                           ),
                         ),
@@ -470,23 +606,24 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
                   ),
                 ),
               ),
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: FloatingActionButton.small(
-                heroTag: null,
-                backgroundColor: Colors.white,
-                foregroundColor: FlowGuardTheme.navy,
-                onPressed: _locatingMe ? null : _centerOnMyLocation,
-                child: _locatingMe
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.my_location_rounded),
+            if (widget.showDefaultCenterButton)
+              Positioned(
+                bottom: 12,
+                right: 12,
+                child: FloatingActionButton.small(
+                  heroTag: null,
+                  backgroundColor: Colors.white,
+                  foregroundColor: FlowGuardTheme.navy,
+                  onPressed: _locatingMe ? null : _centerOnMyLocation,
+                  child: _locatingMe
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.my_location_rounded),
+                ),
               ),
-            ),
           ],
         ),
       ),

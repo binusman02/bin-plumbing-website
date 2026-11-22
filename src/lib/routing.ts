@@ -17,20 +17,18 @@
  * provider, with no names, phone numbers or ticket references.
  */
 
-export interface RouteStep {
-  instruction: string;
-  distanceM: number;
-}
+import type { RouteStep, RouteVoiceInstruction } from "@/lib/tracking-types";
+
+export type { RouteStep, RouteVoiceInstruction };
 
 export interface RoadRoute {
   provider: string;
   distanceM: number;
   durationS: number;
-  /** [lat, lng] pairs, ready for Leaflet. */
+  /** [lat, lng] pairs, ready for Leaflet / Mapbox. */
   points: [number, number][];
   steps: RouteStep[];
-  /** Always false: no supported provider returns live-traffic durations. */
-  trafficAware: false;
+  trafficAware: boolean;
   computedAt: string;
 }
 
@@ -164,6 +162,59 @@ export function parseOrsRoute(json: any, provider = "openrouteservice"): RoadRou
   };
 }
 
+export function parseMapboxRoute(json: any, provider = "mapbox"): RoadRoute | null {
+  const r = json?.routes?.[0];
+  if (!r || (json?.code && json.code !== "Ok")) return null;
+  const distanceM = Number(r.distance);
+  const durationS = Number(r.duration);
+  const points = geojsonToLatLng(r.geometry?.coordinates);
+  if (!Number.isFinite(distanceM) || !Number.isFinite(durationS) || points.length < 2) {
+    return null;
+  }
+
+  const steps: RouteStep[] = [];
+  for (const leg of r.legs || []) {
+    for (const s of leg.steps || []) {
+      const loc = Array.isArray(s.maneuver?.location) ? s.maneuver.location : null;
+      const maneuverLng = loc && typeof loc[0] === "number" ? loc[0] : undefined;
+      const maneuverLat = loc && typeof loc[1] === "number" ? loc[1] : undefined;
+      const banner0 = Array.isArray(s.bannerInstructions) ? s.bannerInstructions[0] : null;
+      const bannerPrimary = banner0?.primary?.text ? String(banner0.primary.text) : undefined;
+      const bannerSecondary = banner0?.secondary?.text ? String(banner0.secondary.text) : undefined;
+      const rawVoice = Array.isArray(s.voiceInstructions) ? s.voiceInstructions : [];
+      const voice: RouteVoiceInstruction[] = rawVoice
+        .map((v: any) => ({
+          distanceAlongGeometry: Number(v?.distanceAlongGeometry) || 0,
+          text: String(v?.announcement || "").trim(),
+        }))
+        .filter((v: RouteVoiceInstruction) => v.text.length > 0);
+
+      steps.push({
+        instruction: String(s.maneuver?.instruction || bannerPrimary || "Continue"),
+        distanceM: Number(s.distance) || 0,
+        durationS: Number(s.duration) || 0,
+        maneuverLat,
+        maneuverLng,
+        maneuverType: s.maneuver?.type ? String(s.maneuver.type) : undefined,
+        maneuverModifier: s.maneuver?.modifier ? String(s.maneuver.modifier) : undefined,
+        bannerPrimary: bannerPrimary || String(s.maneuver?.instruction || "Continue"),
+        bannerSecondary,
+        voice,
+      });
+    }
+  }
+
+  return {
+    provider,
+    distanceM,
+    durationS,
+    points: decimatePoints(points),
+    steps: steps.slice(0, 60),
+    trafficAware: true,
+    computedAt: new Date().toISOString(),
+  };
+}
+
 export function routeCacheKey(a: Coord, b: Coord): string {
   const r = (n: number) => n.toFixed(4); // ~11 m buckets
   return `${r(a.lat)},${r(a.lng)}>${r(b.lat)},${r(b.lng)}`;
@@ -182,12 +233,55 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
   }
 }
 
+async function callOsrmFallback(from: Coord, to: Coord): Promise<RouteResult> {
+  const base = (process.env.ROUTING_OSRM_URL || "https://router.project-osrm.org").replace(/\/$/, "");
+  const url =
+    `${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}` +
+    `?overview=full&geometries=geojson&steps=true`;
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) {
+    console.error(`[routing] osrm responded ${res.status}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  const json = await res.json();
+  if (json?.code === "NoRoute") return { ok: false, reason: "no_route" };
+  const route = parseOsrmRoute(json);
+  return route ? { ok: true, route, cached: false } : { ok: false, reason: "unavailable" };
+}
+
 async function callProvider(from: Coord, to: Coord): Promise<RouteResult> {
   const provider = (process.env.ROUTING_PROVIDER || "osrm").toLowerCase();
 
   if (provider === "none") return { ok: false, reason: "disabled" };
 
   try {
+    if (provider === "mapbox") {
+      const token = process.env.MAPBOX_SERVER_TOKEN?.trim();
+      if (token) {
+        try {
+          const url =
+            `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+            `${from.lng},${from.lat};${to.lng},${to.lat}` +
+            `?geometries=geojson&overview=full&steps=true&banner_instructions=true&voice_instructions=true&voiceUnits=metric&language=en` +
+            `&access_token=${encodeURIComponent(token)}`;
+          const res = await fetchWithTimeout(url);
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.code === "NoRoute") return { ok: false, reason: "no_route" };
+            const route = parseMapboxRoute(json);
+            if (route) return { ok: true, route, cached: false };
+          } else {
+            console.error(`[routing] mapbox responded ${res.status}, falling back to osrm`);
+          }
+        } catch {
+          console.error("[routing] mapbox call failed, falling back to osrm");
+        }
+      } else {
+        console.error("[routing] ROUTING_PROVIDER=mapbox but MAPBOX_SERVER_TOKEN is missing, falling back to osrm");
+      }
+      return await callOsrmFallback(from, to);
+    }
+
     if (provider === "openrouteservice") {
       const key = process.env.ROUTING_API_KEY;
       if (!key) {
@@ -215,19 +309,7 @@ async function callProvider(from: Coord, to: Coord): Promise<RouteResult> {
     }
 
     // default: OSRM-compatible server
-    const base = (process.env.ROUTING_OSRM_URL || "https://router.project-osrm.org").replace(/\/$/, "");
-    const url =
-      `${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}` +
-      `?overview=full&geometries=geojson&steps=true`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) {
-      console.error(`[routing] osrm responded ${res.status}`);
-      return { ok: false, reason: "unavailable" };
-    }
-    const json = await res.json();
-    if (json?.code === "NoRoute") return { ok: false, reason: "no_route" };
-    const route = parseOsrmRoute(json);
-    return route ? { ok: true, route, cached: false } : { ok: false, reason: "unavailable" };
+    return await callOsrmFallback(from, to);
   } catch (err) {
     console.error("[routing] provider call failed:", err instanceof Error ? err.message : err);
     return { ok: false, reason: "unavailable" };

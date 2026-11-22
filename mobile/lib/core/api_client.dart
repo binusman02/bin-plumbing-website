@@ -166,21 +166,29 @@ class FlowGuardApiClient {
     return null;
   }
 
-  static Future<List<Map<String, double>>> fetchRoutePoints({
+  static Future<RoadRouteData?> fetchRoutePoints({
     required String ticket,
     required String viewerRole,
+    double? fromLat,
+    double? fromLng,
   }) async {
-    final uri = Uri.parse(
-      "${SupabaseConfig.webBaseUrl}/api/tracking/route?ticket=${Uri.encodeComponent(ticket)}&as=$viewerRole",
-    );
+    final query = <String>[
+      "ticket=${Uri.encodeComponent(ticket)}",
+      "as=$viewerRole",
+      if (fromLat != null && fromLng != null) ...[
+        "fromLat=${fromLat.toStringAsFixed(6)}",
+        "fromLng=${fromLng.toStringAsFixed(6)}",
+      ],
+    ].join("&");
+    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/tracking/route?$query");
     final res = await http
         .get(uri, headers: _authHeaders())
-        .timeout(const Duration(seconds: 10));
+        .timeout(const Duration(seconds: 12));
     if (res.statusCode >= 200 && res.statusCode < 300) {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final raw = data["points"] ?? data["routePoints"] ?? data["coordinates"];
+      final pts = <Map<String, double>>[];
       if (raw is List) {
-        final pts = <Map<String, double>>[];
         for (final p in raw) {
           if (p is List && p.length >= 2) {
             pts.add({
@@ -194,10 +202,28 @@ class FlowGuardApiClient {
             });
           }
         }
-        return pts;
       }
+      final rawSteps = data["steps"];
+      final steps = <RouteStepData>[];
+      if (rawSteps is List) {
+        for (final s in rawSteps) {
+          if (s is Map<String, dynamic>) {
+            steps.add(RouteStepData.fromJson(s));
+          } else if (s is Map) {
+            steps.add(RouteStepData.fromJson(Map<String, dynamic>.from(s)));
+          }
+        }
+      }
+      return RoadRouteData(
+        points: pts,
+        steps: steps,
+        distanceM: (data["distanceM"] as num?)?.toDouble() ?? 0.0,
+        durationS: (data["durationS"] as num?)?.toDouble() ?? 0.0,
+        provider: data["provider"]?.toString(),
+        trafficAware: data["trafficAware"] as bool? ?? false,
+      );
     }
-    return const [];
+    return null;
   }
 
   static Future<void> createServiceRequest({
@@ -700,4 +726,94 @@ class FlowGuardApiClient {
     } catch (_) {}
     return fallback;
   }
+}
+
+class RouteVoiceInstructionData {
+  const RouteVoiceInstructionData({
+    required this.distanceAlongGeometry,
+    required this.text,
+  });
+
+  final double distanceAlongGeometry;
+  final String text;
+
+  factory RouteVoiceInstructionData.fromJson(Map<String, dynamic> json) {
+    return RouteVoiceInstructionData(
+      distanceAlongGeometry:
+          (json["distanceAlongGeometry"] as num?)?.toDouble() ?? 0.0,
+      text: json["text"]?.toString() ?? "",
+    );
+  }
+}
+
+class RouteStepData {
+  const RouteStepData({
+    required this.instruction,
+    required this.distanceM,
+    this.durationS,
+    this.maneuverLat,
+    this.maneuverLng,
+    this.maneuverType,
+    this.maneuverModifier,
+    this.bannerPrimary,
+    this.bannerSecondary,
+    this.voice = const [],
+  });
+
+  final String instruction;
+  final double distanceM;
+  final double? durationS;
+  final double? maneuverLat;
+  final double? maneuverLng;
+  final String? maneuverType;
+  final String? maneuverModifier;
+  final String? bannerPrimary;
+  final String? bannerSecondary;
+  final List<RouteVoiceInstructionData> voice;
+
+  factory RouteStepData.fromJson(Map<String, dynamic> json) {
+    final rawVoice = json["voice"];
+    final voiceList = <RouteVoiceInstructionData>[];
+    if (rawVoice is List) {
+      for (final v in rawVoice) {
+        if (v is Map<String, dynamic>) {
+          voiceList.add(RouteVoiceInstructionData.fromJson(v));
+        } else if (v is Map) {
+          voiceList.add(
+            RouteVoiceInstructionData.fromJson(Map<String, dynamic>.from(v)),
+          );
+        }
+      }
+    }
+    return RouteStepData(
+      instruction: json["instruction"]?.toString() ?? "Continue",
+      distanceM: (json["distanceM"] as num?)?.toDouble() ?? 0.0,
+      durationS: (json["durationS"] as num?)?.toDouble(),
+      maneuverLat: (json["maneuverLat"] as num?)?.toDouble(),
+      maneuverLng: (json["maneuverLng"] as num?)?.toDouble(),
+      maneuverType: json["maneuverType"]?.toString(),
+      maneuverModifier: json["maneuverModifier"]?.toString(),
+      bannerPrimary: json["bannerPrimary"]?.toString(),
+      bannerSecondary: json["bannerSecondary"]?.toString(),
+      voice: voiceList,
+    );
+  }
+}
+
+class RoadRouteData {
+  const RoadRouteData({
+    required this.points,
+    required this.steps,
+    required this.distanceM,
+    required this.durationS,
+    this.provider,
+    this.trafficAware = false,
+  });
+
+  final List<Map<String, double>> points;
+  final List<RouteStepData> steps;
+  final double distanceM;
+  final double durationS;
+  final String? provider;
+  final bool trafficAware;
 }

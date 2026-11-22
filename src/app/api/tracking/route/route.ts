@@ -57,7 +57,7 @@ export async function GET(request: Request) {
       points: r.points,
       steps: r.steps,
       provider: r.provider,
-      trafficAware: false,
+      trafficAware: r.trafficAware,
       computedAt: r.computedAt,
       straightLineM,
     };

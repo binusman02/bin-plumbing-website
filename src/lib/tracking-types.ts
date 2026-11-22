@@ -53,15 +53,33 @@ export interface TrackingSnapshot {
   plumbers?: TrackedPlumber[];
 }
 
+export interface RouteVoiceInstruction {
+  distanceAlongGeometry: number;
+  text: string;
+}
+
+export interface RouteStep {
+  instruction: string;
+  distanceM: number;
+  durationS?: number;
+  maneuverLat?: number;
+  maneuverLng?: number;
+  maneuverType?: string;
+  maneuverModifier?: string;
+  bannerPrimary?: string;
+  bannerSecondary?: string;
+  voice?: RouteVoiceInstruction[];
+}
+
 export interface RoutePayload {
   ok: boolean;
   reason?: "disabled" | "unavailable" | "no_route" | "no_location" | "forbidden";
   distanceM?: number;
   durationS?: number;
   points?: [number, number][];
-  steps?: { instruction: string; distanceM: number }[];
+  steps?: RouteStep[];
   provider?: string;
-  trafficAware?: false;
+  trafficAware?: boolean;
   computedAt?: string;
   /** Straight-line fallback distance (clearly NOT a driving distance). */
   straightLineM?: number;

@@ -9,6 +9,7 @@ import "package:sensors_plus/sensors_plus.dart";
 import "package:url_launcher/url_launcher.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
+import "package:flowguard_plumbing/features/plumber/navigation_page.dart";
 import "package:flowguard_plumbing/features/shared/flowguard_google_map.dart";
 import "package:flowguard_plumbing/features/shared/voice_note_widgets.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
@@ -47,6 +48,10 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   bool _gpsError = false;
   StreamSubscription<Position>? _gpsSub;
   StreamSubscription<GyroscopeEvent>? _gyroSub;
+  final StreamController<Position> _navPositionController =
+      StreamController<Position>.broadcast();
+  Position? _lastPosition;
+  DateTime? _lastServerPushAt;
   double? _fusedHeading;
   DateTime? _lastGyroAt;
   bool _disposed = false;
@@ -76,6 +81,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     }
     _gpsSub?.cancel();
     _gyroSub?.cancel();
+    _navPositionController.close();
     _labourCtrl.dispose();
     _materialsCtrl.dispose();
     _transportCtrl.dispose();
@@ -132,13 +138,16 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
 
       List<LatLng> routePts = _routePoints;
       if (_tripState == "on_the_way") {
-        final rawPts = await FlowGuardApiClient.fetchRoutePoints(
+        final routeData = await FlowGuardApiClient.fetchRoutePoints(
           ticket: _job.ticketNumber,
           viewerRole: "plumber",
+          fromLat: _plumberLat,
+          fromLng: _plumberLng,
         );
-        if (rawPts.isNotEmpty) {
-          routePts =
-              rawPts.map((p) => LatLng(p["lat"]!, p["lng"]!)).toList();
+        if (routeData != null && routeData.points.isNotEmpty) {
+          routePts = routeData.points
+              .map((p) => LatLng(p["lat"]!, p["lng"]!))
+              .toList();
         }
       }
 
@@ -251,7 +260,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     _gpsSub = Geolocator.getPositionStream(
       locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 15,
+        distanceFilter: 5,
         // Foreground service keeps tracking alive when the screen locks.
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationTitle: "FlowGuard trip in progress",
@@ -291,6 +300,10 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   }
 
   Future<void> _pushLocation(Position pos) async {
+    _lastPosition = pos;
+    if (!_navPositionController.isClosed) {
+      _navPositionController.add(pos);
+    }
     if (pos.heading >= 0 && pos.speed > 0.8) {
       _fusedHeading = pos.heading;
     } else {
@@ -305,6 +318,13 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
             "Live GPS active (${pos.accuracy.round()}m accuracy)";
       });
     }
+    final now = DateTime.now();
+    if (_lastServerPushAt != null &&
+        now.difference(_lastServerPushAt!) <
+            const Duration(milliseconds: 2500)) {
+      return;
+    }
+    _lastServerPushAt = now;
     try {
       await FlowGuardApiClient.pushLiveLocation(
         lat: pos.latitude,
@@ -344,6 +364,25 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     }
   }
 
+  Future<void> _openNavigationPage() async {
+    if (_job.customerLat == null || _job.customerLng == null || !mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NavigationPage(
+          ticket: _job.ticketNumber,
+          customerName: _job.customerName ?? "Customer",
+          destinationLat: _job.customerLat!,
+          destinationLng: _job.customerLng!,
+          positionStream: _navPositionController.stream,
+          initialPosition: _lastPosition,
+          onArrived: _handleArrived,
+        ),
+      ),
+    );
+  }
+
   Future<void> _handleStartTrip() async {
     final ok = await _ensureLocationPermission();
     if (!ok) {
@@ -355,6 +394,9 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       return;
     }
     await _performAction("start_trip");
+    if (mounted && _tripState == "on_the_way") {
+      await _openNavigationPage();
+    }
   }
 
   Future<void> _handleArrived() async {
@@ -819,19 +861,22 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                           const SizedBox(height: 10),
                           SizedBox(
                             width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () => launchUrl(
-                                Uri.parse(
-                                  "https://www.google.com/maps/dir/?api=1&destination=${_job.customerLat},${_job.customerLng}&travelmode=driving",
-                                ),
-                                mode: LaunchMode.externalApplication,
-                              ),
+                            child: ElevatedButton.icon(
+                              onPressed: _openNavigationPage,
                               icon: const Icon(Icons.navigation_rounded, size: 18),
                               label: const Text(
-                                "Open Turn-by-Turn Navigation",
+                                "Resume navigation",
                                 maxLines: 1,
                                 softWrap: false,
                                 overflow: TextOverflow.ellipsis,
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: FlowGuardTheme.navy,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
                               ),
                             ),
                           ),

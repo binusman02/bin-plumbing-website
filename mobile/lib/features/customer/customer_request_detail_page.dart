@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:math" as math;
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:image_picker/image_picker.dart";
@@ -32,15 +33,24 @@ class CustomerRequestDetailPage extends StatefulWidget {
       _CustomerRequestDetailPageState();
 }
 
-class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
+class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
+    with SingleTickerProviderStateMixin {
   late ServiceRequestItem _request;
   QuotationData? _quote;
   bool _loadingQuote = true;
   bool _busy = false;
   double? _plumberLat;
   double? _plumberLng;
+  double? _fromPlumberLat;
+  double? _fromPlumberLng;
+  double? _toPlumberLat;
+  double? _toPlumberLng;
+  late final AnimationController _markerAnimCtrl;
   String? _plumberPhone;
   List<LatLng> _routePoints = [];
+  DateTime? _lastRouteFetchAt;
+  double? _etaSeconds;
+  double? _etaDistanceM;
   String _trackingStateLabel = "Property pinned";
   bool _tripLive = false;
   int _reviewRating = 5;
@@ -49,6 +59,7 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   bool _paymentSubmitted = false;
   String? _paymentStatus;
   Timer? _pollTimer;
+  Timer? _snapshotTimer;
   RealtimeChannel? _trackingRtChannel;
   String? _subscribedPlumberId;
 
@@ -65,11 +76,38 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   void initState() {
     super.initState();
     _request = widget.request;
+    _markerAnimCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addListener(() {
+        if (!mounted) return;
+        if (_fromPlumberLat == null ||
+            _fromPlumberLng == null ||
+            _toPlumberLat == null ||
+            _toPlumberLng == null) {
+          return;
+        }
+        final t = Curves.easeInOut.transform(_markerAnimCtrl.value);
+        setState(() {
+          _plumberLat =
+              _fromPlumberLat! + (_toPlumberLat! - _fromPlumberLat!) * t;
+          _plumberLng =
+              _fromPlumberLng! + (_toPlumberLng! - _fromPlumberLng!) * t;
+        });
+      });
     _loadDetails();
     if (_request.isActive) {
       _pollTimer = Timer.periodic(
-        const Duration(seconds: 10),
+        const Duration(seconds: 12),
         (_) => _loadDetails(),
+      );
+      _snapshotTimer = Timer.periodic(
+        const Duration(seconds: 4),
+        (_) {
+          if (_request.isActive && _tripLive) {
+            _refreshTracking();
+          }
+        },
       );
     }
   }
@@ -77,9 +115,34 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _snapshotTimer?.cancel();
+    _markerAnimCtrl.dispose();
     _trackingRtChannel?.unsubscribe();
     _reviewController.dispose();
     super.dispose();
+  }
+
+  void _animatePlumberTo(double lat, double lng) {
+    if (_plumberLat == null || _plumberLng == null) {
+      setState(() {
+        _plumberLat = lat;
+        _plumberLng = lng;
+        _fromPlumberLat = lat;
+        _fromPlumberLng = lng;
+        _toPlumberLat = lat;
+        _toPlumberLng = lng;
+      });
+      return;
+    }
+    if ((_plumberLat! - lat).abs() < 1e-7 &&
+        (_plumberLng! - lng).abs() < 1e-7) {
+      return;
+    }
+    _fromPlumberLat = _plumberLat;
+    _fromPlumberLng = _plumberLng;
+    _toPlumberLat = lat;
+    _toPlumberLng = lng;
+    _markerAnimCtrl.forward(from: 0.0);
   }
 
   void _ensureTrackingRealtime(String? plumberId) {
@@ -110,9 +173,8 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
               final lng = (rec["lng"] as num?)?.toDouble();
               final active = rec["is_sharing"] == true;
               if (active && lat != null && lng != null) {
+                _animatePlumberTo(lat, lng);
                 setState(() {
-                  _plumberLat = lat;
-                  _plumberLng = lng;
                   _tripLive = true;
                   _trackingStateLabel = "Technician live on map";
                 });
@@ -209,23 +271,40 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
               pLng != null;
 
       List<LatLng> routePts = _routePoints;
-      if (isLive) {
-        final rawPts = await FlowGuardApiClient.fetchRoutePoints(
+      double? etaS = _etaSeconds;
+      double? etaM = _etaDistanceM;
+      final shouldRefreshRoute = isLive &&
+          (_lastRouteFetchAt == null ||
+              DateTime.now().difference(_lastRouteFetchAt!) >=
+                  const Duration(seconds: 30));
+      if (shouldRefreshRoute) {
+        _lastRouteFetchAt = DateTime.now();
+        final routeData = await FlowGuardApiClient.fetchRoutePoints(
           ticket: _request.ticketNumber,
           viewerRole: "customer",
         );
-        if (rawPts.isNotEmpty) {
-          routePts =
-              rawPts.map((p) => LatLng(p["lat"]!, p["lng"]!)).toList();
+        if (routeData != null && routeData.points.isNotEmpty) {
+          routePts = routeData.points
+              .map((p) => LatLng(p["lat"]!, p["lng"]!))
+              .toList();
+          etaS = routeData.durationS;
+          etaM = routeData.distanceM;
         }
       }
 
       if (mounted) {
+        if (isLive) {
+          _animatePlumberTo(pLat, pLng);
+        }
         setState(() {
           _tripLive = isLive;
-          _plumberLat = isLive ? pLat : null;
-          _plumberLng = isLive ? pLng : null;
+          if (!isLive) {
+            _plumberLat = null;
+            _plumberLng = null;
+          }
           _routePoints = routePts;
+          _etaSeconds = etaS;
+          _etaDistanceM = etaM;
           _plumberPhone = job["plumberPhone"]?.toString() ??
               plumber?["phone"]?.toString();
           _trackingStateLabel = tripState == "arrived"
@@ -547,6 +626,31 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
                         ),
                       ),
                     ),
+                    if (_tripLive &&
+                        _etaSeconds != null &&
+                        _etaSeconds! > 0) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: FlowGuardTheme.gold,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          _etaDistanceM != null && _etaDistanceM! > 0
+                              ? "ETA ${math.max(1, (_etaSeconds! / 60).round())} min • ${(_etaDistanceM! / 1000).toStringAsFixed(1)} km"
+                              : "ETA ${math.max(1, (_etaSeconds! / 60).round())} min",
+                          style: const TextStyle(
+                            color: FlowGuardTheme.navy,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
