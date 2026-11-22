@@ -541,7 +541,7 @@ const DEFAULT_SETTINGS: MarketplaceSettings = {
   small_job_threshold: 25000,
   bank_name: "Opay",
   bank_account_name: "Mustapha Aminu Usman",
-  bank_account_number: "08063298575",
+  bank_account_number: "8063298575",
   active_coverage_locations: DEFAULT_COVERAGE_AREAS.map((a) => a.area),
   coverage_areas: DEFAULT_COVERAGE_AREAS,
   service_categories: [],

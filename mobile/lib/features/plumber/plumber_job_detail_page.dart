@@ -1023,7 +1023,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              "Total: ₦${naira.format(_quote!.totalAmount)} • Approval: ${_quote!.approvalStatus.toUpperCase()}",
+              "Total: ₦${naira.format(_quote!.totalAmount)} • Status: ${_quote!.approvalStatus == "approved" ? "Approved" : _quote!.approvalStatus == "rejected" ? "Declined" : "Pending"}",
               style: const TextStyle(
                 fontWeight: FontWeight.w700,
                 color: FlowGuardTheme.navy,
@@ -1551,13 +1551,39 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              "Quotation Preview • ${_job.ticketNumber}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: FlowGuardTheme.navy,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "FlowGuard Plumbing",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      "QUOTATION",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: FlowGuardTheme.mutedText,
+                      ),
+                    ),
+                    Text(
+                      "#${_job.ticketNumber}",
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: FlowGuardTheme.navy,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             if (items.isNotEmpty) ...[
