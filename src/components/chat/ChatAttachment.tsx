@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Check, CheckCheck, Download, FileText, Paperclip, X } from "lucide-react";
+import { Check, CheckCheck, Download, FileText, Mic, Paperclip, X } from "lucide-react";
 import type { ChatAttachment } from "@/lib/marketplace";
 
 export interface ChatPresenceState {
@@ -117,6 +117,37 @@ export function ChatAttachmentBubble({
   isDark?: boolean;
 }) {
   const isImage = attachment.mimeType?.startsWith("image/");
+  const isAudio =
+    attachment.mimeType?.startsWith("audio/") ||
+    /\.(m4a|aac|mp3|wav|ogg|webm)$/i.test(attachment.name || "");
+
+  if (isAudio) {
+    return (
+      <div
+        className={`mt-1.5 flex flex-col gap-1.5 rounded-xl border px-3 py-2 text-xs ${
+          isDark
+            ? "border-white/15 bg-white/10 text-white"
+            : "border-slate-200 bg-slate-50 text-[#0B1F3A]"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 font-semibold">
+            <Mic className={`h-3.5 w-3.5 ${isDark ? "text-[#F5B301]" : "text-[#0B1F3A]"}`} />
+            Voice Note
+          </span>
+          <span className={`text-[10px] ${isDark ? "text-slate-300" : "text-slate-500"}`}>
+            {formatFileSize(attachment.size)}
+          </span>
+        </div>
+        <audio
+          controls
+          preload="metadata"
+          src={attachment.url}
+          className="h-8 w-full min-w-[210px] max-w-[280px]"
+        />
+      </div>
+    );
+  }
 
   if (isImage) {
     return (

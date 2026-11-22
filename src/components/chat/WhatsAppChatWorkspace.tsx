@@ -9,13 +9,13 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  Mic,
   Paperclip,
   Pencil,
   Reply,
   Search,
   Send,
   ShieldAlert,
-  Smile,
   Trash2,
   X,
 } from "lucide-react";
@@ -85,8 +85,6 @@ function formatLastSeen(iso?: string | null): string | null {
   return `Last seen ${day} at ${time}`;
 }
 
-const QUICK_EMOJIS = ["👍", "🙏", "🔧", "🚰", "💧", "✅", "📸", "📍", "⏰", "😊", "👋", "⚠️"];
-
 export function WhatsAppChatWorkspace({
   actorRole,
   actorId,
@@ -128,7 +126,12 @@ export function WhatsAppChatWorkspace({
   const [replyTo, setReplyTo] = useState<JobMessage | null>(null);
   const [editingMsg, setEditingMsg] = useState<JobMessage | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [recordingVoice, setRecordingVoice] = useState(false);
+  const [voiceSeconds, setVoiceSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<BlobPart[]>([]);
+  const voiceTimerRef = useRef<number | null>(null);
   const [visTick, setVisTick] = useState(0);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -376,7 +379,6 @@ export function WhatsAppChatWorkspace({
       setEditingMsg(null);
       setEditDraft("");
       setReplyTo(null);
-      setEmojiOpen(false);
       setSendError(null);
     }
     prevTicketRef.current = selectedTicket;
@@ -826,10 +828,6 @@ export function WhatsAppChatWorkspace({
         setEditDraft("");
         return;
       }
-      if (emojiOpen) {
-        setEmojiOpen(false);
-        return;
-      }
       if (threadSearchOpen) {
         setThreadSearchOpen(false);
         setThreadSearch("");
@@ -849,7 +847,7 @@ export function WhatsAppChatWorkspace({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editingMsg, emojiOpen, threadSearchOpen, replyTo, selectedTicket, onTargetChange]);
+  }, [editingMsg, threadSearchOpen, replyTo, selectedTicket, onTargetChange]);
 
   const handleDraftChange = (val: string) => {
     setDraft(val);
@@ -910,7 +908,6 @@ export function WhatsAppChatWorkspace({
           draftsRef.current[targetTicket] = "";
           setPendingFile(null);
           setReplyTo(null);
-          setEmojiOpen(false);
           broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket });
           broadcastRealtimeEvent("notification_sync", {});
         } else {
@@ -921,6 +918,147 @@ export function WhatsAppChatWorkspace({
         setSendError(err?.message || "Failed to send message.");
       }
     });
+  };
+
+  const cleanupVoiceStream = useCallback(() => {
+    if (voiceTimerRef.current != null) {
+      window.clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+    if (voiceStreamRef.current) {
+      voiceStreamRef.current.getTracks().forEach((t) => t.stop());
+      voiceStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => cleanupVoiceStream();
+  }, [cleanupVoiceStream]);
+
+  const startVoiceRecording = async () => {
+    if (!selectedTicket || recordingVoice || uploading) return;
+    setSendError(null);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setSendError("Voice recording is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceStreamRef.current = stream;
+      const preferredTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+      ];
+      const mimeType = preferredTypes.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      voiceChunksRef.current = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          voiceChunksRef.current.push(ev.data);
+        }
+      };
+      recorder.start(250);
+      mediaRecorderRef.current = recorder;
+      setVoiceSeconds(0);
+      setRecordingVoice(true);
+      voiceTimerRef.current = window.setInterval(() => {
+        setVoiceSeconds((s) => s + 1);
+      }, 1000);
+    } catch {
+      cleanupVoiceStream();
+      setSendError("Microphone permission is required for voice notes.");
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      rec.onstop = null;
+      try {
+        rec.stop();
+      } catch {}
+    }
+    voiceChunksRef.current = [];
+    setRecordingVoice(false);
+    setVoiceSeconds(0);
+    cleanupVoiceStream();
+  };
+
+  const sendVoiceRecording = () => {
+    const rec = mediaRecorderRef.current;
+    if (!rec || !selectedTicket) {
+      cancelVoiceRecording();
+      return;
+    }
+    const targetTicket = selectedTicket;
+    const targetReqId = activeThread?.req?.id || targetTicket;
+    const isInternal =
+      actorRole !== "customer" &&
+      (visibilityMode === "private_plumber" || Boolean(replyTo?.is_internal));
+    const replyId = replyTo?.id || null;
+
+    rec.onstop = () => {
+      const chunks = voiceChunksRef.current;
+      const actualMime = rec.mimeType || "audio/webm";
+      const ext = actualMime.includes("mp4")
+        ? ".m4a"
+        : actualMime.includes("ogg")
+          ? ".ogg"
+          : ".webm";
+      const blob = new Blob(chunks, { type: actualMime });
+      voiceChunksRef.current = [];
+      setRecordingVoice(false);
+      setVoiceSeconds(0);
+      cleanupVoiceStream();
+
+      if (blob.size <= 0) {
+        setSendError("Voice note was empty. Please try again.");
+        return;
+      }
+
+      const file = new File([blob], `chat_voice_${Date.now()}${ext}`, {
+        type: actualMime.split(";")[0],
+      });
+
+      startTransition(async () => {
+        try {
+          setUploading(true);
+          const attachment = await uploadChatFile(file, targetTicket, actorRole);
+          setUploading(false);
+          const res = await postCommunicationMessageAction({
+            requestId: targetReqId,
+            ticketNumber: targetTicket,
+            senderRole: actorRole,
+            message: "",
+            attachment,
+            isInternal,
+            replyToId: replyId,
+          });
+          if (res.success && res.message) {
+            const sentMsg = res.message;
+            setMessages((prev) => (prev.some((m) => m.id === sentMsg.id) ? prev : [...prev, sentMsg]));
+            setReplyTo(null);
+            broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket });
+            broadcastRealtimeEvent("notification_sync", {});
+          } else {
+            setSendError(res.error || "Could not send voice note.");
+          }
+        } catch (err: any) {
+          setUploading(false);
+          setSendError(err?.message || "Failed to upload voice note.");
+        }
+      });
+    };
+
+    try {
+      rec.stop();
+    } catch {
+      cancelVoiceRecording();
+    }
   };
 
   const handleSaveEdit = () => {
@@ -1532,85 +1670,95 @@ export function WhatsAppChatWorkspace({
                 </div>
               )}
 
-              {emojiOpen && (
-                <div className="mb-2 flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                  {QUICK_EMOJIS.map((em) => (
-                    <button
-                      key={em}
-                      type="button"
-                      onClick={() => {
-                        handleDraftChange(`${draft}${em}`);
-                        setEmojiOpen(false);
-                      }}
-                      className="rounded-lg px-2 py-1 text-base hover:bg-white"
-                    >
-                      {em}
-                    </button>
-                  ))}
+              {recordingVoice ? (
+                <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />
+                  <span className="flex-1 text-xs font-bold text-red-700 tabular-nums">
+                    Recording voice note… {Math.floor(voiceSeconds / 60)}:
+                    {String(voiceSeconds % 60).padStart(2, "0")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={cancelVoiceRecording}
+                    className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-lg border border-red-200 bg-white px-2.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                    aria-label="Cancel voice note"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={sendVoiceRecording}
+                    className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-lg bg-[#0B1F3A] px-3 text-xs font-bold text-white hover:bg-[#0B1F3A]/90"
+                    aria-label="Send voice note"
+                  >
+                    <Send className="h-3.5 w-3.5" /> Send
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        if (f.size > MAX_CHAT_FILE_BYTES) {
+                          setSendError("File size must not exceed 20 MB.");
+                        } else {
+                          setPendingFile(f);
+                        }
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={startVoiceRecording}
+                    disabled={isPending || uploading}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                    aria-label="Record voice note"
+                    title="Record voice note"
+                  >
+                    <Mic className="h-4 w-4 text-[#0B1F3A]" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    aria-label="Attach file"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                  <textarea
+                    rows={1}
+                    value={draft}
+                    onChange={(e) => handleDraftChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    placeholder="Type a message..."
+                    className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    disabled={isPending || uploading || (!draft.trim() && !pendingFile)}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] text-xs font-bold text-white transition hover:bg-[#0B1F3A]/90 disabled:opacity-40 sm:w-auto sm:px-4"
+                    aria-label="Send message"
+                  >
+                    {isPending || uploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                    <span className="hidden sm:inline">Send</span>
+                  </button>
                 </div>
               )}
-
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      if (f.size > MAX_CHAT_FILE_BYTES) {
-                        setSendError("File size must not exceed 20 MB.");
-                      } else {
-                        setPendingFile(f);
-                      }
-                    }
-                    e.target.value = "";
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setEmojiOpen((v) => !v)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  aria-label="Insert emoji"
-                >
-                  <Smile className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  aria-label="Attach file"
-                >
-                  <Paperclip className="h-4 w-4" />
-                </button>
-                <textarea
-                  rows={1}
-                  value={draft}
-                  onChange={(e) => handleDraftChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="Type a message..."
-                  className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={isPending || uploading || (!draft.trim() && !pendingFile)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] text-xs font-bold text-white transition hover:bg-[#0B1F3A]/90 disabled:opacity-40 sm:w-auto sm:px-4"
-                  aria-label="Send message"
-                >
-                  {isPending || uploading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                  <span className="hidden sm:inline">Send</span>
-                </button>
-              </div>
             </div>
           </>
         )}
