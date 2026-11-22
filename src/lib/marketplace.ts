@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { cacheLife, cacheTag } from "next/cache";
+import { cacheLife, cacheTag, revalidateTag } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { getRequiredAnonKey, getRequiredSupabaseUrl, getServiceSupabase } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/notifications";
@@ -2939,6 +2939,12 @@ export async function updateMarketplaceSettings(
       company_phone: nextSettings.company_phone,
     }),
   });
+
+  try {
+    revalidateTag("settings", { expire: 0 });
+  } catch {
+    // Non-Next test contexts do not have an active incremental cache store.
+  }
 
   return nextSettings;
 }

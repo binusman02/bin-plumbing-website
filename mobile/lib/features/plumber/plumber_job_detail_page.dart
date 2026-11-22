@@ -60,10 +60,12 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   String? _loadError;
 
   final _labourCtrl = TextEditingController();
-  final _materialsCtrl = TextEditingController(text: "0");
   final _transportCtrl = TextEditingController();
   final _otherCtrl = TextEditingController(text: "0");
   final _notesCtrl = TextEditingController();
+  final List<_QuoteLineItemControllers> _quoteItems = [
+    _QuoteLineItemControllers(),
+  ];
 
   @override
   void initState() {
@@ -83,10 +85,12 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     _gyroSub?.cancel();
     _navPositionController.close();
     _labourCtrl.dispose();
-    _materialsCtrl.dispose();
     _transportCtrl.dispose();
     _otherCtrl.dispose();
     _notesCtrl.dispose();
+    for (final item in _quoteItems) {
+      item.dispose();
+    }
     super.dispose();
   }
 
@@ -165,7 +169,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       if (_tripState == "on_the_way" && _job.isActive) {
         await _startGpsStream();
       } else {
-        await _stopGpsStream(disableSharing: false);
+        await _stopGpsStream(disableSharing: !_job.isActive);
       }
     } catch (_) {
       if (mounted) {
@@ -424,16 +428,43 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   double _parseNum(TextEditingController c) =>
       double.tryParse(c.text.trim().replaceAll(",", "")) ?? 0;
 
+  double get _materialsSubtotal {
+    double sum = 0;
+    for (final item in _quoteItems) {
+      final name = item.nameCtrl.text.trim();
+      final qty = math.max(1.0, _parseNum(item.qtyCtrl));
+      final price = math.max(0.0, _parseNum(item.priceCtrl));
+      if (name.isNotEmpty || price > 0) {
+        sum += qty * price;
+      }
+    }
+    return sum;
+  }
+
   double get _quoteTotal =>
       _parseNum(_labourCtrl) +
-      _parseNum(_materialsCtrl) +
+      _materialsSubtotal +
       _parseNum(_transportCtrl) +
       _parseNum(_otherCtrl);
 
+  List<Map<String, dynamic>> get _validQuoteItemsPayload {
+    final list = <Map<String, dynamic>>[];
+    for (final item in _quoteItems) {
+      final name = item.nameCtrl.text.trim();
+      if (name.isEmpty) continue;
+      list.add({
+        "name": name,
+        "quantity": math.max(1, _parseNum(item.qtyCtrl).round()),
+        "unitPrice": math.max(0, _parseNum(item.priceCtrl)),
+      });
+    }
+    return list;
+  }
+
   Future<void> _submitQuotation() async {
-    if (_quoteTotal <= 0) {
+    if (_parseNum(_labourCtrl) <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter at least one charge above ₦0.")),
+        const SnackBar(content: Text("Please enter a Labour charge above ₦0.")),
       );
       return;
     }
@@ -442,9 +473,10 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       await FlowGuardApiClient.submitQuotation(
         ticketNumber: _job.ticketNumber,
         labourCharge: _parseNum(_labourCtrl),
-        materialsCost: _parseNum(_materialsCtrl),
+        materialsCost: _materialsSubtotal,
         transportCharge: _parseNum(_transportCtrl),
         otherCharges: _parseNum(_otherCtrl),
+        items: _validQuoteItemsPayload,
         notes: _notesCtrl.text.trim(),
       );
       await _loadJobDetails();
@@ -1194,41 +1226,237 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            "Prepare Itemised Quotation (₦)",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: FlowGuardTheme.navy,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            "Inspect the property and enter transparent labour and materials costs.",
-            style: TextStyle(fontSize: 12, color: FlowGuardTheme.mutedText),
+          Row(
+            children: [
+              const Icon(
+                Icons.description_outlined,
+                size: 18,
+                color: FlowGuardTheme.gold,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  "Create Itemised Quotation",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _quoteItems.add(_QuoteLineItemControllers());
+                  });
+                },
+                icon: const Icon(Icons.add, size: 16, color: FlowGuardTheme.gold),
+                label: const Text(
+                  "Add Item",
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: const Size(0, 34),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
-          _numField("Labour Charge (₦)", _labourCtrl),
-          const SizedBox(height: 10),
-          _numField("Materials Cost (₦)", _materialsCtrl),
-          const SizedBox(height: 10),
-          _numField("Transport Charge (₦)", _transportCtrl),
-          const SizedBox(height: 10),
-          _numField("Other Charges (₦)", _otherCtrl),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _notesCtrl,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: "Inspection Notes / Parts Breakdown",
-            ),
-          ),
-          const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: FlowGuardTheme.surface,
               borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: FlowGuardTheme.border),
+            ),
+            child: Column(
+              children: [
+                const Row(
+                  children: [
+                    Expanded(
+                      flex: 5,
+                      child: Text(
+                        "ITEM NAME",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        "QTY",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        "PRICE (₦)",
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 32),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ...List.generate(_quoteItems.length, (idx) {
+                  final row = _quoteItems[idx];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: TextField(
+                            controller: row.nameCtrl,
+                            onChanged: (_) => setState(() {}),
+                            decoration: const InputDecoration(
+                              hintText: "e.g. PVC Pipe, Elbow",
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: row.qtyCtrl,
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.center,
+                            onChanged: (_) => setState(() {}),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 10,
+                              ),
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          flex: 3,
+                          child: TextField(
+                            controller: row.priceCtrl,
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.right,
+                            onChanged: (_) => setState(() {}),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 10,
+                              ),
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 32,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              Icons.delete_outline_rounded,
+                              size: 18,
+                              color: _quoteItems.length > 1
+                                  ? Colors.red.shade400
+                                  : Colors.grey.shade400,
+                            ),
+                            onPressed: _quoteItems.length > 1
+                                ? () {
+                                    setState(() {
+                                      final removed = _quoteItems.removeAt(idx);
+                                      removed.dispose();
+                                    });
+                                  }
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Materials Subtotal",
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: FlowGuardTheme.navy,
+                      ),
+                    ),
+                    Text(
+                      "₦${naira.format(_materialsSubtotal)}",
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: FlowGuardTheme.navy,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _numField("Labour (₦) *", _labourCtrl)),
+              const SizedBox(width: 8),
+              Expanded(child: _numField("Transport (₦)", _transportCtrl)),
+              const SizedBox(width: 8),
+              Expanded(child: _numField("Other (₦)", _otherCtrl)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _notesCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              hintText: "Work scope or additional notes...",
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: FlowGuardTheme.surface,
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1243,7 +1471,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                 Text(
                   "₦${naira.format(_quoteTotal)}",
                   style: const TextStyle(
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.w900,
                     color: FlowGuardTheme.navy,
                   ),
@@ -1252,16 +1480,164 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
             ),
           ),
           const SizedBox(height: 14),
-          ElevatedButton(
-            onPressed: _busy ? null : _submitQuotation,
-            child: _busy
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text("Submit Quotation"),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _quoteTotal <= 0
+                    ? null
+                    : () => _showQuotePreview(naira),
+                icon: const Icon(Icons.visibility_outlined, size: 17),
+                label: const Text(
+                  "Preview",
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 13,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _busy ? null : _submitQuotation,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: FlowGuardTheme.gold,
+                    foregroundColor: FlowGuardTheme.navyDark,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text(
+                          "Submit Quotation",
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                ),
+              ),
+            ],
           ),
+        ],
+      ),
+    );
+  }
+
+  void _showQuotePreview(NumberFormat naira) {
+    final items = _validQuoteItemsPayload;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              "Quotation Preview • ${_job.ticketNumber}",
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (items.isNotEmpty) ...[
+              const Text(
+                "Materials",
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: FlowGuardTheme.mutedText,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ...items.map(
+                (it) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text("${it["name"]} (×${it["quantity"]})"),
+                      ),
+                      Text(
+                        "₦${naira.format((it["quantity"] as int) * (it["unitPrice"] as double))}",
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 18),
+            ],
+            _previewRow("Materials Subtotal", naira.format(_materialsSubtotal)),
+            _previewRow("Labour", naira.format(_parseNum(_labourCtrl))),
+            _previewRow("Transport", naira.format(_parseNum(_transportCtrl))),
+            _previewRow("Other", naira.format(_parseNum(_otherCtrl))),
+            const Divider(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Total Quotation",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                Text(
+                  "₦${naira.format(_quoteTotal)}",
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text(
+                "Close Preview",
+                maxLines: 1,
+                softWrap: false,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _previewRow(String label, String amount) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: FlowGuardTheme.mutedText)),
+          Text("₦$amount", style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -1272,7 +1648,23 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       controller: controller,
       keyboardType: TextInputType.number,
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(labelText: label),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(fontSize: 12),
+        isDense: true,
+      ),
     );
+  }
+}
+
+class _QuoteLineItemControllers {
+  final TextEditingController nameCtrl = TextEditingController();
+  final TextEditingController qtyCtrl = TextEditingController(text: "1");
+  final TextEditingController priceCtrl = TextEditingController(text: "0");
+
+  void dispose() {
+    nameCtrl.dispose();
+    qtyCtrl.dispose();
+    priceCtrl.dispose();
   }
 }

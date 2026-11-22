@@ -223,8 +223,23 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
           .eq("id", _request.id)
           .maybeSingle();
       if (row != null && mounted) {
-        setState(() => _request = ServiceRequestItem.fromJson(row));
-        if (!_request.isActive) _pollTimer?.cancel();
+        setState(() {
+          _request = ServiceRequestItem.fromJson(row);
+          if (!_request.isActive) {
+            _tripLive = false;
+            _plumberLat = null;
+            _plumberLng = null;
+            _routePoints = const [];
+            _etaSeconds = null;
+            _etaDistanceM = null;
+          }
+        });
+        if (!_request.isActive) {
+          _pollTimer?.cancel();
+          _snapshotTimer?.cancel();
+          _trackingRtChannel?.unsubscribe();
+          _trackingRtChannel = null;
+        }
       }
     } catch (_) {}
   }
@@ -249,7 +264,7 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
   }
 
   Future<void> _refreshTracking() async {
-    if (_request.status == "cancelled") return;
+    if (!_request.isActive) return;
     try {
       final snap = await FlowGuardApiClient.fetchTrackingSnapshot(
         viewerRole: "customer",
@@ -596,8 +611,8 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
               ),
             const SizedBox(height: 14),
 
-            // 2. Embedded Map (~50% height when not cancelled)
-            if (!isCancelled) ...[
+            // 2. Embedded Map (~50% height while active)
+            if (!isCancelled && _request.isActive) ...[
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

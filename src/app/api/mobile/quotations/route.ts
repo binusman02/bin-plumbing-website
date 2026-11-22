@@ -29,6 +29,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const rawItems = Array.isArray(body?.items) ? body.items : [];
+    const items = rawItems
+      .filter((it: unknown) => it && typeof it === "object")
+      .map((it: Record<string, unknown>) => ({
+        name: typeof it.name === "string" ? it.name.trim() : "",
+        quantity: Math.max(1, Number(it.quantity) || 1),
+        unitPrice: Math.max(0, Number(it.unitPrice) || 0),
+      }))
+      .filter((it: { name: string }) => it.name.length > 0);
+
     const quotation = await submitStructuredQuotation({
       requestId: ctx.requestId,
       ticketNumber: ctx.ticketNumber,
@@ -38,6 +48,7 @@ export async function POST(request: Request) {
       materialsCost: Number(body?.materialsCost) || 0,
       transportCharge: Number(body?.transportCharge) || 0,
       otherCharges: Number(body?.otherCharges) || 0,
+      items: items.length > 0 ? items : undefined,
       notes: typeof body?.notes === "string" ? body.notes : undefined,
       actorRole: actor.role === "admin" ? "admin" : "plumber",
     });

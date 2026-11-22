@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, Camera, CheckCircle2, Eye, FileText, Loader2, MapPin, MessageSquare, Navigation, Phone, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, Camera, CheckCircle2, Eye, FileText, Loader2, MapPin, MessageSquare, Navigation, Phone, Plus, Printer, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { uploadChatFile } from "@/components/chat/ChatAttachment";
 import { LiveMap, type LiveMapMarker, type OwnPositionFix } from "@/components/map/LiveMap";
 import {
@@ -595,9 +595,9 @@ export function PlumberJobDrawer({
                     { id: `item-${Date.now()}-${quoteItems.length}`, name: "", quantity: 1, unitPrice: 0 },
                   ])
                 }
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                className="inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-100"
               >
-                <Plus className="h-3.5 w-3.5 text-[#F5B301]" /> Add Item
+                <Plus className="h-3.5 w-3.5 shrink-0 text-[#F5B301]" /> Add Item
               </button>
             </div>
 
@@ -756,14 +756,14 @@ export function PlumberJobDrawer({
                     isDraftPreview: true,
                   })
                 }
-                className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-[#0B1F3A] bg-white px-4 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50 disabled:opacity-40"
+                className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-[#0B1F3A] bg-white px-4 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50 disabled:opacity-40"
               >
-                <Eye className="h-4 w-4" /> Preview
+                <Eye className="h-4 w-4 shrink-0" /> Preview
               </button>
               <button
                 type="submit"
                 disabled={busyAction === "quote"}
-                className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#F5B301] text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] disabled:opacity-60"
+                className="inline-flex h-11 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#F5B301] px-4 text-sm font-bold text-[#07152B] transition hover:bg-[#e5a700] disabled:opacity-60"
               >
                 {busyAction === "quote" && <Loader2 className="h-4 w-4 animate-spin" />}
                 {busyAction === "quote" ? "Submitting..." : "Submit Quotation"}
@@ -826,9 +826,9 @@ export function PlumberJobDrawer({
                               notes: q.notes,
                             })
                           }
-                          className="inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                          className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-[#0B1F3A] hover:bg-slate-100"
                         >
-                          <Eye className="h-3 w-3" /> Preview / Print
+                          <Printer className="h-3 w-3 shrink-0" /> Print
                         </button>
                       </div>
                     </div>

@@ -3,6 +3,7 @@ import "dart:convert";
 import "package:flutter/foundation.dart";
 import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:geolocator/geolocator.dart" as geo;
 import "package:latlong2/latlong.dart";
 import "package:mapbox_maps_flutter/mapbox_maps_flutter.dart";
@@ -66,9 +67,11 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   static const String _routeLayerId = "flowguard-route-layer";
 
   MapboxMap? _mapboxMap;
-  CircleAnnotationManager? _circleManager;
-  CircleAnnotation? _customerAnnotation;
-  CircleAnnotation? _plumberAnnotation;
+  PointAnnotationManager? _pointManager;
+  PointAnnotation? _customerAnnotation;
+  PointAnnotation? _plumberAnnotation;
+  Uint8List? _customerPinBytes;
+  Uint8List? _plumberPinBytes;
   late final ViewportController _viewportController;
   LatLng? _myLocation;
   bool _locatingMe = false;
@@ -197,9 +200,28 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
     } catch (_) {}
   }
 
+  Future<void> _ensurePinBytesLoaded() async {
+    if (_customerPinBytes == null) {
+      try {
+        final data = await rootBundle.load(
+          "assets/images/map-pins/customer-pin.png",
+        );
+        _customerPinBytes = data.buffer.asUint8List();
+      } catch (_) {}
+    }
+    if (_plumberPinBytes == null) {
+      try {
+        final data = await rootBundle.load(
+          "assets/images/map-pins/plumber-pin.png",
+        );
+        _plumberPinBytes = data.buffer.asUint8List();
+      } catch (_) {}
+    }
+  }
+
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
-    _circleManager = await mapboxMap.annotations.createCircleAnnotationManager();
+    _pointManager = await mapboxMap.annotations.createPointAnnotationManager();
     _customerAnnotation = null;
     _plumberAnnotation = null;
     if (widget.onPickLocation != null) {
@@ -213,61 +235,64 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         }),
       );
     }
+    await _ensurePinBytesLoaded();
     await _enableLocationPuck(engageFollow: widget.followMe);
     await _syncCircleAnnotations();
     await _syncRouteSource();
   }
 
   Future<void> _syncCircleAnnotations() async {
-    final circles = _circleManager;
-    if (circles == null) return;
+    final points = _pointManager;
+    if (points == null) return;
+    await _ensurePinBytesLoaded();
 
     try {
-      if (widget.customerLat != null && widget.customerLng != null) {
+      if (widget.customerLat != null &&
+          widget.customerLng != null &&
+          _customerPinBytes != null) {
         final pt = Point(
           coordinates: Position(widget.customerLng!, widget.customerLat!),
         );
         if (_customerAnnotation == null) {
-          _customerAnnotation = await circles.create(
-            CircleAnnotationOptions(
+          _customerAnnotation = await points.create(
+            PointAnnotationOptions(
               geometry: pt,
-              circleColor: FlowGuardTheme.navy.toARGB32(),
-              circleRadius: 10.0,
-              circleStrokeColor: Colors.white.toARGB32(),
-              circleStrokeWidth: 3.0,
+              image: _customerPinBytes,
+              iconSize: 0.55,
+              iconAnchor: IconAnchor.BOTTOM,
             ),
           );
         } else {
           _customerAnnotation!.geometry = pt;
-          await circles.update(_customerAnnotation!);
+          await points.update(_customerAnnotation!);
         }
       } else if (_customerAnnotation != null) {
-        await circles.delete(_customerAnnotation!);
+        await points.delete(_customerAnnotation!);
         _customerAnnotation = null;
       }
 
       if (widget.showPlumberMarker &&
           widget.plumberLat != null &&
-          widget.plumberLng != null) {
+          widget.plumberLng != null &&
+          _plumberPinBytes != null) {
         final pt = Point(
           coordinates: Position(widget.plumberLng!, widget.plumberLat!),
         );
         if (_plumberAnnotation == null) {
-          _plumberAnnotation = await circles.create(
-            CircleAnnotationOptions(
+          _plumberAnnotation = await points.create(
+            PointAnnotationOptions(
               geometry: pt,
-              circleColor: FlowGuardTheme.gold.toARGB32(),
-              circleRadius: 11.0,
-              circleStrokeColor: FlowGuardTheme.navy.toARGB32(),
-              circleStrokeWidth: 3.0,
+              image: _plumberPinBytes,
+              iconSize: 0.55,
+              iconAnchor: IconAnchor.BOTTOM,
             ),
           );
         } else {
           _plumberAnnotation!.geometry = pt;
-          await circles.update(_plumberAnnotation!);
+          await points.update(_plumberAnnotation!);
         }
       } else if (_plumberAnnotation != null) {
-        await circles.delete(_plumberAnnotation!);
+        await points.delete(_plumberAnnotation!);
         _plumberAnnotation = null;
       }
     } catch (_) {}

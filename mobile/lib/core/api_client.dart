@@ -281,6 +281,7 @@ class FlowGuardApiClient {
     required double materialsCost,
     double transportCharge = 0,
     double otherCharges = 0,
+    List<Map<String, dynamic>> items = const [],
     String? notes,
   }) async {
     final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/mobile/quotations");
@@ -294,6 +295,7 @@ class FlowGuardApiClient {
             "materialsCost": materialsCost,
             "transportCharge": transportCharge,
             "otherCharges": otherCharges,
+            if (items.isNotEmpty) "items": items,
             if (notes != null && notes.isNotEmpty) "notes": notes,
           }),
         )
