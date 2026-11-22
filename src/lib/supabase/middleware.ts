@@ -70,7 +70,8 @@ export async function updateSession(request: NextRequest) {
     if (isAccessingAdmin && !isAdminLogin) {
       if (role === "customer" || role === "plumber") {
         const url = request.nextUrl.clone();
-        url.pathname = role === "customer" ? "/customer" : "/plumber";
+        url.pathname = "/admin/login";
+        url.searchParams.set("reason", "auth_required");
         return NextResponse.redirect(url);
       }
 
