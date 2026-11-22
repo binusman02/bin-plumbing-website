@@ -45,7 +45,7 @@ export default async function CustomerPortalPage() {
   if (user && role === "plumber") {
     redirect("/plumber");
   }
-  if (user && role !== "customer") {
+  if (user && role === "admin") {
     redirect("/admin");
   }
 

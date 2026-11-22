@@ -65,6 +65,9 @@ function normalizeNigerianPhoneDigits(input: string): string {
   if (digits.startsWith("0") && digits.length === 11) {
     return `234${digits.slice(1)}`;
   }
+  if (digits.length === 10 && !digits.startsWith("0")) {
+    return `234${digits}`;
+  }
   return digits;
 }
 
@@ -159,7 +162,38 @@ export async function loginCustomerWithPasswordAction(
       return { success: false, error: "Invalid sign-in details." };
     }
 
-    const role = getUserRole(data.user);
+    let role = getUserRole(data.user);
+    if (role !== "customer") {
+      // Backfill app_metadata.role = "customer" if this verified auth user is a customer and not admin/plumber
+      const adminSupabase = getServiceSupabase();
+      const userEmail = (data.user.email || "").toLowerCase().trim();
+      const [{ data: adminRow }, { data: plumberRow }, { data: custRow }] = await Promise.all([
+        adminSupabase
+          .from("admin_users")
+          .select("id")
+          .eq("auth_user_id", data.user.id)
+          .limit(1)
+          .maybeSingle(),
+        adminSupabase
+          .from("plumbers")
+          .select("id")
+          .eq("auth_user_id", data.user.id)
+          .limit(1)
+          .maybeSingle(),
+        adminSupabase
+          .from("customers")
+          .select("id")
+          .or(`auth_user_id.eq.${data.user.id},email.eq.${userEmail}`)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (!adminRow && !plumberRow && (custRow || !role)) {
+        await setServerAppRole(data.user.id, "customer");
+        role = "customer";
+      }
+    }
+
     if (role !== "customer") {
       await supabase.auth.signOut();
       return { success: false, error: "Invalid sign-in details." };

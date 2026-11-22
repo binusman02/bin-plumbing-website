@@ -466,6 +466,9 @@ export function WhatsAppChatWorkspace({
 
   // Fallback ticket message sync, visibility listener & online reconnect sync
   useEffect(() => {
+    if (selectedTicket) {
+      void syncTicketMessages(selectedTicket, true);
+    }
     const syncTimer = setInterval(() => {
       if (document.visibilityState === "visible" && selectedTicket) {
         void syncTicketMessages(selectedTicket);
@@ -498,7 +501,7 @@ export function WhatsAppChatWorkspace({
     userId: actorId,
     onMessageSignal: ({ ticketNumber }) => {
       if (!ticketNumber) return;
-      syncTicketMessages(ticketNumber);
+      syncTicketMessages(ticketNumber, true);
     },
     onMessage: (msg) => {
       if (actorRole === "customer" && msg.is_internal) return;
