@@ -98,25 +98,27 @@ export async function generateSupportReply(params: {
 
   const googleProvider = createGoogleGenerativeAI({ apiKey });
   const system = await buildSystemPrompt(params.ticketContext);
-  const candidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite"] as const;
+  const candidates = [
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.8-flash",
+  ];
   const reasons: string[] = [];
+
+  const tryModel = async (modelId: string) => {
+    const result = await generateText({
+      model: googleProvider(modelId),
+      system,
+      messages: cleanMessages,
+      maxOutputTokens: 400,
+      abortSignal: AbortSignal.timeout(12000),
+    });
+    return result.text?.trim() || "";
+  };
 
   for (const modelId of candidates) {
     try {
-      const result = await generateText({
-        model: googleProvider(modelId),
-        system,
-        messages: cleanMessages,
-        maxOutputTokens: 300,
-        providerOptions: {
-          google: {
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        },
-        abortSignal: AbortSignal.timeout(12000),
-      });
-
-      const text = result.text?.trim();
+      const text = await tryModel(modelId);
       if (text) {
         return { text, model: modelId, fallback: false };
       }
@@ -127,6 +129,46 @@ export async function generateSupportReply(params: {
       reasons.push(short);
       console.error("[ai-assistant] failed:", short);
     }
+  }
+
+  // Dynamic model discovery fallback if static IDs change
+  try {
+    const listRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (listRes.ok) {
+      const listJson = (await listRes.json()) as {
+        models?: { name?: string; supportedGenerationMethods?: string[] }[];
+      };
+      const dynamicFlash = (listJson.models || [])
+        .filter(
+          (m) =>
+            m.name?.includes("flash") &&
+            !m.name?.includes("image") &&
+            !m.name?.includes("tts") &&
+            !m.name?.includes("audio") &&
+            m.supportedGenerationMethods?.includes("generateContent")
+        )
+        .map((m) => String(m.name).replace(/^models\//, ""))
+        .reverse()
+        .slice(0, 2);
+
+      for (const modelId of dynamicFlash) {
+        if (candidates.includes(modelId)) continue;
+        try {
+          const text = await tryModel(modelId);
+          if (text) {
+            return { text, model: modelId, fallback: false };
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          reasons.push(`${modelId}: ${msg.slice(0, 90)}`);
+        }
+      }
+    }
+  } catch {
+    // Ignore discovery failure
   }
 
   return {
