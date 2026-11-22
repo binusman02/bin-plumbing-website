@@ -507,10 +507,8 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                     const SizedBox(height: 12),
                   ],
                   // Header Card
-                  if (_job.status != "completed" &&
-                      _job.status != "cancelled") ...[
-                    Container(
-                      padding: const EdgeInsets.all(16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
