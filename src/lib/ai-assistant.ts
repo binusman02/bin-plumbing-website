@@ -110,7 +110,7 @@ export async function generateSupportReply(params: {
       model: googleProvider(modelId),
       system,
       messages: cleanMessages,
-      maxOutputTokens: 400,
+      maxOutputTokens: 1200,
       abortSignal: AbortSignal.timeout(12000),
     });
     return result.text?.trim() || "";
