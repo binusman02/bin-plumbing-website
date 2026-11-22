@@ -3,7 +3,9 @@
 import { startTransition as startBackgroundTransition, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Check,
   CheckCircle2,
+  Copy,
   CreditCard,
   Crosshair,
   Eye,
@@ -171,6 +173,7 @@ export default function CustomerPortalClient({
   const homeReceiptInputRef = useRef<HTMLInputElement | null>(null);
   const [homeReceiptTarget, setHomeReceiptTarget] = useState<ServiceRequestRecord | null>(null);
   const [homeReceiptUploading, setHomeReceiptUploading] = useState<string | null>(null);
+  const [copiedAccount, setCopiedAccount] = useState(false);
 
   useEffect(() => {
     setRequests(initialRequests);
@@ -1380,10 +1383,26 @@ export default function CustomerPortalClient({
                 Your job has been marked complete. Please transfer to the company bank account and upload your payment receipt so Admin can verify and close your ticket.
               </p>
               {bankDetails?.bankAccountNumber && (
-                <div className="rounded-lg border border-amber-200 bg-white p-3 text-xs text-slate-700">
-                  <span className="font-semibold">Bank:</span> {bankDetails.bankName || "Configured Bank"} •{" "}
-                  <span className="font-semibold">Account:</span> {bankDetails.bankAccountName || "FlowGuard Plumbing Enterprises"} •{" "}
-                  <span className="font-mono font-bold text-[#0B1F3A]">{bankDetails.bankAccountNumber}</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white p-3 text-xs text-slate-700">
+                  <div>
+                    <span className="font-semibold">Bank:</span> {bankDetails.bankName || "Configured Bank"} •{" "}
+                    <span className="font-semibold">Account:</span> {bankDetails.bankAccountName || "FlowGuard Plumbing Enterprises"} •{" "}
+                    <span className="font-mono font-bold text-[#0B1F3A]">{bankDetails.bankAccountNumber}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(bankDetails.bankAccountNumber || "");
+                        setCopiedAccount(true);
+                        setTimeout(() => setCopiedAccount(false), 1800);
+                      } catch {}
+                    }}
+                    className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                  >
+                    {copiedAccount ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                    {copiedAccount ? "Copied" : "Copy"}
+                  </button>
                 </div>
               )}
               <input
@@ -1547,25 +1566,25 @@ export default function CustomerPortalClient({
                           notes: q.notes,
                         });
                       }}
-                      className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                      className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-[#0B1F3A] hover:bg-slate-50"
                     >
-                      <Eye className="h-4 w-4" /> Preview / Print
+                      <Printer className="h-4 w-4 shrink-0" /> Print
                     </button>
                     <button
                       type="button"
                       disabled={isPending}
                       onClick={() => handleQuoteDecision(q, "approved")}
-                      className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700"
+                      className="inline-flex h-11 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-3 text-sm font-bold text-white hover:bg-emerald-700"
                     >
-                      <ThumbsUp className="h-4 w-4" /> Approve Quote
+                      <ThumbsUp className="h-4 w-4 shrink-0" /> Approve Quote
                     </button>
                     <button
                       type="button"
                       disabled={isPending}
                       onClick={() => handleQuoteDecision(q, "rejected")}
-                      className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 bg-white text-sm font-bold text-red-700 hover:bg-red-50"
+                      className="inline-flex h-11 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-red-200 bg-white px-3 text-sm font-bold text-red-700 hover:bg-red-50"
                     >
-                      <ThumbsDown className="h-4 w-4" /> Reject
+                      <ThumbsDown className="h-4 w-4 shrink-0" /> Decline
                     </button>
                   </div>
                 </div>
@@ -1691,7 +1710,12 @@ export default function CustomerPortalClient({
             </div>
           ) : (
             myPayments.map((p) => {
-              const badge = getStatusMeta(p.verification_status);
+              const isPaid =
+                p.verification_status === "verified" ||
+                (p.verification_status as string) === "confirmed";
+              const badge = isPaid
+                ? { label: "Paid", className: "bg-emerald-100 text-emerald-800" }
+                : getStatusMeta(p.verification_status);
               return (
                 <button
                   key={p.id}
