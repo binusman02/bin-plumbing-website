@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getMarketplaceSettings, postJobMessage } from "@/lib/marketplace";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
@@ -75,7 +75,7 @@ function buildFallbackReply(userText: string, ticket?: TicketAiContext | null): 
 export async function generateSupportReply(params: {
   messages: AiChatTurn[];
   ticketContext?: TicketAiContext | null;
-}): Promise<{ text: string; model: string; fallback: boolean }> {
+}): Promise<{ text: string; model: string; fallback: boolean; reason?: string }> {
   const cleanMessages = params.messages
     .filter((m) => m.content && m.content.trim().length > 0)
     .slice(-10)
@@ -92,37 +92,43 @@ export async function generateSupportReply(params: {
       text: buildFallbackReply(lastUser, params.ticketContext),
       model: "fallback-rule",
       fallback: true,
+      reason: "missing_key",
     };
   }
 
-  try {
-    const system = await buildSystemPrompt(params.ticketContext);
-    const result = await generateText({
-      model: google("gemini-2.5-flash"),
-      system,
-      messages: cleanMessages,
-      maxOutputTokens: 240,
-      abortSignal: AbortSignal.timeout(8000),
-    });
+  const googleProvider = createGoogleGenerativeAI({ apiKey });
+  const system = await buildSystemPrompt(params.ticketContext);
+  const candidates = ["gemini-2.5-flash", "gemini-2.0-flash"] as const;
+  let lastReason = "unknown";
 
-    const text = result.text?.trim();
-    if (!text) {
-      return {
-        text: buildFallbackReply(lastUser, params.ticketContext),
-        model: "fallback-empty",
-        fallback: true,
-      };
+  for (const modelId of candidates) {
+    try {
+      const result = await generateText({
+        model: googleProvider(modelId),
+        system,
+        messages: cleanMessages,
+        maxOutputTokens: 400,
+        abortSignal: AbortSignal.timeout(12000),
+      });
+
+      const text = result.text?.trim();
+      if (text) {
+        return { text, model: modelId, fallback: false };
+      }
+      lastReason = "empty_text";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      lastReason = msg.slice(0, 120);
+      console.error(`[ai-assistant] ${modelId} failed:`, lastReason);
     }
-
-    return { text, model: "gemini-2.5-flash", fallback: false };
-  } catch (err) {
-    console.error("[ai-assistant] generateSupportReply failed:", err instanceof Error ? err.message : "error");
-    return {
-      text: buildFallbackReply(lastUser, params.ticketContext),
-      model: "fallback-error",
-      fallback: true,
-    };
   }
+
+  return {
+    text: buildFallbackReply(lastUser, params.ticketContext),
+    model: "fallback-error",
+    fallback: true,
+    reason: lastReason,
+  };
 }
 
 export async function maybeAutoReplyToTicketMessage(params: {

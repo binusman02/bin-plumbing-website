@@ -73,6 +73,7 @@ export async function POST(request: Request) {
       reply: res.text,
       model: res.model,
       fallback: res.fallback,
+      ...(res.reason ? { reason: res.reason } : {}),
     });
   } catch (err) {
     return NextResponse.json(
