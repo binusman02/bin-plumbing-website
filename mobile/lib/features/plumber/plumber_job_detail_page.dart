@@ -1,9 +1,11 @@
 import "dart:async";
+import "dart:math" as math;
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 import "package:latlong2/latlong.dart";
 import "package:image_picker/image_picker.dart";
 import "package:intl/intl.dart";
+import "package:sensors_plus/sensors_plus.dart";
 import "package:url_launcher/url_launcher.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
@@ -44,6 +46,9 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   String _gpsMessage = "GPS standby";
   bool _gpsError = false;
   StreamSubscription<Position>? _gpsSub;
+  StreamSubscription<GyroscopeEvent>? _gyroSub;
+  double? _fusedHeading;
+  DateTime? _lastGyroAt;
   bool _disposed = false;
   List<dynamic> _history = [];
   final List<String> _uploadedPhotoNames = [];
@@ -70,6 +75,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
       FlowGuardApiClient.stopLiveLocation().catchError((_) {});
     }
     _gpsSub?.cancel();
+    _gyroSub?.cancel();
     _labourCtrl.dispose();
     _materialsCtrl.dispose();
     _transportCtrl.dispose();
@@ -209,6 +215,22 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
     if (!ok || _disposed || !mounted) return;
 
     await _gpsSub?.cancel();
+    await _gyroSub?.cancel();
+    _lastGyroAt = DateTime.now();
+    _gyroSub = gyroscopeEventStream().listen(
+      (event) {
+        final now = DateTime.now();
+        final dt = _lastGyroAt == null
+            ? 0.0
+            : now.difference(_lastGyroAt!).inMilliseconds / 1000.0;
+        _lastGyroAt = now;
+        if (_fusedHeading != null && dt > 0 && dt < 0.5) {
+          final deltaDeg = -(event.z * (180.0 / math.pi)) * dt;
+          _fusedHeading = (_fusedHeading! + deltaDeg + 360.0) % 360.0;
+        }
+      },
+      onError: (_) {},
+    );
     if (mounted) {
       setState(() {
         _gpsError = false;
@@ -253,6 +275,8 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   Future<void> _stopGpsStream({bool disableSharing = true}) async {
     await _gpsSub?.cancel();
     _gpsSub = null;
+    await _gyroSub?.cancel();
+    _gyroSub = null;
     if (disableSharing) {
       await FlowGuardApiClient.stopLiveLocation().catchError((_) {});
     }
@@ -267,6 +291,11 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
   }
 
   Future<void> _pushLocation(Position pos) async {
+    if (pos.heading >= 0 && pos.speed > 0.8) {
+      _fusedHeading = pos.heading;
+    } else {
+      _fusedHeading ??= (pos.heading >= 0 ? pos.heading : 0.0);
+    }
     if (mounted) {
       setState(() {
         _plumberLat = pos.latitude;
@@ -281,7 +310,7 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
         lat: pos.latitude,
         lng: pos.longitude,
         accuracy: pos.accuracy,
-        heading: pos.heading,
+        heading: _fusedHeading,
         speed: pos.speed,
       );
     } catch (_) {
@@ -478,8 +507,10 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                     const SizedBox(height: 12),
                   ],
                   // Header Card
-                  Container(
-                    padding: const EdgeInsets.all(16),
+                  if (_job.status != "completed" &&
+                      _job.status != "cancelled") ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
@@ -574,7 +605,10 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                _job.addressInKano,
+                                (_job.status == "completed" ||
+                                        _job.status == "cancelled")
+                                    ? "Customer location hidden after job completion for privacy."
+                                    : _job.addressInKano,
                                 style: const TextStyle(
                                   fontSize: 13,
                                   color: FlowGuardTheme.mutedText,
@@ -702,7 +736,9 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
 
                   const SizedBox(height: 14),
 
-                  // Embedded In-App Map & GPS Status (No external Google Maps redirect!)
+                  if (_job.status != "completed" &&
+                      _job.status != "cancelled") ...[
+                  // Embedded In-App Map & GPS Status
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -776,10 +812,36 @@ class _PlumberJobDetailPageState extends State<PlumberJobDetailPage> {
                           routePoints: _routePoints,
                           height: 240,
                           allowFullscreen: true,
+                          followMe: _tripState == "on_the_way",
+                          enable3D: _tripState == "on_the_way",
                         ),
+                        if (_tripState == "on_the_way" &&
+                            _job.customerLat != null &&
+                            _job.customerLng != null) ...[
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => launchUrl(
+                                Uri.parse(
+                                  "https://www.google.com/maps/dir/?api=1&destination=${_job.customerLat},${_job.customerLng}&travelmode=driving",
+                                ),
+                                mode: LaunchMode.externalApplication,
+                              ),
+                              icon: const Icon(Icons.navigation_rounded, size: 18),
+                              label: const Text(
+                                "Open Turn-by-Turn Navigation",
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
+                  ],
 
                   const SizedBox(height: 16),
 

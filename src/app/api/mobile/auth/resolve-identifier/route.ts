@@ -6,6 +6,7 @@ function normalizeNigerianDigits(input: string): string {
   const digits = input.replace(/\D/g, "");
   if (digits.startsWith("234") && digits.length === 13) return digits;
   if (digits.startsWith("0") && digits.length === 11) return `234${digits.slice(1)}`;
+  if (digits.length === 10 && !digits.startsWith("0")) return `234${digits}`;
   return digits;
 }
 
@@ -66,6 +67,27 @@ export async function POST(req: NextRequest) {
       ? String(custMatch.email).toLowerCase()
       : `c_${normalized}@customer.binplumbing.local`;
     return NextResponse.json({ email });
+  }
+
+  // Fallback: check Supabase Auth user_metadata.phone for newly signed-up mobile accounts
+  try {
+    const { data: usersPage } = await adminSupabase.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+    const authMatch = (usersPage?.users || []).find((u) => {
+      const metaPhone = String(u.user_metadata?.phone || "");
+      const authPhone = String(u.phone || "");
+      return (
+        normalizeNigerianDigits(metaPhone) === normalized ||
+        normalizeNigerianDigits(authPhone) === normalized
+      );
+    });
+    if (authMatch?.email) {
+      return NextResponse.json({ email: authMatch.email.toLowerCase() });
+    }
+  } catch {
+    // ignore fallback error
   }
 
   return NextResponse.json({ error: "Invalid sign-in details." }, { status: 404 });

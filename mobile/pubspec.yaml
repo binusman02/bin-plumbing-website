@@ -26,6 +26,7 @@ dependencies:
   record: ^5.1.2
   audioplayers: ^6.1.0
   mapbox_maps_flutter: ^3.35.2
+  sensors_plus: ^7.1.1
 
 dependency_overrides:
   record_linux: ^1.0.0

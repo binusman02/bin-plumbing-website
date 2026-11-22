@@ -7,6 +7,7 @@ import "package:record/record.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/app_state_badges.dart";
+import "package:flowguard_plumbing/core/presence_service.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/shared/voice_note_widgets.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
@@ -359,22 +360,30 @@ class _TicketChatViewState extends State<TicketChatView> {
                                                   ),
                                                 ),
                                     ),
-                                    Positioned(
+                                      Positioned(
                                       bottom: 0,
                                       right: 0,
-                                      child: Container(
-                                        width: 13,
-                                        height: 13,
-                                        decoration: BoxDecoration(
-                                          color: item.online
-                                              ? const Color(0xFF22C55E)
-                                              : const Color(0xFF94A3B8),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: Colors.white,
-                                            width: 2,
-                                          ),
-                                        ),
+                                      child: ValueListenableBuilder<Set<String>>(
+                                        valueListenable:
+                                            PresenceService.instance.onlineRoles,
+                                        builder: (_, roles, __) {
+                                          final liveOnline = item.online ||
+                                              roles.contains(item.peerRole);
+                                          return Container(
+                                            width: 13,
+                                            height: 13,
+                                            decoration: BoxDecoration(
+                                              color: liveOnline
+                                                  ? const Color(0xFF22C55E)
+                                                  : const Color(0xFF94A3B8),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: Colors.white,
+                                                width: 2,
+                                              ),
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                   ],
@@ -432,15 +441,29 @@ class _TicketChatViewState extends State<TicketChatView> {
                                           if (isMe &&
                                               item.lastReceiptStatus !=
                                                   null) ...[
-                                            Icon(
-                                              item.lastReceiptStatus == "sent"
-                                                  ? Icons.done_rounded
-                                                  : Icons.done_all_rounded,
-                                              size: 15,
-                                              color: item.lastReceiptStatus ==
-                                                      "read"
-                                                  ? const Color(0xFF0284C7)
-                                                  : FlowGuardTheme.mutedText,
+                                            ValueListenableBuilder<Set<String>>(
+                                              valueListenable: PresenceService
+                                                  .instance.onlineRoles,
+                                              builder: (_, roles, __) {
+                                                final liveOnline = item.online ||
+                                                    roles.contains(
+                                                      item.peerRole,
+                                                    );
+                                                final showSingle =
+                                                    item.lastReceiptStatus ==
+                                                            "sent" &&
+                                                        !liveOnline;
+                                                return Icon(
+                                                  showSingle
+                                                      ? Icons.done_rounded
+                                                      : Icons.done_all_rounded,
+                                                  size: 15,
+                                                  color: item.lastReceiptStatus ==
+                                                          "read"
+                                                      ? const Color(0xFF0284C7)
+                                                      : FlowGuardTheme.mutedText,
+                                                );
+                                              },
                                             ),
                                             const SizedBox(width: 4),
                                           ],
@@ -1008,14 +1031,21 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  Text(
-                    "${_peerOnline ? "Online" : "Offline"} • ${widget.conversation.ticketNumber} • Owner: ${widget.conversation.ownerName}",
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFCBD5E1),
-                      fontSize: 11,
-                    ),
+                  ValueListenableBuilder<Set<String>>(
+                    valueListenable: PresenceService.instance.onlineRoles,
+                    builder: (_, roles, __) {
+                      final liveOnline = _peerOnline ||
+                          roles.contains(widget.conversation.peerRole);
+                      return Text(
+                        "${liveOnline ? "Online" : "Offline"} • ${widget.conversation.ticketNumber} • Owner: ${widget.conversation.ownerName}",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFCBD5E1),
+                          fontSize: 11,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -1358,14 +1388,26 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                               color: Color(0xFF667781),
                                             )
                                           else
-                                            Icon(
-                                              (status == "sent" && !_peerOnline)
-                                                  ? Icons.done_rounded
-                                                  : Icons.done_all_rounded,
-                                              size: 14,
-                                              color: status == "read"
-                                                  ? const Color(0xFF0284C7)
-                                                  : const Color(0xFF667781),
+                                            ValueListenableBuilder<Set<String>>(
+                                              valueListenable: PresenceService
+                                                  .instance.onlineRoles,
+                                              builder: (_, roles, __) {
+                                                final liveOnline = _peerOnline ||
+                                                    roles.contains(
+                                                      widget
+                                                          .conversation.peerRole,
+                                                    );
+                                                return Icon(
+                                                  (status == "sent" &&
+                                                          !liveOnline)
+                                                      ? Icons.done_rounded
+                                                      : Icons.done_all_rounded,
+                                                  size: 14,
+                                                  color: status == "read"
+                                                      ? const Color(0xFF0284C7)
+                                                      : const Color(0xFF667781),
+                                                );
+                                              },
                                             ),
                                         ],
                                       ],

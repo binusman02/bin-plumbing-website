@@ -16,6 +16,8 @@ class FlowGuardGoogleMap extends StatefulWidget {
   final void Function(double lat, double lng)? onPickLocation;
   final double height;
   final bool allowFullscreen;
+  final bool followMe;
+  final bool enable3D;
 
   static const LatLng _kanoCenter = LatLng(12.0022, 8.5920);
   static const String _mapboxAccessToken = String.fromEnvironment(
@@ -37,6 +39,8 @@ class FlowGuardGoogleMap extends StatefulWidget {
     this.onPickLocation,
     this.height = 240,
     this.allowFullscreen = false,
+    this.followMe = false,
+    this.enable3D = false,
   });
 
   @override
@@ -47,14 +51,24 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   MapboxMap? _mapboxMap;
   CircleAnnotationManager? _circleManager;
   PolylineAnnotationManager? _polylineManager;
+  late final ViewportController _viewportController;
   LatLng? _myLocation;
   bool _locatingMe = false;
   bool _satellite = false;
+  late bool _is3D;
 
   @override
   void initState() {
     super.initState();
+    _is3D = widget.enable3D;
+    _viewportController = ViewportController();
     MapboxOptions.setAccessToken(FlowGuardGoogleMap._mapboxAccessToken);
+  }
+
+  @override
+  void dispose() {
+    _viewportController.dispose();
+    super.dispose();
   }
 
   LatLng get _target {
@@ -71,7 +85,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   }
 
   double get _targetZoom =>
-      (widget.customerLat != null || widget.plumberLat != null) ? 15.0 : 12.5;
+      (widget.customerLat != null || widget.plumberLat != null) ? 15.5 : 12.5;
 
   @override
   void didUpdateWidget(covariant FlowGuardGoogleMap oldWidget) {
@@ -82,7 +96,9 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         oldWidget.plumberLng != widget.plumberLng;
     final routeChanged = oldWidget.routePoints.length != widget.routePoints.length;
 
-    if (coordsChanged) {
+    if (oldWidget.followMe != widget.followMe && widget.followMe) {
+      _engageFollowPuck();
+    } else if (coordsChanged && !widget.followMe) {
       _moveCamera(_target, _targetZoom);
     }
     if (coordsChanged || routeChanged) {
@@ -100,8 +116,47 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
             coordinates: Position(target.longitude, target.latitude),
           ),
           zoom: zoom,
+          pitch: _is3D ? 48.0 : 0.0,
         ),
         MapAnimationOptions(duration: 450),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _enableLocationPuck({bool engageFollow = false}) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    try {
+      final perm = await geo.Geolocator.checkPermission();
+      if (perm != geo.LocationPermission.always &&
+          perm != geo.LocationPermission.whileInUse) {
+        return;
+      }
+      await map.location.updateSettings(
+        LocationComponentSettings(
+          enabled: true,
+          pulsingEnabled: true,
+          showAccuracyRing: true,
+          puckBearingEnabled: true,
+          puckBearing: PuckBearing.HEADING,
+        ),
+      );
+      if (engageFollow ||
+          widget.followMe ||
+          (widget.customerLat == null && widget.plumberLat == null)) {
+        _engageFollowPuck();
+      }
+    } catch (_) {}
+  }
+
+  void _engageFollowPuck() {
+    try {
+      _viewportController.moveTo(
+        FollowPuckViewportState(
+          zoom: 16.2,
+          pitch: _is3D ? 50.0 : 0.0,
+          bearing: const FollowPuckViewportStateBearingHeading(),
+        ),
       );
     } catch (_) {}
   }
@@ -122,6 +177,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         }),
       );
     }
+    await _enableLocationPuck(engageFollow: widget.followMe);
     await _syncAnnotations();
   }
 
@@ -175,25 +231,6 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
           ),
         );
       }
-
-      if (_myLocation != null &&
-          widget.customerLat == null &&
-          widget.plumberLat == null) {
-        await circles.create(
-          CircleAnnotationOptions(
-            geometry: Point(
-              coordinates: Position(
-                _myLocation!.longitude,
-                _myLocation!.latitude,
-              ),
-            ),
-            circleColor: const Color(0xFF2563EB).toARGB32(),
-            circleRadius: 9.0,
-            circleStrokeColor: Colors.white.toARGB32(),
-            circleStrokeWidth: 2.5,
-          ),
-        );
-      }
     } catch (_) {}
   }
 
@@ -208,6 +245,17 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
       );
       await _syncAnnotations();
     } catch (_) {}
+  }
+
+  Future<void> _toggle3D() async {
+    final next = !_is3D;
+    setState(() => _is3D = next);
+    if (widget.followMe ||
+        (widget.customerLat == null && widget.plumberLat == null)) {
+      _engageFollowPuck();
+    } else {
+      await _moveCamera(_target, _targetZoom);
+    }
   }
 
   Future<void> _centerOnMyLocation() async {
@@ -226,6 +274,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
         }
         return;
       }
+      await _enableLocationPuck(engageFollow: true);
       final pos = await geo.Geolocator.getCurrentPosition(
         locationSettings: const geo.LocationSettings(
           accuracy: geo.LocationAccuracy.high,
@@ -235,8 +284,6 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
       if (mounted) {
         setState(() => _myLocation = point);
       }
-      await _moveCamera(point, 15.5);
-      await _syncAnnotations();
       if (widget.onPickLocation != null) {
         widget.onPickLocation!(pos.latitude, pos.longitude);
       }
@@ -258,12 +305,20 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
       styleUri: _satellite
           ? FlowGuardGoogleMap._satelliteStyleUri
           : FlowGuardGoogleMap._streetStyleUri,
-      viewport: CameraViewportState(
-        center: Point(
-          coordinates: Position(_target.longitude, _target.latitude),
-        ),
-        zoom: _targetZoom,
-      ),
+      viewportController: _viewportController,
+      viewport: widget.followMe
+          ? FollowPuckViewportState(
+              zoom: 16.2,
+              pitch: _is3D ? 50.0 : 0.0,
+              bearing: const FollowPuckViewportStateBearingHeading(),
+            )
+          : CameraViewportState(
+              center: Point(
+                coordinates: Position(_target.longitude, _target.latitude),
+              ),
+              zoom: _targetZoom,
+              pitch: _is3D ? 48.0 : 0.0,
+            ),
       gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
         Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
       },
@@ -285,43 +340,74 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
             Positioned(
               top: 10,
               right: 10,
-              child: Material(
-                color: Colors.white,
-                elevation: 2,
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: _toggleStyle,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _satellite
-                              ? Icons.map_outlined
-                              : Icons.satellite_alt_rounded,
-                          size: 16,
-                          color: FlowGuardTheme.navy,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Material(
+                    color: _is3D ? FlowGuardTheme.navy : Colors.white,
+                    elevation: 2,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: _toggle3D,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
                         ),
-                        const SizedBox(width: 5),
-                        Text(
-                          _satellite ? "Street" : "Satellite",
+                        child: Text(
+                          _is3D ? "3D" : "2D",
                           maxLines: 1,
                           softWrap: false,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: FlowGuardTheme.navy,
+                            fontWeight: FontWeight.w800,
+                            color: _is3D ? Colors.white : FlowGuardTheme.navy,
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Material(
+                    color: Colors.white,
+                    elevation: 2,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: _toggleStyle,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _satellite
+                                  ? Icons.map_outlined
+                                  : Icons.satellite_alt_rounded,
+                              size: 16,
+                              color: FlowGuardTheme.navy,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _satellite ? "Street" : "Satellite",
+                              maxLines: 1,
+                              softWrap: false,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: FlowGuardTheme.navy,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             if (widget.allowFullscreen)
@@ -349,6 +435,8 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
                               onPickLocation: widget.onPickLocation,
                               height: double.infinity,
                               allowFullscreen: false,
+                              followMe: widget.followMe,
+                              enable3D: _is3D,
                             ),
                           ),
                         ),

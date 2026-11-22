@@ -6,6 +6,7 @@ import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/app_state_badges.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
+import "package:flowguard_plumbing/core/presence_service.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/plumber/plumber_job_detail_page.dart";
 import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
@@ -172,6 +173,9 @@ class _PlumberShellState extends State<PlumberShell> {
           _loadError = null;
         });
       }
+      if (_plumberId != null && _plumberId!.isNotEmpty) {
+        PresenceService.instance.start(role: "plumber", actorId: _plumberId!);
+      }
       await _checkGpsStatus();
     } catch (_) {
       if (mounted) {
@@ -336,6 +340,7 @@ class _PlumberShellState extends State<PlumberShell> {
   }
 
   Future<void> _signOut() async {
+    await PresenceService.instance.stop();
     final token = GoogleServicesBootstrap.fcmToken;
     if (token != null) {
       await FlowGuardApiClient.deactivateDeviceToken(token).catchError((_) {});

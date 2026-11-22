@@ -1,6 +1,9 @@
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:image_picker/image_picker.dart";
+import "package:url_launcher/url_launcher.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
+import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
 class FlowGuardProfileView extends StatelessWidget {
@@ -329,6 +332,14 @@ class FlowGuardProfileView extends StatelessWidget {
         ),
         const SizedBox(height: 8),
 
+        // Get Support
+        _navTile(
+          icon: Icons.headset_mic_outlined,
+          title: "Get Support",
+          onTap: () => _openGetSupportSheet(context),
+        ),
+        const SizedBox(height: 8),
+
         // About Us
         _navTile(
           icon: Icons.info_outline_rounded,
@@ -350,6 +361,149 @@ class FlowGuardProfileView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  void _openGetSupportSheet(BuildContext context) {
+    const supportEmail = "binplumbingservices@gmail.com";
+    const whatsappUrl = "https://wa.me/2348063298575";
+    final contactUrl = "${SupabaseConfig.webBaseUrl}/contact";
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "How would you like to reach us?",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: FlowGuardTheme.navy,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFDCFCE7),
+                  child: Icon(
+                    Icons.chat_rounded,
+                    color: Color(0xFF16A34A),
+                    size: 22,
+                  ),
+                ),
+                title: const Text(
+                  "Chat on WhatsApp",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                subtitle: const Text(
+                  "Fastest response",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: FlowGuardTheme.mutedText,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  launchUrl(
+                    Uri.parse(whatsappUrl),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.mail_outline_rounded,
+                  color: Color(0xFF2563EB),
+                  size: 26,
+                ),
+                title: const Text(
+                  "Email support",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                subtitle: const Text(
+                  supportEmail,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: FlowGuardTheme.mutedText,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  launchUrl(Uri.parse("mailto:$supportEmail"));
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.copy_rounded,
+                  color: FlowGuardTheme.navy,
+                  size: 24,
+                ),
+                title: const Text(
+                  "Copy support email",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                onTap: () async {
+                  await Clipboard.setData(
+                    const ClipboardData(text: supportEmail),
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Support email copied to clipboard."),
+                      ),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.headset_mic_outlined,
+                  color: FlowGuardTheme.navy,
+                  size: 24,
+                ),
+                title: const Text(
+                  "Visit contact page",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: FlowGuardTheme.navy,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  launchUrl(
+                    Uri.parse(contactUrl),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

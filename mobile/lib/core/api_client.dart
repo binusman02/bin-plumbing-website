@@ -609,6 +609,28 @@ class FlowGuardApiClient {
     }
   }
 
+  static Future<void> sendPresenceHeartbeat({required String role}) async {
+    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/chat/presence");
+    await http
+        .post(
+          uri,
+          headers: _authHeaders(),
+          body: jsonEncode({"role": role}),
+        )
+        .timeout(const Duration(seconds: 10));
+  }
+
+  static Future<void> sendPresenceOffline({required String role}) async {
+    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/chat/presence");
+    await http
+        .post(
+          uri,
+          headers: _authHeaders(),
+          body: jsonEncode({"role": role, "action": "offline"}),
+        )
+        .timeout(const Duration(seconds: 8));
+  }
+
   static Future<void> markChatRead({
     required String ticketNumber,
     required String role,

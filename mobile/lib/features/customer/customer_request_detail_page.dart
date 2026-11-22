@@ -4,6 +4,7 @@ import "package:flutter/services.dart";
 import "package:image_picker/image_picker.dart";
 import "package:intl/intl.dart";
 import "package:latlong2/latlong.dart";
+import "package:supabase_flutter/supabase_flutter.dart";
 import "package:url_launcher/url_launcher.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
@@ -48,6 +49,8 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   bool _paymentSubmitted = false;
   String? _paymentStatus;
   Timer? _pollTimer;
+  RealtimeChannel? _trackingRtChannel;
+  String? _subscribedPlumberId;
 
   static const List<String> _stages = [
     "Received",
@@ -74,8 +77,54 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _trackingRtChannel?.unsubscribe();
     _reviewController.dispose();
     super.dispose();
+  }
+
+  void _ensureTrackingRealtime(String? plumberId) {
+    if (plumberId == null ||
+        plumberId.isEmpty ||
+        !_request.isActive ||
+        _subscribedPlumberId == plumberId) {
+      return;
+    }
+    _subscribedPlumberId = plumberId;
+    _trackingRtChannel?.unsubscribe();
+    try {
+      _trackingRtChannel = SupabaseConfig.client
+          .channel("cust-track-$plumberId")
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: "public",
+            table: "plumber_locations",
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: "plumber_id",
+              value: plumberId,
+            ),
+            callback: (payload) {
+              if (!mounted) return;
+              final rec = payload.newRecord;
+              final lat = (rec["lat"] as num?)?.toDouble();
+              final lng = (rec["lng"] as num?)?.toDouble();
+              final active = rec["is_sharing"] == true;
+              if (active && lat != null && lng != null) {
+                setState(() {
+                  _plumberLat = lat;
+                  _plumberLng = lng;
+                  _tripLive = true;
+                  _trackingStateLabel = "Technician live on map";
+                });
+              } else if (!active) {
+                setState(() {
+                  _tripLive = false;
+                });
+              }
+            },
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _loadDetails() async {
@@ -149,6 +198,8 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage> {
       if (jobs == null || jobs.isEmpty) return;
       final job = jobs.first as Map<String, dynamic>;
       final plumber = job["plumber"] as Map<String, dynamic>?;
+      final plumberId = plumber?["id"]?.toString();
+      _ensureTrackingRealtime(plumberId);
       final tripState = (job["tripState"] ?? "idle").toString();
       final pLat = (plumber?["lat"] as num?)?.toDouble();
       final pLng = (plumber?["lng"] as num?)?.toDouble();

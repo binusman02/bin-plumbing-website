@@ -1,3 +1,4 @@
+import "dart:async";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:image_picker/image_picker.dart";
@@ -5,6 +6,7 @@ import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/app_state_badges.dart";
 import "package:flowguard_plumbing/core/google_services.dart";
+import "package:flowguard_plumbing/core/presence_service.dart";
 import "package:flowguard_plumbing/core/service_assets.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/customer/customer_request_detail_page.dart";
@@ -141,6 +143,9 @@ class _CustomerShellState extends State<CustomerShell> {
           _loading = false;
           _loadError = null;
         });
+      }
+      if (customerId.isNotEmpty) {
+        PresenceService.instance.start(role: "customer", actorId: customerId);
       }
     } catch (_) {
       if (mounted) {
@@ -309,6 +314,7 @@ class _CustomerShellState extends State<CustomerShell> {
         avatarUrl: _avatarUrl,
         onProfileUpdated: _loadCustomerData,
         onSignOut: () async {
+          await PresenceService.instance.stop();
           final token = GoogleServicesBootstrap.fcmToken;
           if (token != null) {
             await FlowGuardApiClient.deactivateDeviceToken(token)
@@ -486,16 +492,43 @@ class _CustomerHomeTab extends StatefulWidget {
 
 class _CustomerHomeTabState extends State<_CustomerHomeTab> {
   late final PageController _spotlightController;
+  final ScrollController _categoryScrollController = ScrollController();
+  Timer? _autoSlideTimer;
   int _spotlightPage = 0;
 
   @override
   void initState() {
     super.initState();
     _spotlightController = PageController(viewportFraction: 0.90);
+    _autoSlideTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      final spotlightLen = widget.categories.take(5).length;
+      if (spotlightLen > 1 && _spotlightController.hasClients) {
+        final nextPage = (_spotlightPage + 1) % spotlightLen;
+        _spotlightController.animateToPage(
+          nextPage,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
+        );
+      }
+      if (_categoryScrollController.hasClients) {
+        final pos = _categoryScrollController.position;
+        if (pos.maxScrollExtent > 0) {
+          final nextOffset = pos.pixels + 172;
+          _categoryScrollController.animateTo(
+            nextOffset >= pos.maxScrollExtent ? 0.0 : nextOffset,
+            duration: const Duration(milliseconds: 450),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _autoSlideTimer?.cancel();
+    _categoryScrollController.dispose();
     _spotlightController.dispose();
     super.dispose();
   }
@@ -530,13 +563,19 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                ElevatedButton.icon(
-                  onPressed: () => widget.onSelectCategory(),
-                  icon: const Icon(Icons.add),
-                  label: const Text(
-                    "New Plumbing Request",
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                Center(
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => widget.onSelectCategory(),
+                      icon: const Icon(Icons.add),
+                      label: const Text(
+                        "New Request",
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -571,6 +610,7 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                 behavior: ScrollConfiguration.of(context)
                     .copyWith(scrollbars: false),
                 child: ListView.separated(
+                  controller: _categoryScrollController,
                   physics: const BouncingScrollPhysics(),
                   scrollDirection: Axis.horizontal,
                   itemCount: widget.categories.length,
