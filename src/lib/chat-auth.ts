@@ -50,7 +50,17 @@ export async function verifyTicketAccess(
   }
 
   if (actor.role === "customer") {
-    const idMatch = Boolean(req.customer_id && String(req.customer_id) === actor.id);
+    let idMatch = Boolean(req.customer_id && String(req.customer_id) === actor.id);
+    if (!idMatch && req.customer_id && actor.authUserId) {
+      const { data: linkedRow } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("id", String(req.customer_id))
+        .eq("auth_user_id", actor.authUserId)
+        .is("deleted_at", null)
+        .limit(1);
+      idMatch = Boolean(linkedRow && linkedRow.length > 0);
+    }
     // Legacy rows created before customer_id FK was always populated: verify exact verified DB phone
     let legacyPhoneMatch = false;
     if (!req.customer_id && actor.phone) {

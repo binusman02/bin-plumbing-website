@@ -78,11 +78,23 @@ export default async function CustomerPortalPage() {
           .then(() => {}, () => {});
       }
 
-      // Query only this customer's service requests by exact customer_id
+      // Query all service requests belonging to this customer (including any linked rows for same auth_user_id)
+      let customerIds = [actor.id];
+      if (custRow.auth_user_id) {
+        const { data: linkedCusts } = await adminSupabase
+          .from("customers")
+          .select("id")
+          .eq("auth_user_id", custRow.auth_user_id)
+          .is("deleted_at", null);
+        if (linkedCusts && linkedCusts.length > 0) {
+          customerIds = Array.from(new Set([actor.id, ...linkedCusts.map((c) => String(c.id))]));
+        }
+      }
+
       const { data: reqRows } = await adminSupabase
         .from("service_requests")
         .select("*")
-        .eq("customer_id", actor.id)
+        .in("customer_id", customerIds)
         .order("created_at", { ascending: false });
 
       const activeReqRows = (reqRows || []).filter((r) => !r.deleted_at);

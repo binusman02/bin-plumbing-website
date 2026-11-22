@@ -93,13 +93,15 @@ export async function resolvePortalActor(
       // 2. Plumber via Supabase Auth (linked strictly by auth_user_id)
       if ((!preferredRole || preferredRole === "plumber") && (metaRole === "plumber" || !metaRole)) {
         const userEmail = (user.email || "").toLowerCase().trim();
-        const { data: byAuth } = await adminSupabase
+        const { data: byAuthRows } = await adminSupabase
           .from("plumbers")
           .select("*")
           .eq("auth_user_id", user.id)
-          .maybeSingle();
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true })
+          .limit(1);
 
-        const match = byAuth && !byAuth.deleted_at ? byAuth : null;
+        const match = byAuthRows?.[0] ?? null;
         if (match) {
           const plumberStatus = String(match.verification_status || match.status || "pending_review");
           return {
@@ -122,26 +124,34 @@ export async function resolvePortalActor(
         (metaRole === "customer" || (!metaRole && preferredRole === "customer"))
       ) {
         const userEmail = (user.email || "").toLowerCase().trim();
-        let { data: byAuth } = await adminSupabase
+        const { data: byAuthRows } = await adminSupabase
           .from("customers")
           .select("*")
           .eq("auth_user_id", user.id)
-          .maybeSingle();
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true })
+          .limit(1);
+        let byAuth = byAuthRows?.[0] ?? null;
 
         // Auto-heal mobile/OAuth signups that didn't go through web server action
         if (!byAuth) {
-          const { data: isPlumber } = await adminSupabase
+          const { data: plumberRows } = await adminSupabase
             .from("plumbers")
             .select("id")
             .eq("auth_user_id", user.id)
-            .maybeSingle();
+            .is("deleted_at", null)
+            .limit(1);
+          const isPlumber = plumberRows?.[0] ?? null;
           if (!isPlumber) {
             if (userEmail) {
-              const { data: byEmail } = await adminSupabase
+              const { data: byEmailRows } = await adminSupabase
                 .from("customers")
                 .select("*")
                 .ilike("email", userEmail)
-                .maybeSingle();
+                .is("deleted_at", null)
+                .order("created_at", { ascending: true })
+                .limit(1);
+              const byEmail = byEmailRows?.[0] ?? null;
               if (byEmail) {
                 await adminSupabase
                   .from("customers")
