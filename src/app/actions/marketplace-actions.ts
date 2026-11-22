@@ -2,6 +2,7 @@
 
 import path from "path";
 import { revalidatePath, updateTag } from "next/cache";
+import { maybeAutoReplyToTicketMessage } from "@/lib/ai-assistant";
 import { PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 import {
   createPlumberApplication,
@@ -762,12 +763,22 @@ export async function postCommunicationMessageAction(params: {
       replyToId: params.replyToId || null,
     });
 
+    let aiReply = null;
+    if (actor.role === "customer" && !isInternal && params.message.trim().length > 0) {
+      aiReply = await maybeAutoReplyToTicketMessage({
+        requestId: ticketCtx.requestId,
+        ticketNumber: ticketCtx.ticketNumber,
+        customerId: ticketCtx.customerId,
+        customerMessage: params.message.trim(),
+      }).catch(() => null);
+    }
+
     revalidatePath("/tracking");
     revalidatePath("/customer");
     revalidatePath("/admin/requests");
     revalidatePath("/admin/communications");
     revalidatePath("/plumber");
-    return { success: true, message: msg };
+    return { success: true, message: msg, aiReply };
   } catch (err: any) {
     return { success: false, error: err.message };
   }

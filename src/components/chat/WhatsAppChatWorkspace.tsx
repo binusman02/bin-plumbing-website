@@ -903,7 +903,14 @@ export function WhatsAppChatWorkspace({
 
         if (res.success && res.message) {
           const sentMsg = res.message;
-          setMessages((prev) => (prev.some((m) => m.id === sentMsg.id) ? prev : [...prev, sentMsg]));
+          const aiMsg = (res as { aiReply?: JobMessage | null }).aiReply;
+          setMessages((prev) => {
+            let next = prev.some((m) => m.id === sentMsg.id) ? prev : [...prev, sentMsg];
+            if (aiMsg && !next.some((m) => m.id === aiMsg.id)) {
+              next = [...next, aiMsg];
+            }
+            return next;
+          });
           setDraft("");
           draftsRef.current[targetTicket] = "";
           setPendingFile(null);

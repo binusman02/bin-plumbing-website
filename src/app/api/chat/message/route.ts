@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { maybeAutoReplyToTicketMessage } from "@/lib/ai-assistant";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
 import { dispatchFcmPush } from "@/lib/fcm-push";
 import {
@@ -126,7 +127,17 @@ export async function POST(request: Request) {
       }).catch(() => {});
     }
 
-    return NextResponse.json({ success: true, message: created });
+    let aiReply = null;
+    if (actor.role === "customer" && !isInternal && message.length > 0) {
+      aiReply = await maybeAutoReplyToTicketMessage({
+        requestId: ctx.requestId,
+        ticketNumber: ctx.ticketNumber,
+        customerId: ctx.customerId,
+        customerMessage: message,
+      }).catch(() => null);
+    }
+
+    return NextResponse.json({ success: true, message: created, aiReply });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to send message" },
