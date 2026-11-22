@@ -4,7 +4,6 @@ import Image from "next/image";
 import { Printer, X } from "lucide-react";
 import { formatDateTime, formatNGN } from "@/lib/currency";
 import type { QuotationLineItem } from "@/lib/quotation-items";
-import { getStatusMeta } from "@/lib/status-styles";
 
 export interface QuotationPreviewData {
   id?: string;
@@ -46,8 +45,12 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
 
   const items = (quote.items || []).filter((it) => it.name.trim().length > 0);
   const statusBadge = quote.isDraftPreview
-    ? { label: "Draft Preview", className: "bg-amber-100 text-amber-800" }
-    : getStatusMeta(quote.status || "pending");
+    ? { label: "Draft", className: "bg-amber-100 text-amber-800" }
+    : quote.status === "approved"
+      ? { label: "Approved", className: "bg-emerald-100 text-emerald-800" }
+      : quote.status === "rejected"
+        ? { label: "Declined", className: "bg-red-100 text-red-700" }
+        : { label: "Pending", className: "bg-amber-100 text-amber-800" };
 
   const handlePrint = () => {
     if (typeof window === "undefined") return;
@@ -145,22 +148,18 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
   <div class="header">
     <div class="brand">
       <img class="logo" src="${origin}/images/logo/flowguard-icon.jpg" alt="FlowGuard" />
-      <div>
-        <h1>FlowGuard Plumbing Enterprises</h1>
-        <p>Professional Plumbing &amp; Water Systems Engineering</p>
-      </div>
+      <h1>FlowGuard Plumbing</h1>
     </div>
     <div class="meta-r">
-      <p class="doc-label">Official Quotation</p>
-      <p class="ticket">${escapeHtml(quote.ticketNumber)} • Rev #${quote.revisionNumber || 1}</p>
-      <p class="date">${escapeHtml(dateStr)}</p>
+      <p class="doc-label">QUOTATION</p>
+      <p class="ticket">#${escapeHtml(quote.ticketNumber)}</p>
       <span class="badge">${escapeHtml(statusBadge.label)}</span>
     </div>
   </div>
 
   <div class="grid">
     <div>
-      <p class="lbl">Prepared For</p>
+      <p class="lbl">Customer</p>
       <p class="val-b">${escapeHtml(quote.customerName || "Valued Customer")}</p>
       ${quote.customerPhone ? `<p class="val">${escapeHtml(quote.customerPhone)}</p>` : ""}
       ${quote.customerAddress ? `<p class="val">${escapeHtml(quote.customerAddress)}</p>` : ""}
@@ -168,7 +167,8 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
     <div class="grid-r">
       <p class="lbl">Service &amp; Technician</p>
       <p class="val-b">${escapeHtml(quote.serviceCategory || "Plumbing Service")}</p>
-      <p class="val">Assigned Plumber: ${escapeHtml(quote.plumberName)}</p>
+      <p class="val">Plumber: ${escapeHtml(quote.plumberName)}</p>
+      <p class="val">${escapeHtml(dateStr)} • Rev #${quote.revisionNumber || 1}</p>
     </div>
   </div>
 
@@ -302,38 +302,30 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
           {/* Printable Quotation Sheet */}
           <div id="bp-printable-quote" className="flex-1 overflow-y-auto bg-white p-6 sm:p-8">
             {/* Branded Letterhead */}
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-[#0B1F3A] pb-5">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-[#0B1F3A] pb-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-[#F5B301] bg-white">
                   <Image
                     src="/images/logo/flowguard-icon.jpg"
-                    alt="FlowGuard Plumbing Enterprises"
-                    width={48}
-                    height={48}
+                    alt="FlowGuard Plumbing"
+                    width={44}
+                    height={44}
                     className="h-full w-full scale-[1.08] object-cover"
                   />
                 </div>
-                <div>
-                  <h2 className="text-base font-extrabold tracking-wide text-[#0B1F3A]">
-                    FlowGuard Plumbing Enterprises
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Professional Plumbing & Water Systems Engineering
-                  </p>
-                </div>
+                <h2 className="text-base font-extrabold tracking-wide text-[#0B1F3A]">
+                  FlowGuard Plumbing
+                </h2>
               </div>
               <div className="text-right">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Official Quotation
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  QUOTATION
                 </p>
                 <p className="font-mono text-sm font-bold text-[#0B1F3A]">
-                  {quote.ticketNumber} • Rev #{quote.revisionNumber || 1}
-                </p>
-                <p className="mt-0.5 text-[11px] text-slate-500">
-                  {quote.createdAt ? formatDateTime(quote.createdAt) : formatDateTime(new Date().toISOString())}
+                  #{quote.ticketNumber}
                 </p>
                 <span
-                  className={`mt-1.5 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge.className}`}
+                  className={`mt-1 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge.className}`}
                 >
                   {statusBadge.label}
                 </span>
@@ -341,10 +333,10 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
             </div>
 
             {/* Client & Job Metadata */}
-            <div className="mt-5 grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-xs sm:grid-cols-2">
+            <div className="mt-4 grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-xs sm:grid-cols-2">
               <div className="space-y-1">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Prepared For
+                  Customer
                 </p>
                 <p className="text-sm font-bold text-[#0B1F3A]">
                   {quote.customerName || "Valued Customer"}
@@ -359,7 +351,10 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
                 <p className="text-sm font-bold text-[#0B1F3A]">
                   {quote.serviceCategory || "Plumbing Service"}
                 </p>
-                <p className="text-slate-600">Assigned Plumber: {quote.plumberName}</p>
+                <p className="text-slate-600">Plumber: {quote.plumberName}</p>
+                <p className="text-[11px] text-slate-500">
+                  {(quote.createdAt ? formatDateTime(quote.createdAt) : formatDateTime(new Date().toISOString()))} • Rev #{quote.revisionNumber || 1}
+                </p>
               </div>
             </div>
 

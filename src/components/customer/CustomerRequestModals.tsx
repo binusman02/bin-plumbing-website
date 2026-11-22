@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, CheckCircle2, Crosshair, Eye, Landmark, Loader2, MapPin, RefreshCw, Star, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Copy, Crosshair, Landmark, Loader2, MapPin, Printer, RefreshCw, Star, Upload, X } from "lucide-react";
 import { uploadChatFile } from "@/components/chat/ChatAttachment";
 import { LiveMap, type LiveMapMarker } from "@/components/map/LiveMap";
 import { QuotationPreviewModal, type QuotationPreviewData } from "@/components/portal/QuotationPreviewModal";
@@ -73,6 +73,19 @@ export function CustomerRequestDrawer({
   const [proofUploading, setProofUploading] = useState(false);
   const [proofMessage, setProofMessage] = useState<string | null>(null);
   const [previewQuote, setPreviewQuote] = useState<QuotationPreviewData | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopy = async (key: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(key);
+      setTimeout(() => {
+        setCopiedField((prev) => (prev === key ? null : prev));
+      }, 1800);
+    } catch {
+      // Fallback ignored if clipboard blocked
+    }
+  };
 
   const isTrackable =
     selectedRequest != null &&
@@ -277,7 +290,16 @@ export function CustomerRequestDrawer({
                 <span className="font-bold text-[#0B1F3A]">
                   Quotation: {formatNGN(q.total_amount)}
                 </span>
-                <Badge status={q.customer_approval_status} />
+                <Badge
+                  status={q.customer_approval_status}
+                  label={
+                    q.customer_approval_status === "approved"
+                      ? "Approved"
+                      : q.customer_approval_status === "rejected"
+                        ? "Declined"
+                        : "Pending"
+                  }
+                />
               </div>
               <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs text-slate-600">
                 <span>Labour: {formatNGN(q.labour_charge)}</span>
@@ -328,9 +350,9 @@ export function CustomerRequestDrawer({
                       notes: q.notes,
                     })
                   }
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                  className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
                 >
-                  <Eye className="h-3.5 w-3.5" /> Preview / Print
+                  <Printer className="h-3.5 w-3.5 shrink-0" /> Print
                 </button>
               </div>
               {q.customer_approval_status === "pending" && (
@@ -339,7 +361,7 @@ export function CustomerRequestDrawer({
                     type="button"
                     disabled={isPending}
                     onClick={() => onQuoteDecision(q, "approved")}
-                    className="h-11 flex-1 rounded-xl bg-emerald-600 text-xs font-bold text-white"
+                    className="h-11 flex-1 whitespace-nowrap rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white"
                   >
                     Approve Quote
                   </button>
@@ -347,9 +369,9 @@ export function CustomerRequestDrawer({
                     type="button"
                     disabled={isPending}
                     onClick={() => onQuoteDecision(q, "rejected")}
-                    className="h-11 flex-1 rounded-xl border border-red-200 text-xs font-bold text-red-700"
+                    className="h-11 flex-1 whitespace-nowrap rounded-xl border border-red-200 px-3 text-xs font-bold text-red-700"
                   >
-                    Ask for Changes
+                    Decline
                   </button>
                 </div>
               )}
@@ -374,36 +396,98 @@ export function CustomerRequestDrawer({
                   </p>
                 </div>
               )}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2 font-bold text-[#0B1F3A]">
                   <Landmark className="h-4 w-4 text-[#F5B301]" />
-                  Payment Instructions
+                  Bank Transfer Details
                 </span>
-                {hasConfirmedPayment ? (
-                  <Badge status="confirmed" label="Confirmed" />
-                ) : (
-                  <Badge status="pending" label="Awaiting Verification" />
-                )}
+                {hasConfirmedPayment && <Badge status="confirmed" label="Paid" />}
               </div>
 
               {bankDetails?.bankAccountNumber ? (
-                <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-1 text-slate-700">
-                  <p>
-                    <span className="font-semibold">Bank:</span> {bankDetails.bankName || "Configured Bank"}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Account Name:</span>{" "}
-                    {bankDetails.bankAccountName || "FlowGuard Plumbing Enterprises"}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Account Number:</span>{" "}
-                    <span className="font-mono font-bold text-[#0B1F3A]">
-                      {bankDetails.bankAccountNumber}
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700">
+                  <div className="flex items-center justify-between py-2.5">
+                    <span className="text-slate-500">Bank</span>
+                    <span className="font-semibold text-[#0B1F3A]">
+                      {bankDetails.bankName || "Configured Bank"}
                     </span>
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Use ticket <span className="font-mono font-semibold">{selectedRequest.ticket_number}</span> as transfer narration.
-                  </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 py-2.5">
+                    <span className="text-slate-500">Account Name</span>
+                    <span className="text-right font-semibold text-[#0B1F3A]">
+                      {bankDetails.bankAccountName || "FlowGuard Plumbing Enterprises"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 py-2">
+                    <span className="text-slate-500">Account Number</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-[#0B1F3A]">
+                        {bankDetails.bankAccountNumber}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy("acct", bankDetails.bankAccountNumber || "")}
+                        className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                      >
+                        {copiedField === "acct" ? (
+                          <Check className="h-3 w-3 text-emerald-600" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        {copiedField === "acct" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                  {(() => {
+                    const activeQuote =
+                      reqQuotes.find((q) => q.customer_approval_status === "approved") ||
+                      reqQuotes[0];
+                    if (!activeQuote || activeQuote.total_amount <= 0) return null;
+                    return (
+                      <div className="flex items-center justify-between gap-2 py-2">
+                        <span className="text-slate-500">Amount</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[#0B1F3A]">
+                            {formatNGN(activeQuote.total_amount)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopy("amount", String(Math.round(activeQuote.total_amount)))
+                            }
+                            className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                          >
+                            {copiedField === "amount" ? (
+                              <Check className="h-3 w-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                            {copiedField === "amount" ? "Copied" : "Copy"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="flex items-center justify-between gap-2 py-2">
+                    <span className="text-slate-500">Reference</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-semibold text-[#0B1F3A]">
+                        {selectedRequest.ticket_number}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy("ref", selectedRequest.ticket_number)}
+                        className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-[#0B1F3A] hover:bg-slate-100"
+                      >
+                        {copiedField === "ref" ? (
+                          <Check className="h-3 w-3 text-emerald-600" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        {copiedField === "ref" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <p className="text-xs text-slate-600">

@@ -9,6 +9,7 @@ import {
   Loader2,
   MessageCircle,
   Phone,
+  Printer,
   UserCheck,
   X,
 } from "lucide-react";
@@ -441,9 +442,9 @@ export function RequestDetailDrawer({
                               notes: q.notes,
                             })
                           }
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
+                          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#0B1F3A] hover:bg-slate-50"
                         >
-                          <Eye className="h-3.5 w-3.5" /> Preview / Print
+                          <Printer className="h-3.5 w-3.5 shrink-0" /> Print
                         </button>
                         {q.customer_approval_status !== "approved" && (
                           <>

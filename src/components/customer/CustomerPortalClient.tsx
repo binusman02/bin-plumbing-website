@@ -1978,10 +1978,95 @@ export default function CustomerPortalClient({
       />
 
       {selectedPayment && (() => {
-        const badge = getStatusMeta(selectedPayment.verification_status);
+        const isConfirmed =
+          selectedPayment.verification_status === "verified" ||
+          (selectedPayment.verification_status as string) === "confirmed";
+        const badge = isConfirmed
+          ? { label: "Paid", className: "bg-emerald-100 text-emerald-800" }
+          : getStatusMeta(selectedPayment.verification_status);
         const linkedReq = myRequests.find(
           (r) => r.ticket_number === selectedPayment.ticket_number
         );
+        const handlePrintReceipt = () => {
+          if (!isConfirmed || typeof window === "undefined") return;
+          const iframe = document.createElement("iframe");
+          iframe.style.position = "fixed";
+          iframe.style.right = "0";
+          iframe.style.bottom = "0";
+          iframe.style.width = "0";
+          iframe.style.height = "0";
+          iframe.style.border = "0";
+          document.body.appendChild(iframe);
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (!doc) {
+            document.body.removeChild(iframe);
+            window.print();
+            return;
+          }
+          const esc = (v: string) =>
+            String(v || "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;");
+          const origin = window.location.origin;
+          const dt = formatDateTime(
+            selectedPayment.payment_date || selectedPayment.created_at
+          );
+          doc.open();
+          doc.write(`<!doctype html>
+<html><head><meta charset="utf-8" />
+<title>Receipt ${esc(selectedPayment.ticket_number)} - FlowGuard</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0B1F3A; background: #fff; font-size: 12px; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0B1F3A; padding-bottom: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 44px; height: 44px; border-radius: 999px; border: 2px solid #F5B301; object-fit: cover; }
+  .brand h1 { margin: 0; font-size: 16px; font-weight: 800; }
+  .meta { text-align: right; }
+  .lbl { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: #94a3b8; }
+  .tkt { margin: 2px 0; font-family: monospace; font-size: 13px; font-weight: 700; }
+  .paid { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #D1FAE5; color: #065F46; }
+  .box { margin-top: 16px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; background: #f8fafc; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; border: 1px solid #e2e8f0; }
+  th { background: #0B1F3A; color: #fff; padding: 9px 12px; text-align: left; font-size: 11px; }
+  td { padding: 9px 12px; border-top: 1px solid #f1f5f9; }
+  .r { text-align: right; }
+  tfoot tr { background: #FFFBEB; border-top: 2px solid #0B1F3A; }
+  tfoot td { font-weight: 800; font-size: 14px; }
+  .foot { margin-top: 20px; text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+</style></head><body>
+<div class="header">
+  <div class="brand"><img class="logo" src="${origin}/images/logo/flowguard-icon.jpg" alt="FlowGuard" /><h1>FlowGuard Plumbing</h1></div>
+  <div class="meta"><p class="lbl">OFFICIAL RECEIPT</p><p class="tkt">#${esc(selectedPayment.ticket_number)}</p><span class="paid">Paid</span></div>
+</div>
+<div class="box">
+  <div><p class="lbl">PAID BY</p><p style="margin:4px 0 0;font-weight:700;">${esc(linkedReq?.customer_name || "Customer")}</p><p style="margin:2px 0 0;color:#475569;">${esc(dt)}</p></div>
+  <div style="text-align:right;"><p class="lbl">SERVICE</p><p style="margin:4px 0 0;font-weight:700;">${esc(linkedReq?.problem_category || linkedReq?.property_type || "Plumbing Service")}</p><p style="margin:2px 0 0;color:#475569;">Method: ${esc((selectedPayment.payment_method || "Bank Transfer").replace(/_/g, " "))}</p></div>
+</div>
+<table><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead>
+<tbody>
+  <tr><td>Materials Portion</td><td class="r">${esc(formatNGN(selectedPayment.materials_portion))}</td></tr>
+  <tr><td>Labour Portion</td><td class="r">${esc(formatNGN(selectedPayment.labour_portion))}</td></tr>
+</tbody>
+<tfoot><tr><td class="r">Total Paid</td><td class="r">${esc(formatNGN(selectedPayment.total_payment))}</td></tr></tfoot>
+</table>
+<div class="foot">Confirmed by FlowGuard Plumbing • Ticket ${esc(selectedPayment.ticket_number)}</div>
+</body></html>`);
+          doc.close();
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+            } finally {
+              setTimeout(() => {
+                if (iframe.parentNode) document.body.removeChild(iframe);
+              }, 1500);
+            }
+          }, 250);
+        };
         return (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
             <div className="w-full max-w-md rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:p-6">
@@ -2072,19 +2157,21 @@ export default function CustomerPortalClient({
                       setSelectedRequest(linkedReq);
                       setActiveTab("requests");
                     }}
-                    className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50"
+                    className="h-11 flex-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-[#0B1F3A] hover:bg-slate-50"
                   >
                     Open Request
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] px-3 text-xs font-bold text-white hover:bg-[#132f57]"
-                >
-                  <Printer className="h-4 w-4 text-[#F5B301]" />
-                  Print Receipt
-                </button>
+                {isConfirmed && (
+                  <button
+                    type="button"
+                    onClick={handlePrintReceipt}
+                    className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-[#0B1F3A] px-3 text-xs font-bold text-white hover:bg-[#132f57]"
+                  >
+                    <Printer className="h-4 w-4 shrink-0 text-[#F5B301]" />
+                    Print Receipt
+                  </button>
+                )}
               </div>
             </div>
           </div>
