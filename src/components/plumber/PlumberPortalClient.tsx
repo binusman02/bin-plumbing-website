@@ -941,11 +941,11 @@ export default function PlumberPortalClient({
                 {myJobs.filter((j) => j.status === "completed").length}
               </p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Verified Earnings
               </p>
-              <p className="mt-2 text-2xl font-bold text-[#0B1F3A]">
+              <p className="mt-2 text-[clamp(1.05rem,4.4vw,1.5rem)] font-bold tabular-nums tracking-tight text-[#0B1F3A]">
                 {formatNGN(verifiedEarnings)}
               </p>
             </div>

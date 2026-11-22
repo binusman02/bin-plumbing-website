@@ -594,7 +594,7 @@ export function PortalShell({
                   )}
                 </span>
                 <span
-                  className={`mt-0.5 max-w-full truncate px-1 text-[11px] font-semibold ${
+                  className={`mt-0.5 max-w-full truncate px-0.5 text-[10px] sm:text-[11px] leading-tight tracking-tight font-semibold ${
                     isActive ? "text-[#0B1F3A]" : "text-[#5B6675]"
                   }`}
                 >
