@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
 import { getServiceSupabase } from "@/lib/supabase/admin";
-import { validateUploadFile } from "@/lib/security";
+import { validateFileMagicBytes, validateUploadFile } from "@/lib/security";
 
 export async function POST(request: Request) {
   try {
@@ -52,6 +52,10 @@ export async function POST(request: Request) {
     const uniqueId = crypto.randomBytes(6).toString("hex");
     const storedName = `${Date.now()}-${uniqueId}-${safeBase || "file"}${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
+    const magicCheck = validateFileMagicBytes(buffer, ext);
+    if (!magicCheck.valid) {
+      return NextResponse.json({ error: magicCheck.error }, { status: 400 });
+    }
     const mimeType = file.type || "application/octet-stream";
 
     const adminSupabase = getServiceSupabase();

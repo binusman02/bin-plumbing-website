@@ -306,15 +306,19 @@ class _SignInScreenState extends State<SignInScreen> {
         return;
       }
 
-      final resolvedEmail = await FlowGuardApiClient.resolveLoginIdentifier(
-        identifier: identifier,
-        expectedRole: AppFlavorConfig.expectedRole,
-      );
-
-      await SupabaseConfig.client.auth.signInWithPassword(
-        email: resolvedEmail,
-        password: password,
-      );
+      if (identifier.contains("@")) {
+        await SupabaseConfig.client.auth.signInWithPassword(
+          email: identifier.toLowerCase(),
+          password: password,
+        );
+      } else {
+        final refreshToken = await FlowGuardApiClient.signInWithPhoneServer(
+          identifier: identifier,
+          password: password,
+          expectedRole: AppFlavorConfig.expectedRole,
+        );
+        await SupabaseConfig.client.auth.setSession(refreshToken);
+      }
     } on AuthException catch (err) {
       if (mounted) setState(() => _errorMessage = err.message);
     } catch (err) {
@@ -334,28 +338,22 @@ class _SignInScreenState extends State<SignInScreen> {
       setState(() => _errorMessage = "Enter your email or phone first.");
       return;
     }
+    if (!raw.contains("@")) {
+      setState(
+        () => _errorMessage =
+            "Please enter your registered email address to receive a password reset link.",
+      );
+      return;
+    }
     setState(() {
       _loading = true;
       _errorMessage = null;
       _infoMessage = null;
     });
     try {
-      final email = await FlowGuardApiClient.resolveLoginIdentifier(
-        identifier: raw,
-        expectedRole: AppFlavorConfig.expectedRole,
-      );
-      if (email.endsWith(".local")) {
-        if (mounted) {
-          setState(
-            () => _errorMessage =
-                "This phone account has no email address. Contact FlowGuard Support to reset your password.",
-          );
-        }
-        return;
-      }
-      await SupabaseConfig.client.auth.resetPasswordForEmail(email);
+      await SupabaseConfig.client.auth.resetPasswordForEmail(raw.toLowerCase());
       if (mounted) {
-        setState(() => _infoMessage = "Password reset link sent to $email.");
+        setState(() => _infoMessage = "If an account exists, a reset link was sent.");
       }
     } catch (_) {
       if (mounted) {

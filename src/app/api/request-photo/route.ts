@@ -1,7 +1,7 @@
 import path from "path";
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { checkRateLimit, validateUploadFile } from "@/lib/security";
+import { checkRateLimit, validateFileMagicBytes, validateUploadFile } from "@/lib/security";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
@@ -30,6 +30,10 @@ export async function POST(request: Request) {
     const safeExt = rawExt || ".jpg";
     const fileName = `req-${Date.now()}-${crypto.randomUUID().slice(0, 8)}${safeExt}`;
     const bytes = Buffer.from(await file.arrayBuffer());
+    const magicCheck = validateFileMagicBytes(bytes, safeExt);
+    if (!magicCheck.valid) {
+      return NextResponse.json({ error: magicCheck.error }, { status: 400 });
+    }
 
     const supabase = getServiceSupabase();
     const { error: uploadError } = await supabase.storage

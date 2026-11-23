@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { verifyTicketAccess } from "@/lib/chat-auth";
 import {
+  computeAuthorizedPaymentAmount,
+  isValidInternalProofPath,
+} from "@/lib/payment-integrity";
+import {
   getMarketplaceSettings,
   recordPayment,
 } from "@/lib/marketplace";
@@ -97,22 +101,90 @@ export async function POST(request: Request) {
     }
 
     const supabase = getServiceSupabase();
-    const { data: quote } = await supabase
-      .from("quotations")
-      .select(
-        "labour_charge, materials_cost, total_amount, company_commission, plumber_payable"
-      )
-      .eq("ticket_number", ctx.ticketNumber)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const [{ data: quote }, { data: existingPays }] = await Promise.all([
+      supabase
+        .from("quotations")
+        .select(
+          "labour_charge, materials_cost, total_amount, company_commission, plumber_payable, customer_approval_status"
+        )
+        .eq("ticket_number", ctx.ticketNumber)
+        .eq("customer_approval_status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("payments")
+        .select("id, total_payment, verification_status, transaction_ref")
+        .eq("ticket_number", ctx.ticketNumber),
+    ]);
 
-    const total = Number(body?.amount) || Number(quote?.total_amount) || 0;
-    const labour = Number(quote?.labour_charge) || total;
-    const materials = Number(quote?.materials_cost) || 0;
-    const commission = Number(quote?.company_commission) || 0;
-    const plumberPayable =
-      Number(quote?.plumber_payable) || Math.max(0, total - commission);
+    if (!quote) {
+      return NextResponse.json(
+        { error: "Quotation must be approved by the customer before submitting payment." },
+        { status: 400 }
+      );
+    }
+
+    const existingList = existingPays || [];
+    if (existingList.some((p) => p.verification_status === "pending")) {
+      return NextResponse.json(
+        { error: "A payment submission is already pending verification for this ticket." },
+        { status: 409 }
+      );
+    }
+
+    const txRef =
+      typeof body?.transactionRef === "string" ? body.transactionRef.trim() : "";
+    if (txRef.length > 0) {
+      if (txRef.length < 4 || txRef.length > 80) {
+        return NextResponse.json(
+          { error: "Transaction reference must be between 4 and 80 characters." },
+          { status: 400 }
+        );
+      }
+      const { data: dupRef } = await supabase
+        .from("payments")
+        .select("id")
+        .eq("transaction_ref", txRef)
+        .neq("verification_status", "rejected")
+        .limit(1)
+        .maybeSingle();
+      if (dupRef) {
+        return NextResponse.json(
+          { error: "This transaction reference has already been submitted." },
+          { status: 409 }
+        );
+      }
+    }
+
+    const rawProofUrl = typeof body?.proofUrl === "string" ? body.proofUrl.trim() : "";
+    if (rawProofUrl && !isValidInternalProofPath(rawProofUrl)) {
+      return NextResponse.json(
+        { error: "Invalid payment proof path. Please upload the receipt through FlowGuard." },
+        { status: 400 }
+      );
+    }
+
+    const alreadyVerifiedTotal = existingList
+      .filter((p) => p.verification_status === "verified")
+      .reduce((acc, p) => acc + (Number(p.total_payment) || 0), 0);
+
+    const quoteTotal = Number(quote.total_amount) || 0;
+    const amountCheck = computeAuthorizedPaymentAmount({
+      approvedQuoteTotal: quoteTotal,
+      alreadyPaidTotal: alreadyVerifiedTotal,
+      requestedAmount: body?.amount,
+    });
+    if (!amountCheck.ok) {
+      return NextResponse.json({ error: amountCheck.error }, { status: 400 });
+    }
+
+    const total = amountCheck.amount;
+    const ratio = quoteTotal > 0 ? total / quoteTotal : 1;
+    const labour = Math.round((Number(quote.labour_charge) || 0) * ratio * 100) / 100;
+    const materials = Math.round((Number(quote.materials_cost) || 0) * ratio * 100) / 100;
+    const commission = Math.round((Number(quote.company_commission) || 0) * ratio * 100) / 100;
+    const plumberPayable = Math.max(0, Math.round((total - commission) * 100) / 100);
 
     const payment = await recordPayment({
       requestId: ctx.requestId,
@@ -124,15 +196,11 @@ export async function POST(request: Request) {
       companyCommission: commission,
       plumberPayable,
       paymentMethod: "bank_transfer",
-      transactionRef:
-        typeof body?.transactionRef === "string"
-          ? body.transactionRef
-          : undefined,
-      proofStoragePath:
-        typeof body?.proofUrl === "string" ? body.proofUrl : undefined,
+      transactionRef: txRef || undefined,
+      proofStoragePath: rawProofUrl || undefined,
       notes:
         typeof body?.notes === "string"
-          ? body.notes
+          ? body.notes.slice(0, 500)
           : "Uploaded via FlowGuard Mobile App",
     });
 

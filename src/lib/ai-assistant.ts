@@ -162,6 +162,7 @@ export async function generateSupportReply(params: {
   const reasons: string[] = [];
 
   const tryModel = async (modelId: string) => {
+    const isGemini3 = modelId.startsWith("gemini-3");
     const result = await generateText({
       model: googleProvider(modelId),
       system,
@@ -169,7 +170,9 @@ export async function generateSupportReply(params: {
       maxOutputTokens: 350,
       providerOptions: {
         google: {
-          thinkingConfig: { thinkingBudget: 0 },
+          thinkingConfig: isGemini3
+            ? { thinkingLevel: "minimal" }
+            : { thinkingBudget: 0 },
         },
       },
       abortSignal: AbortSignal.timeout(10000),

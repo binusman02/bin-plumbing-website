@@ -4,13 +4,11 @@ export const CUSTOMER_SESSION_COOKIE = "bin_customer_session";
 export const PLUMBER_SESSION_COOKIE = "bin_plumber_session";
 
 function getSessionSecret(): string {
-  const secret =
-    process.env.AUTH_SESSION_SECRET?.trim() ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (secret) return secret;
+  const secret = process.env.AUTH_SESSION_SECRET?.trim();
+  if (secret && secret.length >= 16) return secret;
   if (process.env.NODE_ENV === "production") {
     throw new Error(
-      "Missing AUTH_SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY in production."
+      "Missing dedicated AUTH_SESSION_SECRET (min 16 chars) in production."
     );
   }
   return `dev-ephemeral-${process.pid}-${process.cwd()}`;
@@ -34,11 +32,14 @@ export function verifyCustomerPassword(password: string, stored: string): boolea
 }
 
 function signSessionToken(subjectId: string, role: "customer" | "plumber"): string {
+  const now = Date.now();
   const payload = Buffer.from(
     JSON.stringify({
       sub: subjectId,
       role,
-      exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      jti: crypto.randomBytes(12).toString("hex"),
+      iat: now,
+      exp: now + 7 * 24 * 60 * 60 * 1000,
     })
   ).toString("base64url");
   const sig = crypto

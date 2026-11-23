@@ -104,6 +104,9 @@ export async function resolvePortalActor(
         const match = byAuthRows?.[0] ?? null;
         if (match) {
           const plumberStatus = String(match.verification_status || match.status || "pending_review");
+          if (plumberStatus === "suspended") {
+            return null;
+          }
           return {
             role: "plumber",
             id: String(match.id),
@@ -271,6 +274,9 @@ export async function resolvePortalActor(
 
       if (plumber) {
         const plumberStatus = String(plumber.verification_status || plumber.status || "pending_review");
+        if (plumberStatus === "suspended") {
+          return null;
+        }
         return {
           role: "plumber",
           id: String(plumber.id),

@@ -7,10 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getVerifiedAppRole } from "@/lib/auth-role";
 import { checkRateLimit } from "@/lib/security";
+import { findCustomerByIdentifier, findPlumberByIdentifier } from "@/lib/auth-lookup";
 import {
-  getAllCustomers,
   getAllPlumberAccounts,
-  getAllPlumbers,
   registerCustomer,
   registerPlumberAccount,
 } from "@/lib/marketplace";
@@ -115,10 +114,7 @@ export async function loginCustomerWithPasswordAction(
     let emailToUse = rawId;
     if (!rawId.includes("@")) {
       const normalized = normalizeNigerianPhoneDigits(rawId);
-      const customers = await getAllCustomers();
-      const matched = customers.find(
-        (c) => normalizeNigerianPhoneDigits(c.phone) === normalized
-      );
+      const matched = await findCustomerByIdentifier(rawId);
       emailToUse =
         matched?.email?.trim() || `c_${normalized}@customer.binplumbing.local`;
     }
@@ -131,14 +127,7 @@ export async function loginCustomerWithPasswordAction(
 
     if (error || !data.user) {
       // Fallback to local salted-scrypt password verification (used when Supabase rate-limits or awaits email confirmation)
-      const customers = await getAllCustomers();
-      const rawLower = rawId.toLowerCase();
-      const normalized = !rawId.includes("@") ? normalizeNigerianPhoneDigits(rawId) : "";
-      const matchedLocal = customers.find((c) => {
-        if (rawId.includes("@") && c.email?.toLowerCase() === rawLower) return true;
-        if (normalized && normalizeNigerianPhoneDigits(c.phone) === normalized) return true;
-        return false;
-      });
+      const matchedLocal = await findCustomerByIdentifier(rawId);
 
       if (
         matchedLocal?.password_hash &&
@@ -279,15 +268,11 @@ export async function registerCustomerWithPasswordAction(input: {
     }
 
     const normalizedDigits = normalizeNigerianPhoneDigits(phone);
-    const existingCustomers = await getAllCustomers();
-    const existingAccount = existingCustomers.find(
-      (c) =>
-        (c.email && c.email.toLowerCase() === email.toLowerCase()) ||
-        normalizeNigerianPhoneDigits(c.phone) === normalizedDigits
-    );
+    const existingAccount =
+      (await findCustomerByIdentifier(email)) ||
+      (await findCustomerByIdentifier(phone));
     if (existingAccount) {
-      const existingRaw = existingAccount as typeof existingAccount & { auth_user_id?: string | null };
-      if (existingAccount.password_hash || existingRaw.auth_user_id) {
+      if (existingAccount.password_hash || existingAccount.auth_user_id) {
         return {
           success: false,
           error: "An account with this email or phone number already exists. Please sign in instead.",
@@ -558,10 +543,7 @@ export async function loginPlumberWithPasswordAction(
       if (matchedAcc?.email) {
         emailToUse = matchedAcc.email;
       } else {
-        const plumbers = await getAllPlumbers();
-        const matched = plumbers.find(
-          (p) => normalizeNigerianPhoneDigits(p.phone) === normalized
-        );
+        const matched = await findPlumberByIdentifier(rawId);
         if (!matched?.email) {
           return { success: false, error: "Invalid sign-in details." };
         }

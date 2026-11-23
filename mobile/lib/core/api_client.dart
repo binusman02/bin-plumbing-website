@@ -47,30 +47,31 @@ class FlowGuardApiClient {
     return null;
   }
 
-  static Future<String> resolveLoginIdentifier({
+  static Future<String> signInWithPhoneServer({
     required String identifier,
+    required String password,
     required String expectedRole,
   }) async {
-    final clean = identifier.trim();
-    if (clean.contains("@")) return clean.toLowerCase();
-
     final uri = Uri.parse(
-      "${SupabaseConfig.webBaseUrl}/api/mobile/auth/resolve-identifier",
+      "${SupabaseConfig.webBaseUrl}/api/mobile/auth/sign-in",
     );
     final res = await http
         .post(
           uri,
           headers: const {"Content-Type": "application/json"},
           body: jsonEncode({
-            "identifier": clean,
+            "identifier": identifier.trim(),
+            "password": password,
             "expectedRole": expectedRole,
           }),
         )
-        .timeout(const Duration(seconds: 12));
+        .timeout(const Duration(seconds: 15));
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode >= 200 && res.statusCode < 300 && data["email"] != null) {
-      return data["email"].toString();
+    if (res.statusCode >= 200 &&
+        res.statusCode < 300 &&
+        data["refreshToken"] != null) {
+      return data["refreshToken"].toString();
     }
     throw Exception(data["error"]?.toString() ?? "Invalid sign-in details.");
   }

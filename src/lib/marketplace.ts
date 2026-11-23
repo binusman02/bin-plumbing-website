@@ -2014,16 +2014,41 @@ export async function verifyPaymentById(
   if (error || !updated) return false;
 
   if (status === "verified" && updated.request_id) {
-    const { error: completeErr } = await supabase
-      .from("service_requests")
-      .update({ status: "completed", updated_at: nowIso })
-      .eq("id", updated.request_id);
-    if (completeErr) return false;
-    await reconcileSharingForRequest(String(updated.request_id));
+    const [{ data: quoteRow }, { data: verifiedRows }] = await Promise.all([
+      supabase
+        .from("quotations")
+        .select("total_amount")
+        .eq("ticket_number", updated.ticket_number)
+        .eq("customer_approval_status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("payments")
+        .select("total_payment")
+        .eq("ticket_number", updated.ticket_number)
+        .eq("verification_status", "verified"),
+    ]);
+
+    const approvedTotal = Number(quoteRow?.total_amount) || 0;
+    const verifiedPaidTotal = (verifiedRows || []).reduce(
+      (sum, row) => sum + (Number(row.total_payment) || 0),
+      0
+    );
+    const fullyPaid = approvedTotal > 0 ? verifiedPaidTotal + 0.01 >= approvedTotal : verifiedPaidTotal > 0;
+
+    if (fullyPaid) {
+      const { error: completeErr } = await supabase
+        .from("service_requests")
+        .update({ status: "completed", updated_at: nowIso })
+        .eq("id", updated.request_id);
+      if (completeErr) return false;
+      await reconcileSharingForRequest(String(updated.request_id));
+    }
 
     await appendRequestHistoryEntry(String(updated.request_id), {
       actor,
-      action: "Verified Final Payment",
+      action: fullyPaid ? "Verified Final Payment" : "Verified Partial Payment",
       details: `Confirmed ₦${Number(updated.total_payment).toLocaleString()} (${updated.payment_method})`,
     });
   }

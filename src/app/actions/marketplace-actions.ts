@@ -3,8 +3,10 @@
 import path from "path";
 import { revalidatePath, updateTag } from "next/cache";
 import { maybeAutoReplyToTicketMessage } from "@/lib/ai-assistant";
+import { validateJobTransition, type JobAction } from "@/lib/job-lifecycle";
 import { PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 import {
+  appendRequestHistoryEntry,
   createPlumberApplication,
   updatePlumberVerification,
   updatePlumberAvailability,
@@ -408,35 +410,71 @@ export async function claimServiceRequestAction(params: {
     const effectivePlumberName = admin ? params.plumberName : plumberActor!.name;
 
     const supabase = getServiceSupabase();
-    const { data: existingReq } = await supabase
-      .from("service_requests")
-      .select("id, assigned_plumber_id, customer_id")
-      .eq("ticket_number", params.ticketNumber)
-      .maybeSingle();
+    let existingReq: { id: string; customer_id: string | null };
+    if (!admin) {
+      // Atomic conditional claim: prevents two plumbers from claiming the same unassigned job simultaneously
+      const { data: claimed, error: claimErr } = await supabase
+        .from("service_requests")
+        .update({
+          assigned_technician: effectivePlumberName,
+          assigned_plumber_id: effectivePlumberId,
+          status: "scheduled",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("ticket_number", params.ticketNumber)
+        .is("assigned_plumber_id", null)
+        .not("status", "in", "(completed,cancelled)")
+        .is("deleted_at", null)
+        .select("id, customer_id")
+        .maybeSingle();
 
-    if (!existingReq) {
-      return { success: false, error: "Service request not found." };
-    }
-    if (
-      existingReq.assigned_plumber_id &&
-      String(existingReq.assigned_plumber_id) !== effectivePlumberId &&
-      !admin
-    ) {
-      return { success: false, error: "This job is already assigned to another plumber." };
-    }
+      if (claimErr) {
+        return { success: false, error: claimErr.message };
+      }
+      if (!claimed) {
+        return {
+          success: false,
+          error: "This job is unavailable or has already been claimed by another plumber.",
+        };
+      }
 
-    await updateServiceRequest(
-      params.ticketNumber,
-      {
-        assigned_technician: effectivePlumberName,
-        assigned_plumber_id: effectivePlumberId,
-        status: "scheduled",
-      },
-      {
+      await appendRequestHistoryEntry(params.ticketNumber, {
         actor: effectivePlumberName,
         action: "Claimed job assignment",
+        details: `${effectivePlumberName} claimed dispatch ${params.ticketNumber}.`,
+      });
+      existingReq = {
+        id: String(claimed.id),
+        customer_id: claimed.customer_id ? String(claimed.customer_id) : null,
+      };
+    } else {
+      const { data: reqRow } = await supabase
+        .from("service_requests")
+        .select("id, assigned_plumber_id, customer_id")
+        .eq("ticket_number", params.ticketNumber)
+        .maybeSingle();
+
+      if (!reqRow) {
+        return { success: false, error: "Service request not found." };
       }
-    );
+
+      await updateServiceRequest(
+        params.ticketNumber,
+        {
+          assigned_technician: effectivePlumberName,
+          assigned_plumber_id: effectivePlumberId,
+          status: "scheduled",
+        },
+        {
+          actor: effectivePlumberName,
+          action: "Claimed job assignment",
+        }
+      );
+      existingReq = {
+        id: String(reqRow.id),
+        customer_id: reqRow.customer_id ? String(reqRow.customer_id) : null,
+      };
+    }
 
     // Notification is created below; do not post automatic system messages into chat conversations
 
@@ -608,6 +646,47 @@ export async function updateRequestStatusByTicketAction(
       const allowedPlumberStatuses: readonly RequestStatus[] = PLUMBER_UPDATABLE_STATUSES;
       if (!allowedPlumberStatuses.includes(status)) {
         return { success: false, error: "Only administrators can set this request status." };
+      }
+
+      const statusToAction: Partial<Record<RequestStatus, JobAction>> = {
+        scheduled: "accept",
+        in_progress: "start_work",
+        work_completed: "complete_work",
+      };
+      const mappedAction = statusToAction[status];
+      if (mappedAction) {
+        const supabase = getServiceSupabase();
+        const [{ data: reqRow }, { data: quoteRows }] = await Promise.all([
+          supabase
+            .from("service_requests")
+            .select("status")
+            .eq("ticket_number", ticketNumber)
+            .maybeSingle(),
+          supabase
+            .from("quotations")
+            .select("customer_approval_status")
+            .eq("ticket_number", ticketNumber)
+            .order("created_at", { ascending: false })
+            .limit(5),
+        ]);
+        const transition = validateJobTransition({
+          action: mappedAction,
+          currentStatus: String(reqRow?.status || "new"),
+          hasAnyQuotation: (quoteRows || []).length > 0,
+          hasApprovedQuotation: (quoteRows || []).some(
+            (q) => q.customer_approval_status === "approved"
+          ),
+          tripStarted: true,
+        });
+        if (!transition.allowed) {
+          return {
+            success: false,
+            error: transition.error || "Invalid job status transition.",
+          };
+        }
+        if (transition.idempotent) {
+          return { success: true };
+        }
       }
     }
 

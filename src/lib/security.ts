@@ -67,6 +67,16 @@ export async function getClientIp(): Promise<string> {
   }
 }
 
+const SENSITIVE_RATE_LIMIT_SCOPES = new Set([
+  "customer_login",
+  "plumber_login",
+  "mobile_login",
+  "mobile_login_lookup",
+  "ai_admin",
+  "public_request",
+  "plumber_application",
+]);
+
 export async function checkRateLimit(
   scope: string,
   maxRequests: number,
@@ -77,11 +87,30 @@ export async function checkRateLimit(
   const key = `${scope}:${ip}${extraKey ? `:${extraKey.toLowerCase().trim()}` : ""}`;
   const now = Date.now();
   const cutoffIso = new Date(now - windowMs).toISOString();
+  const failClosedOnDbError =
+    process.env.NODE_ENV === "production" && SENSITIVE_RATE_LIMIT_SCOPES.has(scope);
 
   try {
     const supabase = getServiceSupabase();
 
-    // Automatic cleanup of expired entries for this bucket (and occasional global sweep)
+    // Try atomic PostgreSQL RPC first (zero race condition)
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "check_rate_limit_atomic",
+      {
+        p_bucket_key: key,
+        p_max_requests: maxRequests,
+        p_window_ms: windowMs,
+      }
+    );
+
+    if (!rpcError && Array.isArray(rpcData) && rpcData[0]) {
+      return {
+        allowed: Boolean(rpcData[0].allowed),
+        retryAfterSeconds: Number(rpcData[0].retry_after_seconds) || 0,
+      };
+    }
+
+    // Fallback for environments where the RPC migration hasn't been applied yet
     await supabase
       .from("rate_limits")
       .delete()
@@ -102,7 +131,9 @@ export async function checkRateLimit(
 
     if (error) {
       console.error("[checkRateLimit] DB error:", error.message);
-      return { allowed: true, retryAfterSeconds: 0 };
+      return failClosedOnDbError
+        ? { allowed: false, retryAfterSeconds: 60 }
+        : { allowed: true, retryAfterSeconds: 0 };
     }
 
     const timestamps = (rows || [])
@@ -122,7 +153,9 @@ export async function checkRateLimit(
     return { allowed: true, retryAfterSeconds: 0 };
   } catch (err) {
     console.error("[checkRateLimit]", err instanceof Error ? err.message : err);
-    return { allowed: true, retryAfterSeconds: 0 };
+    return failClosedOnDbError
+      ? { allowed: false, retryAfterSeconds: 60 }
+      : { allowed: true, retryAfterSeconds: 0 };
   }
 }
 
@@ -136,7 +169,13 @@ export function isHoneypotTriggered(honeypotValue: unknown): boolean {
 export async function verifyTurnstileToken(token?: string | null): Promise<boolean> {
   const secret = process.env.TURNSTILE_SECRET_KEY?.trim();
   if (!secret) {
-    // Turnstile not configured; rely on honeypot + rate limiting
+    if (
+      process.env.NODE_ENV === "production" &&
+      process.env.REQUIRE_TURNSTILE === "true"
+    ) {
+      console.error("[verifyTurnstileToken] REQUIRE_TURNSTILE=true but TURNSTILE_SECRET_KEY is missing.");
+      return false;
+    }
     return true;
   }
 
@@ -281,6 +320,99 @@ export function validateUploadFile(
   }
   if (mime && !ALLOWED_DOC_MIME_TYPES.has(mime)) {
     return { valid: false, error: "Only JPG, PNG, WebP, or PDF files are allowed." };
+  }
+  return { valid: true };
+}
+
+/**
+ * Verifies actual file magic bytes against its declared extension so spoofed
+ * extensions / MIME types (e.g. an HTML/JS payload renamed to .jpg) are rejected.
+ */
+export function validateFileMagicBytes(
+  buf: Uint8Array | Buffer,
+  ext: string
+): { valid: boolean; error?: string } {
+  const lower = ext.toLowerCase();
+  if (buf.length < 4) {
+    return { valid: false, error: "File content is too small or corrupted." };
+  }
+  const b0 = buf[0];
+  const b1 = buf[1];
+  const b2 = buf[2];
+  const b3 = buf[3];
+  const ascii4 = String.fromCharCode(b0, b1, b2, b3);
+
+  if (lower === ".jpg" || lower === ".jpeg") {
+    return b0 === 0xff && b1 === 0xd8 && b2 === 0xff
+      ? { valid: true }
+      : { valid: false, error: "Invalid JPEG image header." };
+  }
+  if (lower === ".png") {
+    return b0 === 0x89 && b1 === 0x50 && b2 === 0x4e && b3 === 0x47
+      ? { valid: true }
+      : { valid: false, error: "Invalid PNG image header." };
+  }
+  if (lower === ".gif") {
+    return ascii4 === "GIF8"
+      ? { valid: true }
+      : { valid: false, error: "Invalid GIF image header." };
+  }
+  if (lower === ".webp") {
+    const riff = ascii4 === "RIFF";
+    const webp =
+      buf.length >= 12 &&
+      String.fromCharCode(buf[8], buf[9], buf[10], buf[11]) === "WEBP";
+    return riff && webp
+      ? { valid: true }
+      : { valid: false, error: "Invalid WebP image header." };
+  }
+  if (lower === ".pdf") {
+    return ascii4 === "%PDF"
+      ? { valid: true }
+      : { valid: false, error: "Invalid PDF file header." };
+  }
+  if (lower === ".wav") {
+    const riff = ascii4 === "RIFF";
+    const wave =
+      buf.length >= 12 &&
+      String.fromCharCode(buf[8], buf[9], buf[10], buf[11]) === "WAVE";
+    return riff && wave
+      ? { valid: true }
+      : { valid: false, error: "Invalid WAV audio header." };
+  }
+  if (lower === ".ogg") {
+    return ascii4 === "OggS"
+      ? { valid: true }
+      : { valid: false, error: "Invalid OGG audio header." };
+  }
+  if (lower === ".webm") {
+    return b0 === 0x1a && b1 === 0x45 && b2 === 0xdf && b3 === 0xa3
+      ? { valid: true }
+      : { valid: false, error: "Invalid WebM media header." };
+  }
+  if (lower === ".mp4" || lower === ".m4a" || lower === ".mov") {
+    const ftyp =
+      buf.length >= 8 &&
+      String.fromCharCode(buf[4], buf[5], buf[6], buf[7]) === "ftyp";
+    return ftyp
+      ? { valid: true }
+      : { valid: false, error: "Invalid MP4/M4A container header." };
+  }
+  if (lower === ".mp3") {
+    const id3 = b0 === 0x49 && b1 === 0x44 && b2 === 0x33;
+    const sync = b0 === 0xff && (b1 & 0xe0) === 0xe0;
+    return id3 || sync
+      ? { valid: true }
+      : { valid: false, error: "Invalid MP3 audio header." };
+  }
+  if (lower === ".aac") {
+    const adts = b0 === 0xff && (b1 & 0xf0) === 0xf0;
+    const ftyp =
+      buf.length >= 8 &&
+      String.fromCharCode(buf[4], buf[5], buf[6], buf[7]) === "ftyp";
+    return adts || ftyp
+      ? { valid: true }
+      : { valid: false, error: "Invalid AAC audio header." };
   }
   return { valid: true };
 }

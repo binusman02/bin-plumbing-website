@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServiceSupabase } from "@/lib/supabase/admin";
 import { checkRateLimit } from "@/lib/security";
 
-function normalizeNigerianDigits(input: string): string {
-  const digits = input.replace(/\D/g, "");
-  if (digits.startsWith("234") && digits.length === 13) return digits;
-  if (digits.startsWith("0") && digits.length === 11) return `234${digits.slice(1)}`;
-  if (digits.length === 10 && !digits.startsWith("0")) return `234${digits}`;
-  return digits;
-}
-
+/**
+ * Deprecated unauthenticated phone-to-email lookup.
+ * Phone sign-in now executes server-side via POST /api/mobile/auth/sign-in
+ * so private email addresses are never exposed to unauthenticated callers.
+ */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const raw = String(body?.identifier || "").trim();
-  const expectedRole = body?.expectedRole === "plumber" ? "plumber" : "customer";
 
-  if (!raw) {
-    return NextResponse.json({ error: "Identifier is required." }, { status: 400 });
-  }
-
-  const rate = await checkRateLimit("mobile_login_lookup", 20, 15 * 60 * 1000, raw);
+  const rate = await checkRateLimit("mobile_login_lookup", 20, 15 * 60 * 1000, raw || "anon");
   if (!rate.allowed) {
     return NextResponse.json(
       { error: "Too many sign-in attempts. Please wait a few minutes." },
@@ -31,64 +22,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ email: raw.toLowerCase() });
   }
 
-  const normalized = normalizeNigerianDigits(raw);
-  if (normalized.length < 10) {
-    return NextResponse.json({ error: "Invalid phone number." }, { status: 400 });
-  }
-
-  const adminSupabase = getServiceSupabase();
-
-  if (expectedRole === "plumber") {
-    const { data: plumbers } = await adminSupabase
-      .from("plumbers")
-      .select("email, phone")
-      .is("deleted_at", null);
-    const match = (plumbers || []).find(
-      (p) => normalizeNigerianDigits(String(p.phone || "")) === normalized
-    );
-    if (match) {
-      const email = match.email
-        ? String(match.email).toLowerCase()
-        : `p_${normalized}@plumber.binplumbing.local`;
-      return NextResponse.json({ email });
-    }
-    return NextResponse.json({ error: "Invalid sign-in details." }, { status: 404 });
-  }
-
-  const { data: customers } = await adminSupabase
-    .from("customers")
-    .select("email, phone")
-    .is("deleted_at", null);
-  const custMatch = (customers || []).find(
-    (c) => normalizeNigerianDigits(String(c.phone || "")) === normalized
+  return NextResponse.json(
+    {
+      error:
+        "Phone lookup is disabled for security. Please use /api/mobile/auth/sign-in or update your app.",
+    },
+    { status: 410 }
   );
-  if (custMatch) {
-    const email = custMatch.email
-      ? String(custMatch.email).toLowerCase()
-      : `c_${normalized}@customer.binplumbing.local`;
-    return NextResponse.json({ email });
-  }
-
-  // Fallback: check Supabase Auth user_metadata.phone for newly signed-up mobile accounts
-  try {
-    const { data: usersPage } = await adminSupabase.auth.admin.listUsers({
-      page: 1,
-      perPage: 1000,
-    });
-    const authMatch = (usersPage?.users || []).find((u) => {
-      const metaPhone = String(u.user_metadata?.phone || "");
-      const authPhone = String(u.phone || "");
-      return (
-        normalizeNigerianDigits(metaPhone) === normalized ||
-        normalizeNigerianDigits(authPhone) === normalized
-      );
-    });
-    if (authMatch?.email) {
-      return NextResponse.json({ email: authMatch.email.toLowerCase() });
-    }
-  } catch {
-    // ignore fallback error
-  }
-
-  return NextResponse.json({ error: "Invalid sign-in details." }, { status: 404 });
 }

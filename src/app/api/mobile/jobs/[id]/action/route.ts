@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { verifyTicketAccess } from "@/lib/chat-auth";
+import { validateJobTransition, type JobAction } from "@/lib/job-lifecycle";
+import { deriveJobTripState } from "@/lib/live-location";
 import {
   appendRequestHistoryEntry,
   updateServiceRequest,
@@ -27,6 +29,12 @@ export async function POST(
     if (!actor || (actor.role !== "plumber" && actor.role !== "admin")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (actor.role === "plumber" && !actor.isApproved) {
+      return NextResponse.json(
+        { error: "Only approved technicians can perform job actions." },
+        { status: 403 }
+      );
+    }
 
     const { id } = await context.params;
     const body = await request.json();
@@ -39,6 +47,61 @@ export async function POST(
     const ctx = await verifyTicketAccess(actor, id);
     if (!ctx) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const supabase = getServiceSupabase();
+    const [{ data: reqRow }, { data: quoteRows }, { data: historyRows }] = await Promise.all([
+      supabase
+        .from("service_requests")
+        .select("status")
+        .eq("id", ctx.requestId)
+        .maybeSingle(),
+      supabase
+        .from("quotations")
+        .select("customer_approval_status")
+        .eq("ticket_number", ctx.ticketNumber)
+        .order("created_at", { ascending: false })
+        .limit(5),
+      supabase
+        .from("request_history")
+        .select("action, created_at")
+        .eq("request_id", ctx.requestId)
+        .order("created_at", { ascending: true }),
+    ]);
+
+    const currentStatus = String(reqRow?.status || "new");
+    const hasAnyQuotation = (quoteRows || []).length > 0;
+    const hasApprovedQuotation = (quoteRows || []).some(
+      (q) => q.customer_approval_status === "approved"
+    );
+    const tripState = deriveJobTripState(
+      (historyRows || []).map((h) => ({
+        action: String(h.action || ""),
+        created_at: String(h.created_at || ""),
+      }))
+    );
+
+    const transition = validateJobTransition({
+      action: action as JobAction,
+      currentStatus,
+      hasApprovedQuotation,
+      hasAnyQuotation,
+      tripStarted: tripState === "on_the_way" || tripState === "arrived",
+    });
+
+    if (!transition.allowed) {
+      return NextResponse.json(
+        { error: transition.error || "Invalid job state transition." },
+        { status: 409 }
+      );
+    }
+
+    if (transition.idempotent) {
+      return NextResponse.json({
+        success: true,
+        idempotent: true,
+        status: transition.nextStatus || currentStatus,
+      });
     }
 
     let nextStatus: RequestStatus | undefined;
