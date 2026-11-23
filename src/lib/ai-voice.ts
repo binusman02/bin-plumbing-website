@@ -43,11 +43,17 @@ export async function synthesizeZiatSpeech(
     .replace(/\*\*/g, "")
     .replace(/`+/g, "")
     .replace(/#{1,6}\s+/g, "")
+    .replace(/₦\s*([\d,]+(?:\.\d+)?)/g, "$1 Naira")
+    .replace(/[•]/g, "")
     .trim()
-    .slice(0, 1200);
+    .slice(0, 900);
   if (!apiKey || !cleanText) return null;
 
-  const ttsModels = ["gemini-2.5-flash-preview-tts", "gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"];
+  const ttsModels = [
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+  ];
   for (let i = 0; i < ttsModels.length; i++) {
     const modelId = ttsModels[i];
     try {
@@ -69,13 +75,13 @@ export async function synthesizeZiatSpeech(
               },
             },
           }),
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(16000),
         }
       );
 
       if (!res.ok) {
         if ((res.status === 429 || res.status === 503) && i === 0) {
-          await new Promise((r) => setTimeout(r, 450));
+          await new Promise((r) => setTimeout(r, 850));
         }
         continue;
       }

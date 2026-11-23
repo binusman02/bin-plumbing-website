@@ -52,11 +52,6 @@ export function useZiatLiveCall(
       audioElRef.current.pause();
       audioElRef.current = null;
     }
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
-    }
   }, []);
 
   const stopVadLoop = useCallback(() => {
@@ -167,7 +162,7 @@ export function useZiatLiveCall(
         return;
       }
 
-      const { audioDataUrl, replyText } = await onUtteranceRef.current({
+      const { audioDataUrl } = await onUtteranceRef.current({
         audioBase64: base64,
         audioMimeType: finalMime,
         durationSec,
@@ -187,28 +182,6 @@ export function useZiatLiveCall(
         audio.onended = resumeAfterSpeak;
         audio.onerror = resumeAfterSpeak;
         audio.play().catch(resumeAfterSpeak);
-      } else if (
-        replyText &&
-        typeof window !== "undefined" &&
-        "speechSynthesis" in window
-      ) {
-        // Browser speech fallback so Ziat never goes silent if cloud TTS fails
-        setStateSync("speaking");
-        try {
-          window.speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance(replyText);
-          const voices = window.speechSynthesis.getVoices();
-          const femaleVoice = voices.find((v) =>
-            /female|samantha|victoria|karen|zira|google.*uk|google.*us/i.test(v.name)
-          );
-          if (femaleVoice) utter.voice = femaleVoice;
-          utter.rate = 1.03;
-          utter.onend = resumeAfterSpeak;
-          utter.onerror = resumeAfterSpeak;
-          window.speechSynthesis.speak(utter);
-        } catch {
-          resumeAfterSpeak();
-        }
       } else {
         startListeningTurnRef.current();
       }
