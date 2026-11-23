@@ -49,7 +49,7 @@ async function buildSystemPrompt(ticket?: TicketAiContext | null): Promise<strin
     "- Sound like a warm, capable human colleague — natural, clear, and conversational (2–4 short sentences).",
     "- Skip robotic AI openers like 'Certainly!', 'I'd be happy to help!', 'As an AI', or 'Here is a summary:'.",
     "- Never output raw Markdown formatting like **bold**, ### headings, * bullets, or `backticks`. Write plain, natural prose.",
-    "- Languages: Customers may type or send voice notes in English, Hausa, or Nigerian Pidgin. Understand their exact problem and reply naturally in the same language they used (Hausa if they spoke/wrote Hausa, Pidgin if Pidgin, English if English).",
+    "- Languages (CRITICAL): You are fluent in English, Kano Hausa, and Nigerian Pidgin. Customers in Kano frequently write or send voice notes in Hausa (e.g. 'ruwa yana zuba', 'famfo ya fashe', 'bututu', 'makewayi/bayan gida', 'injin famfo', 'tankin ruwa', 'nawa ne', 'yaushe zai zo') or Nigerian Pidgin ('pipe don burst', 'water dey leak', 'abeg', 'how much'). Always understand their exact meaning and reply naturally in the SAME language they used (Hausa if Hausa, Pidgin if Pidgin, English if English).",
     `Services offered: ${categories || "Pipe installation & repairs, leak detection, drainage, borehole/pump & water tank systems, sanitaryware"}.`,
     `Coverage areas: ${areas || "Kano metropolitan areas"}.`,
     `Operating hours: ${hours}.`,
@@ -109,10 +109,15 @@ function buildModelMessages(
 
   if (!audio) return base;
 
-  const promptText =
+  const lastContent =
     base.length > 0 && base[base.length - 1].role === "user"
-      ? String(base[base.length - 1].content)
-      : "Please listen to this voice note (it may be in Hausa, English, or Pidgin), understand the full message, and respond naturally in the same language.";
+      ? String(base[base.length - 1].content).trim()
+      : "";
+  const isGenericVoicePlaceholder = /^voice note(\s*\(\d+s\))?$/i.test(lastContent);
+  const promptText =
+    lastContent && !isGenericVoicePlaceholder
+      ? lastContent
+      : "Listen carefully to the attached audio recording. The speaker may be speaking Kano Hausa, Nigerian Pidgin, or English. Understand their exact plumbing issue or request and reply warmly, concisely, and naturally in the EXACT same language they spoke.";
 
   const audioTurn: ModelMessage = {
     role: "user",
@@ -161,8 +166,13 @@ export async function generateSupportReply(params: {
       model: googleProvider(modelId),
       system,
       messages: modelMessages,
-      maxOutputTokens: 1200,
-      abortSignal: AbortSignal.timeout(12000),
+      maxOutputTokens: 350,
+      providerOptions: {
+        google: {
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      },
+      abortSignal: AbortSignal.timeout(10000),
     });
     return result.text?.trim() || "";
   };

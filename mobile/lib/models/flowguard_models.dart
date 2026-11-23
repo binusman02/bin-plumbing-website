@@ -1,5 +1,7 @@
 import "package:flutter/material.dart";
 
+import "dart:convert";
+
 class ServiceCategoryItem {
   final String id;
   final String slug;
@@ -107,6 +109,22 @@ class ServiceRequestItem {
   bool get isActive => status != "completed" && status != "cancelled";
 }
 
+class QuotationLineItem {
+  final String id;
+  final String name;
+  final int quantity;
+  final double unitPrice;
+
+  const QuotationLineItem({
+    required this.id,
+    required this.name,
+    required this.quantity,
+    required this.unitPrice,
+  });
+
+  double get amount => quantity * unitPrice;
+}
+
 class QuotationData {
   final String id;
   final String ticketNumber;
@@ -117,6 +135,8 @@ class QuotationData {
   final double totalAmount;
   final String approvalStatus;
   final String? notes;
+  final String? createdAt;
+  final List<QuotationLineItem> items;
 
   const QuotationData({
     required this.id,
@@ -128,6 +148,8 @@ class QuotationData {
     required this.totalAmount,
     required this.approvalStatus,
     this.notes,
+    this.createdAt,
+    this.items = const [],
   });
 
   factory QuotationData.fromJson(Map<String, dynamic> json) {
@@ -137,9 +159,37 @@ class QuotationData {
     final other = (json["other_charges"] as num?)?.toDouble() ?? 0;
     final total = (json["total_amount"] as num?)?.toDouble() ??
         (labour + materials + transport + other);
-    final rawNotes = json["notes"]?.toString();
+    final rawNotes = json["notes"]?.toString() ?? "";
+    final parsedItems = <QuotationLineItem>[];
+    final markerMatch = RegExp(
+      r"<!--BP_QUOTE_ITEMS:([\s\S]*?)-->",
+    ).firstMatch(rawNotes);
+    if (markerMatch != null) {
+      try {
+        final decoded = jsonDecode(markerMatch.group(1) ?? "[]");
+        if (decoded is List) {
+          for (var i = 0; i < decoded.length; i++) {
+            final row = decoded[i];
+            if (row is Map) {
+              final name = (row["name"] ?? "").toString().trim();
+              if (name.isEmpty) continue;
+              final qty = ((row["quantity"] as num?)?.toInt() ?? 1).clamp(1, 9999);
+              final unit = ((row["unitPrice"] as num?)?.toDouble() ?? 0).clamp(0.0, 999999999.0);
+              parsedItems.add(
+                QuotationLineItem(
+                  id: (row["id"] ?? "item-$i").toString(),
+                  name: name,
+                  quantity: qty,
+                  unitPrice: unit,
+                ),
+              );
+            }
+          }
+        }
+      } catch (_) {}
+    }
     final cleanNotes = rawNotes
-        ?.replaceAll(RegExp(r"\s*<!--BP_QUOTE_ITEMS:[\s\S]*?-->"), "")
+        .replaceAll(RegExp(r"\s*<!--BP_QUOTE_ITEMS:[\s\S]*?-->"), "")
         .trim();
     return QuotationData(
       id: (json["id"] ?? "").toString(),
@@ -151,7 +201,9 @@ class QuotationData {
       totalAmount: total,
       approvalStatus:
           (json["customer_approval_status"] ?? "pending").toString(),
-      notes: (cleanNotes != null && cleanNotes.isNotEmpty) ? cleanNotes : null,
+      notes: cleanNotes.isNotEmpty ? cleanNotes : null,
+      createdAt: json["created_at"]?.toString(),
+      items: parsedItems,
     );
   }
 }

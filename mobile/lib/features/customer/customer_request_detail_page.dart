@@ -891,12 +891,22 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
                       ],
                     ),
                     const SizedBox(height: 10),
+                    if (_quote!.items.isNotEmpty) ...[
+                      for (final item in _quote!.items) ...[
+                        _costRow(
+                          "${item.name} (${item.quantity} × ${naira.format(item.unitPrice)})",
+                          naira.format(item.amount),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                    ] else ...[
+                      _costRow(
+                        "Materials Cost",
+                        naira.format(_quote!.materialsCost),
+                      ),
+                      const SizedBox(height: 4),
+                    ],
                     _costRow("Labour Charge", naira.format(_quote!.labourCharge)),
-                    const SizedBox(height: 4),
-                    _costRow(
-                      "Materials Cost",
-                      naira.format(_quote!.materialsCost),
-                    ),
                     if (_quote!.transportCharge > 0) ...[
                       const SizedBox(height: 4),
                       _costRow(
@@ -916,6 +926,34 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
                       "Total Amount",
                       naira.format(_quote!.totalAmount),
                       bold: true,
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => _showFullQuotationSheet(naira),
+                        icon: const Icon(
+                          Icons.receipt_outlined,
+                          size: 15,
+                          color: FlowGuardTheme.navy,
+                        ),
+                        label: const Text(
+                          "View / Copy Full Quote",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                      ),
                     ),
                     if (_quote!.notes != null &&
                         _quote!.notes!.trim().isNotEmpty) ...[
@@ -1322,103 +1360,399 @@ class _CustomerRequestDetailPageState extends State<CustomerRequestDetailPage>
     );
   }
 
-  void _showOfficialReceipt(NumberFormat naira) {
-    final isPaid =
-        _paymentStatus == "verified" || _paymentStatus == "confirmed";
-    if (!isPaid) return;
+  void _showFullQuotationSheet(NumberFormat naira) {
+    final q = _quote;
+    if (q == null) return;
+    final statusLabel = q.approvalStatus == "approved"
+        ? "Approved"
+        : q.approvalStatus == "rejected"
+            ? "Declined"
+            : "Pending Approval";
+    final copyLines = <String>[
+      "FLOWGUARD PLUMBING — ITEMISED QUOTATION",
+      "Ticket: #${_request.ticketNumber}",
+      "Customer: ${_request.customerName} (${_request.customerPhone})",
+      if (_request.addressInKano.isNotEmpty) "Address: ${_request.addressInKano}",
+      if (_request.assignedTechnician != null &&
+          _request.assignedTechnician!.isNotEmpty)
+        "Technician: ${_request.assignedTechnician}",
+      "Status: $statusLabel",
+      "---",
+      if (q.items.isNotEmpty)
+        ...q.items.map(
+          (it) =>
+              "${it.name} (${it.quantity} x ${naira.format(it.unitPrice)}) = ${naira.format(it.amount)}",
+        )
+      else if (q.materialsCost > 0)
+        "Materials & Plumbing Supplies = ${naira.format(q.materialsCost)}",
+      "Labour / Workmanship = ${naira.format(q.labourCharge)}",
+      if (q.transportCharge > 0)
+        "Transport / Logistics = ${naira.format(q.transportCharge)}",
+      if (q.otherCharges > 0)
+        "Other Charges = ${naira.format(q.otherCharges)}",
+      "---",
+      "Total Quotation Amount: ${naira.format(q.totalAmount)}",
+    ];
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "FlowGuard Plumbing",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: FlowGuardTheme.navy,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      ClipOval(
+                        child: Image.asset(
+                          "assets/images/flowguard-icon.jpg",
+                          width: 34,
+                          height: 34,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        "FlowGuard Plumbing",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        "QUOTATION",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                      Text(
+                        "#${_request.ticketNumber}",
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const Divider(height: 22),
+              Text(
+                "${_request.customerName} • ${_request.customerPhone}",
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: FlowGuardTheme.navy,
+                ),
+              ),
+              if (_request.addressInKano.isNotEmpty)
+                Text(
+                  _request.addressInKano,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: FlowGuardTheme.mutedText,
                   ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text(
-                      "OFFICIAL RECEIPT",
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: FlowGuardTheme.mutedText,
-                      ),
+              if (_request.assignedTechnician != null &&
+                  _request.assignedTechnician!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    "Technician: ${_request.assignedTechnician}",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: FlowGuardTheme.mutedText,
                     ),
-                    Text(
-                      "#${_request.ticketNumber}",
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: FlowGuardTheme.navy,
-                      ),
-                    ),
-                  ],
+                  ),
+                ),
+              const SizedBox(height: 14),
+              if (q.items.isNotEmpty) ...[
+                for (final item in q.items) ...[
+                  _costRow(
+                    "${item.name} (${item.quantity} × ${naira.format(item.unitPrice)})",
+                    naira.format(item.amount),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+              ] else if (q.materialsCost > 0) ...[
+                _costRow(
+                  "Materials & Supplies",
+                  naira.format(q.materialsCost),
+                ),
+                const SizedBox(height: 6),
+              ],
+              _costRow("Labour / Workmanship", naira.format(q.labourCharge)),
+              if (q.transportCharge > 0) ...[
+                const SizedBox(height: 6),
+                _costRow(
+                  "Transport / Logistics",
+                  naira.format(q.transportCharge),
                 ),
               ],
-            ),
-            const Divider(height: 22),
-            if (_quote != null) ...[
-              _costRow("Materials", naira.format(_quote!.materialsCost)),
-              const SizedBox(height: 6),
-              _costRow("Labour", naira.format(_quote!.labourCharge)),
-              if (_quote!.transportCharge > 0) ...[
+              if (q.otherCharges > 0) ...[
                 const SizedBox(height: 6),
-                _costRow("Transport", naira.format(_quote!.transportCharge)),
-              ],
-              if (_quote!.otherCharges > 0) ...[
-                const SizedBox(height: 6),
-                _costRow("Other", naira.format(_quote!.otherCharges)),
+                _costRow("Other Charges", naira.format(q.otherCharges)),
               ],
               const Divider(height: 18),
               _costRow(
-                "Total Paid",
-                naira.format(_quote!.totalAmount),
+                "Total Quotation Amount",
+                naira.format(q.totalAmount),
                 bold: true,
               ),
-            ],
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD1FAE5),
-                borderRadius: BorderRadius.circular(10),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Clipboard.setData(
+                          ClipboardData(text: copyLines.join("\n")),
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Quotation copied to clipboard."),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.copy_rounded, size: 16),
+                      label: const Text("Copy Quote", maxLines: 1),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text("Close", maxLines: 1),
+                    ),
+                  ),
+                ],
               ),
-              child: const Text(
-                "Status: Paid (Confirmed by FlowGuard)",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF065F46),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showOfficialReceipt(NumberFormat naira) {
+    final isPaid =
+        _paymentStatus == "verified" || _paymentStatus == "confirmed";
+    if (!isPaid) return;
+    final q = _quote;
+    final receiptCopy = <String>[
+      "FLOWGUARD PLUMBING — OFFICIAL RECEIPT",
+      "Ticket: #${_request.ticketNumber}",
+      "Customer: ${_request.customerName} (${_request.customerPhone})",
+      if (_request.addressInKano.isNotEmpty) "Address: ${_request.addressInKano}",
+      if (_request.assignedTechnician != null &&
+          _request.assignedTechnician!.isNotEmpty)
+        "Technician: ${_request.assignedTechnician}",
+      "Status: Paid (Confirmed by FlowGuard)",
+      "---",
+      if (q != null) ...[
+        if (q.items.isNotEmpty)
+          ...q.items.map(
+            (it) =>
+                "${it.name} (${it.quantity} x ${naira.format(it.unitPrice)}) = ${naira.format(it.amount)}",
+          )
+        else
+          "Materials = ${naira.format(q.materialsCost)}",
+        "Labour = ${naira.format(q.labourCharge)}",
+        if (q.transportCharge > 0)
+          "Transport = ${naira.format(q.transportCharge)}",
+        if (q.otherCharges > 0) "Other = ${naira.format(q.otherCharges)}",
+        "---",
+        "Total Paid: ${naira.format(q.totalAmount)}",
+      ],
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      ClipOval(
+                        child: Image.asset(
+                          "assets/images/flowguard-icon.jpg",
+                          width: 34,
+                          height: 34,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        "FlowGuard Plumbing",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        "OFFICIAL RECEIPT",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.mutedText,
+                        ),
+                      ),
+                      Text(
+                        "#${_request.ticketNumber}",
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: FlowGuardTheme.navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const Divider(height: 22),
+              Text(
+                "${_request.customerName} • ${_request.customerPhone}",
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: FlowGuardTheme.navy,
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(
-                "Close",
-                maxLines: 1,
-                softWrap: false,
+              if (_request.addressInKano.isNotEmpty)
+                Text(
+                  _request.addressInKano,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: FlowGuardTheme.mutedText,
+                  ),
+                ),
+              if (_request.assignedTechnician != null &&
+                  _request.assignedTechnician!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    "Technician: ${_request.assignedTechnician}",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: FlowGuardTheme.mutedText,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              if (q != null) ...[
+                if (q.items.isNotEmpty) ...[
+                  for (final item in q.items) ...[
+                    _costRow(
+                      "${item.name} (${item.quantity} × ${naira.format(item.unitPrice)})",
+                      naira.format(item.amount),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                ] else ...[
+                  _costRow("Materials", naira.format(q.materialsCost)),
+                  const SizedBox(height: 6),
+                ],
+                _costRow("Labour", naira.format(q.labourCharge)),
+                if (q.transportCharge > 0) ...[
+                  const SizedBox(height: 6),
+                  _costRow("Transport", naira.format(q.transportCharge)),
+                ],
+                if (q.otherCharges > 0) ...[
+                  const SizedBox(height: 6),
+                  _costRow("Other", naira.format(q.otherCharges)),
+                ],
+                const Divider(height: 18),
+                _costRow(
+                  "Total Paid",
+                  naira.format(q.totalAmount),
+                  bold: true,
+                ),
+              ],
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD1FAE5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text(
+                  "Status: Paid (Confirmed by FlowGuard)",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF065F46),
+                  ),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Clipboard.setData(
+                          ClipboardData(text: receiptCopy.join("\n")),
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Receipt copied — ready to print or share."),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.print_outlined, size: 16),
+                      label: const Text("Copy / Print", maxLines: 1),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text(
+                        "Close",
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

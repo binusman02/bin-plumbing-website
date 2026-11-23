@@ -48,7 +48,7 @@ class _ZiatAssistantSheetState extends State<ZiatAssistantSheet> {
   static final List<ZiatChatTurn> _sessionTurns = [
     const ZiatChatTurn(role: "assistant", content: _greeting),
   ];
-  static bool _voiceRepliesEnabled = true;
+  static bool _voiceRepliesEnabled = false;
 
   final TextEditingController _inputCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();

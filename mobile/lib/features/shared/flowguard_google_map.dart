@@ -5,8 +5,10 @@ import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:geolocator/geolocator.dart" as geo;
+import "package:http/http.dart" as http;
 import "package:latlong2/latlong.dart";
 import "package:mapbox_maps_flutter/mapbox_maps_flutter.dart";
+import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
 
 class FlowGuardGoogleMap extends StatefulWidget {
@@ -65,6 +67,12 @@ class FlowGuardGoogleMap extends StatefulWidget {
 class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
   static const String _routeSourceId = "flowguard-route-source";
   static const String _routeLayerId = "flowguard-route-layer";
+  static String _runtimeMapboxToken = "";
+
+  String get _effectiveToken {
+    final compileToken = FlowGuardGoogleMap._mapboxAccessToken.trim();
+    return compileToken.isNotEmpty ? compileToken : _runtimeMapboxToken;
+  }
 
   MapboxMap? _mapboxMap;
   PointAnnotationManager? _pointManager;
@@ -83,7 +91,29 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
     super.initState();
     _is3D = widget.enable3D;
     _viewportController = ViewportController();
-    MapboxOptions.setAccessToken(FlowGuardGoogleMap._mapboxAccessToken);
+    final token = _effectiveToken;
+    if (token.isNotEmpty) {
+      MapboxOptions.setAccessToken(token);
+    } else {
+      _resolveRuntimeToken();
+    }
+  }
+
+  Future<void> _resolveRuntimeToken() async {
+    try {
+      final res = await http
+          .get(Uri.parse("${SupabaseConfig.webBaseUrl}/api/mobile/map-config"))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final token = (data is Map ? data["mapboxPublicToken"] : null)?.toString().trim() ?? "";
+        if (token.startsWith("pk.")) {
+          _runtimeMapboxToken = token;
+          MapboxOptions.setAccessToken(token);
+          if (mounted) setState(() {});
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -417,7 +447,7 @@ class _FlowGuardGoogleMapState extends State<FlowGuardGoogleMap> {
 
   @override
   Widget build(BuildContext context) {
-    final missingToken = FlowGuardGoogleMap._mapboxAccessToken.trim().isEmpty;
+    final missingToken = _effectiveToken.isEmpty;
 
     final mapWidget = MapWidget(
       key: const ValueKey("flowguard-mapbox-widget"),
