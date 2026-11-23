@@ -1,14 +1,23 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Loader2, Send, X } from "lucide-react";
+import { Check, Copy, Loader2, RotateCcw, Send, X } from "lucide-react";
 
 interface AiTurn {
   role: "user" | "assistant";
   content: string;
 }
+
+const STORAGE_KEY = "flowguard-ziat-admin-chat-v1";
+const INITIAL_TURNS: AiTurn[] = [
+  {
+    role: "assistant",
+    content:
+      "Hello Admin! I'm Ziat. Ask me for a daily briefing, plumber assignment recommendations, customer/plumber reply drafts, or live revenue & commission stats.",
+  },
+];
 
 const QUICK_PROMPTS = [
   { label: "Daily Briefing", prompt: "Give me a daily operations briefing of what needs my attention right now." },
@@ -23,13 +32,61 @@ export function AdminAiCopilot() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
-  const [turns, setTurns] = useState<AiTurn[]>([
-    {
-      role: "assistant",
-      content:
-        "Hello Admin! I'm Ziat. Ask me for a daily briefing, plumber assignment recommendations, customer/plumber reply drafts, or live revenue & commission stats.",
-    },
-  ]);
+  const [turns, setTurns] = useState<AiTurn[]>(INITIAL_TURNS);
+  const hydratedRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          Array.isArray(parsed) &&
+          parsed.length > 0 &&
+          parsed.every(
+            (item) =>
+              item &&
+              (item.role === "user" || item.role === "assistant") &&
+              typeof item.content === "string"
+          )
+        ) {
+          setTurns(parsed);
+        }
+      }
+    } catch {
+      // Ignore storage read errors
+    } finally {
+      hydratedRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(turns.slice(-50)));
+    } catch {
+      // Ignore storage write errors
+    }
+  }, [turns]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [turns, loading, open]);
+
+  const clearChat = () => {
+    setTurns(INITIAL_TURNS);
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+  };
 
   const askAdminAi = async (textOverride?: string) => {
     const text = (textOverride ?? input).trim();
@@ -98,14 +155,28 @@ export function AdminAiCopilot() {
             <p className="text-[10px] text-slate-300">Live Dispatch, Analysis &amp; Actions</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
-          aria-label="Close Admin AI"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          {turns.length > 1 && (
+            <button
+              type="button"
+              onClick={clearChat}
+              disabled={loading}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20 disabled:opacity-40"
+              aria-label="Clear chat history"
+              title="New chat"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
+            aria-label="Close Admin AI"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-1.5 overflow-x-auto border-b border-slate-100 bg-slate-50 px-3 py-2">
@@ -122,7 +193,7 @@ export function AdminAiCopilot() {
         ))}
       </div>
 
-      <div className="flex-1 space-y-2.5 overflow-y-auto p-3">
+      <div ref={scrollContainerRef} className="flex-1 space-y-2.5 overflow-y-auto p-3">
         {turns.map((t, idx) => (
           <div
             key={idx}

@@ -1,13 +1,22 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
-import { Loader2, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, RotateCcw, Send, X } from "lucide-react";
 
 interface AiTurn {
   role: "user" | "assistant";
   content: string;
 }
+
+const STORAGE_KEY = "flowguard-ziat-customer-chat-v1";
+const INITIAL_TURNS: AiTurn[] = [
+  {
+    role: "assistant",
+    content:
+      "Hi! I'm Ziat, your FlowGuard assistant. Ask me about our plumbing services in Kano, emergency leak steps, or how to book a technician.",
+  },
+];
 
 export function FlowGuardAiAssistant({
   onBookRequest,
@@ -17,13 +26,61 @@ export function FlowGuardAiAssistant({
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [turns, setTurns] = useState<AiTurn[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi! I'm Ziat, your FlowGuard assistant. Ask me about our plumbing services in Kano, emergency leak steps, or how to book a technician.",
-    },
-  ]);
+  const [turns, setTurns] = useState<AiTurn[]>(INITIAL_TURNS);
+  const hydratedRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          Array.isArray(parsed) &&
+          parsed.length > 0 &&
+          parsed.every(
+            (item) =>
+              item &&
+              (item.role === "user" || item.role === "assistant") &&
+              typeof item.content === "string"
+          )
+        ) {
+          setTurns(parsed);
+        }
+      }
+    } catch {
+      // Ignore storage read errors
+    } finally {
+      hydratedRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(turns.slice(-50)));
+    } catch {
+      // Ignore storage write errors
+    }
+  }, [turns]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [turns, loading, open]);
+
+  const clearChat = () => {
+    setTurns(INITIAL_TURNS);
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+  };
 
   const sendMessage = async () => {
     const text = input.trim();
@@ -96,17 +153,31 @@ export function FlowGuardAiAssistant({
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-          aria-label="Close AI assistant"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {turns.length > 1 && (
+            <button
+              type="button"
+              onClick={clearChat}
+              disabled={loading}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
+              aria-label="Clear chat history"
+              title="New chat"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close AI assistant"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="mt-3 max-h-60 space-y-2 overflow-y-auto pr-1">
+      <div ref={scrollContainerRef} className="mt-3 max-h-60 space-y-2 overflow-y-auto pr-1">
         {turns.map((t, idx) => (
           <div
             key={idx}
