@@ -600,16 +600,16 @@ export async function generateAdminCopilotReply(params: {
     }),
 
     resolveComplaint: tool({
-      description: "Update a complaint status (under_review, resolved, closed) with a resolution note.",
+      description: "Update a complaint status (under_review, investigating, resolved) with a resolution note.",
       inputSchema: jsonSchema<{
         complaintIdOrTicket: string;
-        status: "under_review" | "resolved" | "closed";
+        status: "under_review" | "investigating" | "resolved";
         adminNote?: string;
       }>({
         type: "object",
         properties: {
           complaintIdOrTicket: { type: "string" },
-          status: { type: "string", enum: ["under_review", "resolved", "closed"] },
+          status: { type: "string", enum: ["under_review", "investigating", "resolved"] },
           adminNote: { type: "string" },
         },
         required: ["complaintIdOrTicket", "status"],
