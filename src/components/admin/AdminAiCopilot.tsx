@@ -3,7 +3,8 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Loader2, RotateCcw, Send, X } from "lucide-react";
+import { Check, Copy, RotateCcw, Send, X } from "lucide-react";
+import { ChatMessageText } from "@/components/ai/ChatMessageText";
 
 interface AiTurn {
   role: "user" | "assistant";
@@ -15,7 +16,7 @@ const INITIAL_TURNS: AiTurn[] = [
   {
     role: "assistant",
     content:
-      "Hello Admin! I'm Ziat. Ask me for a daily briefing, plumber assignment recommendations, customer/plumber reply drafts, or live revenue & commission stats.",
+      "Hey Boss, I'm Ziat. Tell me what you'd like to handle today — whether it's checking pending payments, assigning a plumber, drafting a quick update, or reviewing today's numbers.",
   },
 ];
 
@@ -195,46 +196,68 @@ export function AdminAiCopilot() {
         ))}
       </div>
 
-      <div ref={scrollContainerRef} className="flex-1 space-y-2.5 overflow-y-auto p-3">
+      <div ref={scrollContainerRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 p-3.5">
         {turns.map((t, idx) => (
           <div
             key={idx}
-            className={`flex flex-col ${t.role === "user" ? "items-end" : "items-start"}`}
+            className={`flex items-end gap-2 ${t.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                t.role === "user"
-                  ? "bg-[#0B1F3A] text-white"
-                  : "border border-slate-200 bg-slate-50 text-slate-800"
-              }`}
-            >
-              {t.content}
-            </div>
-            {t.role === "assistant" && idx > 0 && (
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(t.content);
-                    setCopiedIdx(idx);
-                    setTimeout(() => setCopiedIdx(null), 1500);
-                  } catch {}
-                }}
-                className="mt-1 inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold text-slate-500 hover:text-[#0B1F3A]"
-              >
-                {copiedIdx === idx ? (
-                  <Check className="h-3 w-3 text-emerald-600" />
-                ) : (
-                  <Copy className="h-3 w-3" />
-                )}
-                {copiedIdx === idx ? "Copied" : "Copy"}
-              </button>
+            {t.role === "assistant" && (
+              <Image
+                src="/images/ai/ziat-avatar.jpg"
+                alt="Ziat"
+                width={26}
+                height={26}
+                className="mb-0.5 h-6.5 w-6.5 shrink-0 rounded-full border border-[#F5B301]/70 object-cover shadow-xs"
+              />
             )}
+            <div className={`flex max-w-[84%] flex-col ${t.role === "user" ? "items-end" : "items-start"}`}>
+              <div
+                className={`px-3.5 py-2.5 shadow-xs ${
+                  t.role === "user"
+                    ? "rounded-2xl rounded-br-sm bg-[#0B1F3A] text-white"
+                    : "rounded-2xl rounded-bl-sm border border-slate-200/80 bg-white text-slate-800"
+                }`}
+              >
+                <ChatMessageText content={t.content} isUser={t.role === "user"} />
+              </div>
+              {t.role === "assistant" && idx > 0 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(t.content);
+                      setCopiedIdx(idx);
+                      setTimeout(() => setCopiedIdx(null), 1500);
+                    } catch {}
+                  }}
+                  className="mt-1 inline-flex items-center gap-1 whitespace-nowrap px-1 text-[10px] font-medium text-slate-400 transition hover:text-[#0B1F3A]"
+                >
+                  {copiedIdx === idx ? (
+                    <Check className="h-3 w-3 text-emerald-600" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  {copiedIdx === idx ? "Copied" : "Copy"}
+                </button>
+              )}
+            </div>
           </div>
         ))}
         {loading && (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing live operations…
+          <div className="flex items-end gap-2">
+            <Image
+              src="/images/ai/ziat-avatar.jpg"
+              alt="Ziat"
+              width={26}
+              height={26}
+              className="h-6.5 w-6.5 shrink-0 rounded-full border border-[#F5B301]/70 object-cover"
+            />
+            <div className="inline-flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs text-slate-500 shadow-xs">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0B1F3A]/50 [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0B1F3A]/50 [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0B1F3A]/50" />
+            </div>
           </div>
         )}
       </div>

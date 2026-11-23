@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, RotateCcw, Send, X } from "lucide-react";
+import { RotateCcw, Send, X } from "lucide-react";
+import { ChatMessageText } from "@/components/ai/ChatMessageText";
 
 interface AiTurn {
   role: "user" | "assistant";
@@ -14,7 +15,7 @@ const INITIAL_TURNS: AiTurn[] = [
   {
     role: "assistant",
     content:
-      "Hi! I'm Ziat, your FlowGuard assistant. Ask me about our plumbing services in Kano, emergency leak steps, or how to book a technician.",
+      "Hi there! I'm Ziat from FlowGuard. Tell me what's going on with your plumbing in Kano, and I'll help you right away or guide you on booking a technician.",
   },
 ];
 
@@ -177,26 +178,49 @@ export function FlowGuardAiAssistant({
         </div>
       </div>
 
-      <div ref={scrollContainerRef} className="mt-3 max-h-60 space-y-2 overflow-y-auto pr-1">
+      <div
+        ref={scrollContainerRef}
+        className="mt-3 max-h-64 space-y-3 overflow-y-auto rounded-xl bg-slate-50/70 p-2.5"
+      >
         {turns.map((t, idx) => (
           <div
             key={idx}
-            className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}
+            className={`flex items-end gap-2 ${t.role === "user" ? "justify-end" : "justify-start"}`}
           >
+            {t.role === "assistant" && (
+              <Image
+                src="/images/ai/ziat-avatar.jpg"
+                alt="Ziat"
+                width={24}
+                height={24}
+                className="mb-0.5 h-6 w-6 shrink-0 rounded-full border border-[#F5B301]/70 object-cover"
+              />
+            )}
             <div
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
+              className={`max-w-[84%] px-3.5 py-2.5 shadow-xs ${
                 t.role === "user"
-                  ? "bg-[#0B1F3A] text-white"
-                  : "bg-slate-100 text-slate-800"
+                  ? "rounded-2xl rounded-br-sm bg-[#0B1F3A] text-white"
+                  : "rounded-2xl rounded-bl-sm border border-slate-200/80 bg-white text-slate-800"
               }`}
             >
-              {t.content}
+              <ChatMessageText content={t.content} isUser={t.role === "user"} />
             </div>
           </div>
         ))}
         {loading && (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+          <div className="flex items-end gap-2">
+            <Image
+              src="/images/ai/ziat-avatar.jpg"
+              alt="Ziat"
+              width={24}
+              height={24}
+              className="h-6 w-6 shrink-0 rounded-full border border-[#F5B301]/70 object-cover"
+            />
+            <div className="inline-flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-slate-200/80 bg-white px-3.5 py-2.5 shadow-xs">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0B1F3A]/50 [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0B1F3A]/50 [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0B1F3A]/50" />
+            </div>
           </div>
         )}
       </div>
