@@ -27,7 +27,6 @@ import {
   X,
 } from "lucide-react";
 import { LiveMap, type LiveMapMarker } from "@/components/map/LiveMap";
-import { FlowGuardAiAssistant } from "@/components/ai/FlowGuardAiAssistant";
 import { pushUrlIfChanged } from "@/lib/history";
 import { WhatsAppChatWorkspace } from "@/components/chat/WhatsAppChatWorkspace";
 import { uploadChatFile } from "@/components/chat/ChatAttachment";
@@ -1021,10 +1020,6 @@ export default function CustomerPortalClient({
                   </>
                 )}
               </div>
-            </div>
-
-            <div className="mb-3">
-              <FlowGuardAiAssistant onBookRequest={() => setShowNewRequestModal(true)} />
             </div>
 
             {activeMapRequest && (() => {

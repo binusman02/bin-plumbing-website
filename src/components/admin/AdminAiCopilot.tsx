@@ -14,12 +14,12 @@ interface AiTurn {
   audioDataUrl?: string;
 }
 
-const STORAGE_KEY = "flowguard-ziat-admin-chat-v1";
+const STORAGE_KEY = "flowguard-ops-manager-chat-v1";
 const INITIAL_TURNS: AiTurn[] = [
   {
     role: "assistant",
     content:
-      "Hey Boss, I'm Ziat. Tell me what you'd like to handle today — whether it's checking pending payments, assigning a plumber, drafting a quick update, or reviewing today's numbers.",
+      "Hello, I'm your FlowGuard AI Operations Manager. Tell me what you'd like to review or prepare today — any mutating action I propose will wait for your explicit approval.",
   },
 ];
 
