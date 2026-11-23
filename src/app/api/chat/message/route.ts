@@ -128,12 +128,18 @@ export async function POST(request: Request) {
     }
 
     let aiReply = null;
-    if (actor.role === "customer" && !isInternal && message.length > 0) {
+    const isAudioAttachment = Boolean(
+      body?.attachment?.url &&
+        (String(body?.attachment?.mimeType || "").startsWith("audio/") ||
+          /\.(webm|ogg|mp3|wav|m4a|mp4|aac)$/i.test(String(body?.attachment?.name || "")))
+    );
+    if (actor.role === "customer" && !isInternal && (message.length > 0 || isAudioAttachment)) {
       aiReply = await maybeAutoReplyToTicketMessage({
         requestId: ctx.requestId,
         ticketNumber: ctx.ticketNumber,
         customerId: ctx.customerId,
         customerMessage: message,
+        attachment: body?.attachment || null,
       }).catch(() => null);
     }
 

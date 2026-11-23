@@ -1,5 +1,10 @@
-import { generateText, jsonSchema, stepCountIs, tool } from "ai";
+import { generateText, jsonSchema, type ModelMessage, stepCountIs, tool } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import {
+  downloadChatUploadAudio,
+  synthesizeZiatSpeech,
+  uploadZiatVoiceNote,
+} from "@/lib/ai-voice";
 import {
   getMarketplaceSettings,
   postJobMessage,
@@ -44,6 +49,7 @@ async function buildSystemPrompt(ticket?: TicketAiContext | null): Promise<strin
     "- Sound like a warm, capable human colleague — natural, clear, and conversational (2–4 short sentences).",
     "- Skip robotic AI openers like 'Certainly!', 'I'd be happy to help!', 'As an AI', or 'Here is a summary:'.",
     "- Never output raw Markdown formatting like **bold**, ### headings, * bullets, or `backticks`. Write plain, natural prose.",
+    "- Languages: Customers may type or send voice notes in English, Hausa, or Nigerian Pidgin. Understand their exact problem and reply naturally in the same language they used (Hausa if they spoke/wrote Hausa, Pidgin if Pidgin, English if English).",
     `Services offered: ${categories || "Pipe installation & repairs, leak detection, drainage, borehole/pump & water tank systems, sanitaryware"}.`,
     `Coverage areas: ${areas || "Kano metropolitan areas"}.`,
     `Operating hours: ${hours}.`,
@@ -84,11 +90,16 @@ function buildFallbackReply(userText: string, ticket?: TicketAiContext | null): 
   return "Hello! I'm Ziat, your FlowGuard AI Assistant. Ask me about our plumbing services in Kano, emergency leak steps, or tap New Request to book a verified technician.";
 }
 
-export async function generateSupportReply(params: {
-  messages: AiChatTurn[];
-  ticketContext?: TicketAiContext | null;
-}): Promise<{ text: string; model: string; fallback: boolean; reason?: string }> {
-  const cleanMessages = params.messages
+export interface AiAudioInput {
+  data: Buffer;
+  mimeType: string;
+}
+
+function buildModelMessages(
+  turns: AiChatTurn[],
+  audio?: AiAudioInput | null
+): ModelMessage[] {
+  const base: ModelMessage[] = turns
     .filter((m) => m.content && m.content.trim().length > 0)
     .slice(-10)
     .map((m) => ({
@@ -96,7 +107,35 @@ export async function generateSupportReply(params: {
       content: m.content.trim().slice(0, 1500),
     }));
 
-  const lastUser = [...cleanMessages].reverse().find((m) => m.role === "user")?.content || "";
+  if (!audio) return base;
+
+  const promptText =
+    base.length > 0 && base[base.length - 1].role === "user"
+      ? String(base[base.length - 1].content)
+      : "Please listen to this voice note (it may be in Hausa, English, or Pidgin), understand the full message, and respond naturally in the same language.";
+
+  const audioTurn: ModelMessage = {
+    role: "user",
+    content: [
+      { type: "text", text: promptText },
+      { type: "file", data: audio.data, mediaType: audio.mimeType },
+    ],
+  };
+
+  if (base.length > 0 && base[base.length - 1].role === "user") {
+    return [...base.slice(0, -1), audioTurn];
+  }
+  return [...base, audioTurn];
+}
+
+export async function generateSupportReply(params: {
+  messages: AiChatTurn[];
+  ticketContext?: TicketAiContext | null;
+  audio?: AiAudioInput | null;
+}): Promise<{ text: string; model: string; fallback: boolean; reason?: string }> {
+  const modelMessages = buildModelMessages(params.messages, params.audio);
+  const lastUser =
+    [...params.messages].reverse().find((m) => m.role === "user")?.content?.trim() || "";
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
 
   if (!apiKey) {
@@ -121,7 +160,7 @@ export async function generateSupportReply(params: {
     const result = await generateText({
       model: googleProvider(modelId),
       system,
-      messages: cleanMessages,
+      messages: modelMessages,
       maxOutputTokens: 1200,
       abortSignal: AbortSignal.timeout(12000),
     });
@@ -196,9 +235,20 @@ export async function maybeAutoReplyToTicketMessage(params: {
   ticketNumber: string;
   customerId: string | null;
   customerMessage: string;
+  attachment?: {
+    url?: string;
+    name?: string;
+    size?: number;
+    mimeType?: string;
+  } | null;
 }) {
   const cleanMsg = params.customerMessage.trim();
-  if (!cleanMsg) return null;
+  const isAudioAttachment = Boolean(
+    params.attachment?.url &&
+      (params.attachment?.mimeType?.startsWith("audio/") ||
+        /\.(webm|ogg|mp3|wav|m4a|mp4|aac)$/i.test(params.attachment?.name || ""))
+  );
+  if (!cleanMsg && !isAudioAttachment) return null;
 
   try {
     const supabase = getServiceSupabase();
@@ -243,8 +293,28 @@ export async function maybeAutoReplyToTicketMessage(params: {
       }))
       .filter((r) => r.message.trim().length > 0);
 
+    const audioInput =
+      isAudioAttachment && params.attachment?.url
+        ? await downloadChatUploadAudio(
+            params.attachment.url,
+            params.attachment.mimeType
+          )
+        : null;
+
+    if (!cleanMsg && !audioInput) {
+      return null;
+    }
+
     const { text } = await generateSupportReply({
-      messages: [{ role: "user", content: cleanMsg }],
+      messages: [
+        {
+          role: "user",
+          content:
+            cleanMsg ||
+            "Listen to this customer voice note (it may be in Hausa, English, or Nigerian Pidgin). Understand their plumbing issue or request and reply warmly and clearly in the same language they spoke.",
+        },
+      ],
+      audio: audioInput,
       ticketContext: {
         ticketNumber: params.ticketNumber,
         status: reqRow?.status ? String(reqRow.status) : undefined,
@@ -253,6 +323,18 @@ export async function maybeAutoReplyToTicketMessage(params: {
         recentMessages: orderedRecent,
       },
     });
+
+    // If customer sent a voice note, Ziat replies with a synthesized voice note too
+    let replyAttachment:
+      | { url: string; name: string; size: number; mimeType: string }
+      | undefined;
+    if (audioInput) {
+      const speech = await synthesizeZiatSpeech(text);
+      if (speech) {
+        const uploaded = await uploadZiatVoiceNote(speech.wavBuffer, params.ticketNumber);
+        if (uploaded) replyAttachment = uploaded;
+      }
+    }
 
     const aiMsg = await postJobMessage({
       requestId: params.requestId,
@@ -269,6 +351,7 @@ export async function maybeAutoReplyToTicketMessage(params: {
         },
       ],
       message: text,
+      ...(replyAttachment ? { attachment: replyAttachment } : {}),
       isInternal: false,
     });
 
@@ -282,16 +365,11 @@ export async function maybeAutoReplyToTicketMessage(params: {
 export async function generateAdminCopilotReply(params: {
   messages: AiChatTurn[];
   adminActor?: string;
+  audio?: AiAudioInput | null;
 }): Promise<{ text: string; model: string; fallback: boolean; actionsTaken: string[] }> {
   const actorLabel = params.adminActor || "Admin AI";
   const actionsTaken: string[] = [];
-  const cleanMessages = params.messages
-    .filter((m) => m.content && m.content.trim().length > 0)
-    .slice(-10)
-    .map((m) => ({
-      role: m.role,
-      content: m.content.trim().slice(0, 1500),
-    }));
+  const modelMessages = buildModelMessages(params.messages, params.audio);
 
   const supabase = getServiceSupabase();
   const [reqRes, plumberRes, payRes, compRes, msgRes] = await Promise.all([
@@ -402,6 +480,7 @@ export async function generateAdminCopilotReply(params: {
     "- Write like a sharp, reliable human operations manager talking directly to the boss — natural, warm, concise, and clear.",
     "- Never use robotic AI filler ('Certainly!', 'I have analyzed the data', 'Here is a breakdown:', 'Let me know if you need anything else').",
     "- Never output raw Markdown syntax such as **bold**, ### headings, * bullets, or `backticks`. Write clean, natural sentences; if listing multiple items, use simple lines with '• ' and plain readable text.",
+    "- Languages: Admin or customers may speak/write in English, Hausa, or Nigerian Pidgin. Understand voice notes and text in all three and reply naturally in the same language used.",
     "",
     "ALWAYS ANALYZE BEFORE EXECUTING:",
     "- Before assigning a plumber, updating a ticket, verifying a payment, or replying to a customer, first call your read/analysis tools (inspectTicket, findBestPlumbersForArea, inspectFinancialSummary) to verify exact facts, history, quotes, payments, and workload.",
@@ -448,7 +527,7 @@ export async function generateAdminCopilotReply(params: {
             .order("created_at", { ascending: false }),
           supabase
             .from("messages")
-            .select("sender_name, sender_role, message, is_internal, created_at")
+            .select("sender_name, sender_role, message, attachment_url, attachment_name, attachment_type, is_internal, created_at")
             .eq("ticket_number", clean)
             .order("created_at", { ascending: false })
             .limit(8),
@@ -814,7 +893,7 @@ export async function generateAdminCopilotReply(params: {
       const result = await generateText({
         model: googleProvider(modelId),
         system: systemPrompt,
-        messages: cleanMessages,
+        messages: modelMessages,
         tools: adminTools,
         stopWhen: stepCountIs(5),
         maxOutputTokens: 1400,

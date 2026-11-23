@@ -2,12 +2,14 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Send, X } from "lucide-react";
+import { Mic, Pause, Play, RotateCcw, Send, Square, Volume2, VolumeX, X } from "lucide-react";
 import { ChatMessageText } from "@/components/ai/ChatMessageText";
+import { useZiatVoice } from "@/components/ai/useZiatVoice";
 
 interface AiTurn {
   role: "user" | "assistant";
   content: string;
+  audioDataUrl?: string;
 }
 
 const STORAGE_KEY = "flowguard-ziat-customer-chat-v1";
@@ -30,6 +32,17 @@ export function FlowGuardAiAssistant({
   const [turns, setTurns] = useState<AiTurn[]>(INITIAL_TURNS);
   const hydratedRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const {
+    recording,
+    recordSeconds,
+    playingIdx,
+    voiceRepliesEnabled,
+    micError,
+    toggleVoiceReplies,
+    startRecording,
+    stopRecording,
+    playAudio,
+  } = useZiatVoice("flowguard-ziat-customer-voice-v1");
 
   useEffect(() => {
     try {
@@ -59,7 +72,10 @@ export function FlowGuardAiAssistant({
   useEffect(() => {
     if (!hydratedRef.current) return;
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(turns.slice(-50)));
+      const compact = turns
+        .slice(-50)
+        .map((t) => ({ role: t.role, content: t.content }));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
     } catch {
       // Ignore storage write errors
     }
@@ -83,25 +99,46 @@ export function FlowGuardAiAssistant({
     }
   };
 
-  const sendMessage = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
+  const sendMessage = async (
+    voicePayload?: { audioBase64: string; audioMimeType: string; durationSec: number }
+  ) => {
+    const text = voicePayload
+      ? `Voice note (${voicePayload.durationSec}s)`
+      : input.trim();
+    if ((!text && !voicePayload) || loading) return;
     const nextTurns: AiTurn[] = [...turns, { role: "user", content: text }];
     setTurns(nextTurns);
-    setInput("");
+    if (!voicePayload) setInput("");
     setLoading(true);
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextTurns }),
+        body: JSON.stringify({
+          messages: nextTurns.map((t) => ({ role: t.role, content: t.content })),
+          ...(voicePayload
+            ? {
+                audioBase64: voicePayload.audioBase64,
+                audioMimeType: voicePayload.audioMimeType,
+              }
+            : {}),
+          wantVoiceReply: voiceRepliesEnabled || Boolean(voicePayload),
+        }),
       });
       const data = await res.json();
       const reply =
         typeof data?.reply === "string" && data.reply.trim()
           ? data.reply.trim()
           : data?.error || "Unable to reach FlowGuard AI right now.";
-      setTurns([...nextTurns, { role: "assistant", content: reply }]);
+      const audioDataUrl =
+        typeof data?.audioDataUrl === "string" && data.audioDataUrl.startsWith("data:audio/")
+          ? data.audioDataUrl
+          : undefined;
+      const updated = [...nextTurns, { role: "assistant" as const, content: reply, audioDataUrl }];
+      setTurns(updated);
+      if (audioDataUrl && (voiceRepliesEnabled || Boolean(voicePayload))) {
+        playAudio(audioDataUrl, updated.length - 1);
+      }
     } catch {
       setTurns([
         ...nextTurns,
@@ -155,6 +192,19 @@ export function FlowGuardAiAssistant({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={toggleVoiceReplies}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-[#0B1F3A]"
+            aria-label={voiceRepliesEnabled ? "Mute Ziat voice replies" : "Enable Ziat voice replies"}
+            title={voiceRepliesEnabled ? "Voice replies on" : "Voice replies off"}
+          >
+            {voiceRepliesEnabled ? (
+              <Volume2 className="h-4 w-4 text-[#0B1F3A]" />
+            ) : (
+              <VolumeX className="h-4 w-4 text-slate-400" />
+            )}
+          </button>
           {turns.length > 1 && (
             <button
               type="button"
@@ -196,14 +246,30 @@ export function FlowGuardAiAssistant({
                 className="mb-0.5 h-6 w-6 shrink-0 rounded-full border border-[#F5B301]/70 object-cover"
               />
             )}
-            <div
-              className={`max-w-[84%] px-3.5 py-2.5 shadow-xs ${
-                t.role === "user"
-                  ? "rounded-2xl rounded-br-sm bg-[#0B1F3A] text-white"
-                  : "rounded-2xl rounded-bl-sm border border-slate-200/80 bg-white text-slate-800"
-              }`}
-            >
-              <ChatMessageText content={t.content} isUser={t.role === "user"} />
+            <div className={`flex max-w-[84%] flex-col ${t.role === "user" ? "items-end" : "items-start"}`}>
+              <div
+                className={`px-3.5 py-2.5 shadow-xs ${
+                  t.role === "user"
+                    ? "rounded-2xl rounded-br-sm bg-[#0B1F3A] text-white"
+                    : "rounded-2xl rounded-bl-sm border border-slate-200/80 bg-white text-slate-800"
+                }`}
+              >
+                <ChatMessageText content={t.content} isUser={t.role === "user"} />
+              </div>
+              {t.role === "assistant" && t.audioDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => playAudio(t.audioDataUrl!, idx)}
+                  className="mt-1 inline-flex items-center gap-1 whitespace-nowrap px-1 text-[10px] font-semibold text-[#0B1F3A] transition hover:text-[#F5B301]"
+                >
+                  {playingIdx === idx ? (
+                    <Pause className="h-3 w-3" />
+                  ) : (
+                    <Play className="h-3 w-3" />
+                  )}
+                  {playingIdx === idx ? "Pause" : "Listen"}
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -225,29 +291,66 @@ export function FlowGuardAiAssistant({
         )}
       </div>
 
+      {micError && (
+        <p className="mt-2 rounded-lg bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-600">
+          {micError}
+        </p>
+      )}
       <div className="mt-3 flex items-center gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
-          placeholder="Ask about leaks, services, or areas..."
-          className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
-        />
-        <button
-          type="button"
-          onClick={sendMessage}
-          disabled={loading || !input.trim()}
-          className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#0B1F3A]/90 disabled:opacity-40"
-          aria-label="Ask AI"
-        >
-          <Send className="h-4 w-4" />
-        </button>
+        {recording ? (
+          <div className="flex h-10 flex-1 items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700">
+            <span className="inline-flex items-center gap-2">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-rose-600" />
+              Recording… 0:{String(recordSeconds).padStart(2, "0")}
+            </span>
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-700"
+            >
+              <Square className="h-3 w-3 fill-current" /> Send
+            </button>
+          </div>
+        ) : (
+          <>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Ask in English, Hausa, or Pidgin..."
+              className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-900 focus:border-[#0B1F3A] focus:bg-white focus:outline-none"
+            />
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() =>
+                startRecording((audioBase64, audioMimeType, durationSec) => {
+                  sendMessage({ audioBase64, audioMimeType, durationSec });
+                })
+              }
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-[#0B1F3A] hover:bg-slate-100 disabled:opacity-40"
+              aria-label="Send voice note to Ziat"
+              title="Speak to Ziat"
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => sendMessage()}
+              disabled={loading || !input.trim()}
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#0B1F3A]/90 disabled:opacity-40"
+              aria-label="Ask AI"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </>
+        )}
       </div>
 
       {onBookRequest && (

@@ -764,12 +764,22 @@ export async function postCommunicationMessageAction(params: {
     });
 
     let aiReply = null;
-    if (actor.role === "customer" && !isInternal && params.message.trim().length > 0) {
+    const isAudioAttachment = Boolean(
+      params.attachment?.url &&
+        (String(params.attachment?.mimeType || "").startsWith("audio/") ||
+          /\.(webm|ogg|mp3|wav|m4a|mp4|aac)$/i.test(String(params.attachment?.name || "")))
+    );
+    if (
+      actor.role === "customer" &&
+      !isInternal &&
+      (params.message.trim().length > 0 || isAudioAttachment)
+    ) {
       aiReply = await maybeAutoReplyToTicketMessage({
         requestId: ticketCtx.requestId,
         ticketNumber: ticketCtx.ticketNumber,
         customerId: ticketCtx.customerId,
         customerMessage: params.message.trim(),
+        attachment: params.attachment || null,
       }).catch(() => null);
     }
 
