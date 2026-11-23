@@ -43,12 +43,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const res = await generateAdminCopilotReply({ messages: turns });
+    const res = await generateAdminCopilotReply({
+      messages: turns,
+      adminActor: actor.email || actor.name || "Admin",
+    });
     return NextResponse.json({
       success: true,
       reply: res.text,
       model: res.model,
       fallback: res.fallback,
+      actionsTaken: res.actionsTaken,
     });
   } catch (err) {
     return NextResponse.json(

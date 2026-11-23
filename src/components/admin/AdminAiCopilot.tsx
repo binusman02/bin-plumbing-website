@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bot, Check, Copy, Loader2, Send, Sparkles, X } from "lucide-react";
 
 interface AiTurn {
@@ -16,6 +17,7 @@ const QUICK_PROMPTS = [
 ];
 
 export function AdminAiCopilot() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,6 +49,9 @@ export function AdminAiCopilot() {
           ? data.reply.trim()
           : data?.error || "Admin AI unavailable right now.";
       setTurns([...nextTurns, { role: "assistant", content: reply }]);
+      if (Array.isArray(data?.actionsTaken) && data.actionsTaken.length > 0) {
+        router.refresh();
+      }
     } catch {
       setTurns([
         ...nextTurns,

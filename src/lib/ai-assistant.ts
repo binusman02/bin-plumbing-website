@@ -1,6 +1,15 @@
-import { generateText } from "ai";
+import { generateText, jsonSchema, stepCountIs, tool } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { getMarketplaceSettings, postJobMessage } from "@/lib/marketplace";
+import {
+  getMarketplaceSettings,
+  postJobMessage,
+  type RequestStatus,
+  updateComplaintStatus,
+  updateMarketplaceSettings,
+  updatePlumberVerification,
+  updateServiceRequest,
+  verifyPaymentById,
+} from "@/lib/marketplace";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export interface AiChatTurn {
@@ -267,7 +276,10 @@ export async function maybeAutoReplyToTicketMessage(params: {
 
 export async function generateAdminCopilotReply(params: {
   messages: AiChatTurn[];
-}): Promise<{ text: string; model: string; fallback: boolean }> {
+  adminActor?: string;
+}): Promise<{ text: string; model: string; fallback: boolean; actionsTaken: string[] }> {
+  const actorLabel = params.adminActor || "Admin AI";
+  const actionsTaken: string[] = [];
   const cleanMessages = params.messages
     .filter((m) => m.content && m.content.trim().length > 0)
     .slice(-10)
@@ -381,12 +393,15 @@ export async function generateAdminCopilotReply(params: {
 
   const systemPrompt = [
     "You are FlowGuard Admin AI Copilot for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
-    "Help the Operations Admin with:",
-    "1. Daily Operations Briefing (prioritize unassigned urgent jobs, pending payment verifications, open complaints, unread messages).",
-    "2. Smart Plumber Assignment (recommend the best On-Duty approved plumber based on Kano area match, lowest active job load, and rating).",
-    "3. Drafting crisp, polite customer or plumber replies (for complaints, payment confirmations, or ticket updates).",
-    "4. Financial & Commission Q&A using ONLY the live numbers in the snapshot below.",
-    "Be concise, structured with short bullets, and strictly factual — never invent tickets, plumbers, or Naira figures not in the snapshot.",
+    "You can both advise AND execute real administrative actions using your tools:",
+    "1. Daily Operations Briefing (unassigned jobs, pending payment verifications, open complaints, unread messages).",
+    "2. Smart Plumber Assignment (recommend or assign an On-Duty approved plumber using assignPlumberToTicket).",
+    "3. Ticket Updates & Messaging (updateTicketStatus, sendTicketMessage).",
+    "4. Payment Verification, Plumber Approval, Complaints & Commission Settings (verifyPayment, updatePlumberStatus, resolveComplaint, updateCommissionSettings).",
+    "Safety rules:",
+    "- Only execute destructive or financial actions (verifyPayment, updatePlumberStatus, updateCommissionSettings, cancelling tickets) when the Admin explicitly asks you to do so; otherwise recommend first.",
+    "- Never invent tickets, plumbers, or Naira figures not in the snapshot.",
+    "- After calling a tool, clearly state what action succeeded or failed.",
     "",
     snapshotLines.join("\n"),
   ].join("\n");
@@ -397,8 +412,266 @@ export async function generateAdminCopilotReply(params: {
       text: `Operations Summary: ${unassignedReqs.length} unassigned jobs, ${pendingPayments.length} pending payments, ${openComplaints.length} open complaints, ${unreadMsgs.length} unread messages, ${availablePlumbers.length} plumbers On Duty.`,
       model: "fallback-rule",
       fallback: true,
+      actionsTaken,
     };
   }
+
+  const adminTools = {
+    assignPlumberToTicket: tool({
+      description: "Assign an approved plumber (by name or ID) to a service request ticket.",
+      inputSchema: jsonSchema<{ ticketNumber: string; plumberNameOrId: string }>({
+        type: "object",
+        properties: {
+          ticketNumber: { type: "string", description: "Ticket number e.g. BP-261122-1234" },
+          plumberNameOrId: { type: "string", description: "Plumber full name or ID" },
+        },
+        required: ["ticketNumber", "plumberNameOrId"],
+      }),
+      execute: async ({ ticketNumber, plumberNameOrId }) => {
+        const needle = plumberNameOrId.trim().toLowerCase();
+        const match = approvedPlumbers.find(
+          (p) =>
+            String(p.id).toLowerCase() === needle ||
+            String(p.full_name || "").toLowerCase().includes(needle)
+        );
+        if (!match) {
+          return { ok: false, error: `No approved plumber matching "${plumberNameOrId}" found.` };
+        }
+        const updated = await updateServiceRequest(
+          ticketNumber.trim(),
+          {
+            assigned_plumber_id: String(match.id),
+            assigned_technician: String(match.full_name),
+            status: "scheduled",
+          },
+          {
+            actor: actorLabel,
+            action: "Assigned Technician",
+            details: `Assigned ${match.full_name} via Admin AI`,
+          }
+        );
+        if (!updated) return { ok: false, error: `Ticket ${ticketNumber} not found.` };
+        actionsTaken.push(`Assigned ${match.full_name} to ${updated.ticket_number}`);
+        return { ok: true, ticketNumber: updated.ticket_number, plumber: match.full_name, status: updated.status };
+      },
+    }),
+
+    updateTicketStatus: tool({
+      description: "Update the status or internal notes of a service request ticket.",
+      inputSchema: jsonSchema<{ ticketNumber: string; status: string; internalNote?: string }>({
+        type: "object",
+        properties: {
+          ticketNumber: { type: "string" },
+          status: {
+            type: "string",
+            enum: [
+              "new",
+              "contacted",
+              "scheduled",
+              "inspection_required",
+              "in_progress",
+              "work_completed",
+              "awaiting_final_payment",
+              "completed",
+              "cancelled",
+            ],
+          },
+          internalNote: { type: "string" },
+        },
+        required: ["ticketNumber", "status"],
+      }),
+      execute: async ({ ticketNumber, status, internalNote }) => {
+        const updated = await updateServiceRequest(
+          ticketNumber.trim(),
+          {
+            status: status as RequestStatus,
+            ...(internalNote ? { internal_notes: internalNote } : {}),
+          },
+          {
+            actor: actorLabel,
+            action: `Status updated to ${status}`,
+            details: internalNote || "Updated via Admin AI",
+          }
+        );
+        if (!updated) return { ok: false, error: `Ticket ${ticketNumber} not found.` };
+        actionsTaken.push(`Updated ${updated.ticket_number} to ${status}`);
+        return { ok: true, ticketNumber: updated.ticket_number, status: updated.status };
+      },
+    }),
+
+    sendTicketMessage: tool({
+      description: "Send a chat message on a ticket to the customer or plumber (or internal team note).",
+      inputSchema: jsonSchema<{
+        ticketNumber: string;
+        recipientRole: "customer" | "plumber";
+        message: string;
+        isInternal?: boolean;
+      }>({
+        type: "object",
+        properties: {
+          ticketNumber: { type: "string" },
+          recipientRole: { type: "string", enum: ["customer", "plumber"] },
+          message: { type: "string" },
+          isInternal: { type: "boolean" },
+        },
+        required: ["ticketNumber", "recipientRole", "message"],
+      }),
+      execute: async ({ ticketNumber, recipientRole, message, isInternal }) => {
+        const cleanTicket = ticketNumber.trim();
+        const { data: reqRow } = await supabase
+          .from("service_requests")
+          .select("id, customer_id, assigned_plumber_id")
+          .eq("ticket_number", cleanTicket)
+          .maybeSingle();
+        if (!reqRow) return { ok: false, error: `Ticket ${cleanTicket} not found.` };
+        const recId =
+          recipientRole === "customer"
+            ? (reqRow.customer_id ? String(reqRow.customer_id) : null)
+            : (reqRow.assigned_plumber_id ? String(reqRow.assigned_plumber_id) : null);
+        await postJobMessage({
+          requestId: String(reqRow.id),
+          ticketNumber: cleanTicket,
+          senderRole: "admin",
+          senderName: "FlowGuard Admin",
+          recipientRole,
+          recipientId: recId,
+          message: message.trim(),
+          isInternal: Boolean(isInternal),
+        });
+        actionsTaken.push(`Sent message on ${cleanTicket} to ${recipientRole}`);
+        return { ok: true, ticketNumber: cleanTicket, recipientRole };
+      },
+    }),
+
+    verifyPayment: tool({
+      description: "Verify (confirm) or reject a pending payment by ticketNumber.",
+      inputSchema: jsonSchema<{ ticketNumber: string; decision: "verified" | "rejected" }>({
+        type: "object",
+        properties: {
+          ticketNumber: { type: "string" },
+          decision: { type: "string", enum: ["verified", "rejected"] },
+        },
+        required: ["ticketNumber", "decision"],
+      }),
+      execute: async ({ ticketNumber, decision }) => {
+        const { data: payRows } = await supabase
+          .from("payments")
+          .select("id, verification_status")
+          .eq("ticket_number", ticketNumber.trim())
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const pay = payRows?.[0];
+        if (!pay) return { ok: false, error: `No payment record found for ${ticketNumber}.` };
+        const ok = await verifyPaymentById(String(pay.id), decision, actorLabel);
+        if (!ok) return { ok: false, error: "Could not update payment status." };
+        actionsTaken.push(`Marked payment for ${ticketNumber} as ${decision}`);
+        return { ok: true, ticketNumber, decision };
+      },
+    }),
+
+    updatePlumberStatus: tool({
+      description: "Approve, reject, or suspend a plumber by name or ID.",
+      inputSchema: jsonSchema<{
+        plumberNameOrId: string;
+        status: "approved" | "rejected" | "suspended";
+        notes?: string;
+      }>({
+        type: "object",
+        properties: {
+          plumberNameOrId: { type: "string" },
+          status: { type: "string", enum: ["approved", "rejected", "suspended"] },
+          notes: { type: "string" },
+        },
+        required: ["plumberNameOrId", "status"],
+      }),
+      execute: async ({ plumberNameOrId, status, notes }) => {
+        const needle = plumberNameOrId.trim().toLowerCase();
+        const match = plumbers.find(
+          (p) =>
+            String(p.id).toLowerCase() === needle ||
+            String(p.full_name || "").toLowerCase().includes(needle)
+        );
+        if (!match) return { ok: false, error: `No plumber matching "${plumberNameOrId}" found.` };
+        const ok = await updatePlumberVerification(String(match.id), status, notes);
+        if (!ok) return { ok: false, error: "Could not update plumber verification." };
+        actionsTaken.push(`Set plumber ${match.full_name} status to ${status}`);
+        return { ok: true, plumber: match.full_name, status };
+      },
+    }),
+
+    resolveComplaint: tool({
+      description: "Update a complaint status (under_review, resolved, closed) with a resolution note.",
+      inputSchema: jsonSchema<{
+        complaintIdOrTicket: string;
+        status: "under_review" | "resolved" | "closed";
+        adminNote?: string;
+      }>({
+        type: "object",
+        properties: {
+          complaintIdOrTicket: { type: "string" },
+          status: { type: "string", enum: ["under_review", "resolved", "closed"] },
+          adminNote: { type: "string" },
+        },
+        required: ["complaintIdOrTicket", "status"],
+      }),
+      execute: async ({ complaintIdOrTicket, status, adminNote }) => {
+        const clean = complaintIdOrTicket.trim();
+        const match = complaints.find(
+          (c) => String(c.id) === clean || String(c.ticket_number || "") === clean
+        );
+        if (!match) return { ok: false, error: `Complaint "${clean}" not found.` };
+        const ok = await updateComplaintStatus(String(match.id), status, adminNote, actorLabel);
+        if (!ok) return { ok: false, error: "Could not update complaint." };
+        actionsTaken.push(`Updated complaint ${match.ticket_number || match.id} to ${status}`);
+        return { ok: true, id: match.id, status };
+      },
+    }),
+
+    updateCommissionSettings: tool({
+      description: "Update global commission rates or small-job threshold in marketplace settings.",
+      inputSchema: jsonSchema<{
+        commissionDefaultRate?: number;
+        commissionSmallJobRate?: number;
+        smallJobThreshold?: number;
+        smallJobRuleEnabled?: boolean;
+      }>({
+        type: "object",
+        properties: {
+          commissionDefaultRate: { type: "number" },
+          commissionSmallJobRate: { type: "number" },
+          smallJobThreshold: { type: "number" },
+          smallJobRuleEnabled: { type: "boolean" },
+        },
+      }),
+      execute: async (input) => {
+        const next = await updateMarketplaceSettings(
+          {
+            ...(input.commissionDefaultRate !== undefined
+              ? { commission_default_rate: input.commissionDefaultRate }
+              : {}),
+            ...(input.commissionSmallJobRate !== undefined
+              ? { commission_small_job_rate: input.commissionSmallJobRate }
+              : {}),
+            ...(input.smallJobThreshold !== undefined
+              ? { small_job_threshold: input.smallJobThreshold }
+              : {}),
+            ...(input.smallJobRuleEnabled !== undefined
+              ? { small_job_rule_enabled: input.smallJobRuleEnabled }
+              : {}),
+          },
+          actorLabel
+        );
+        actionsTaken.push("Updated marketplace commission settings");
+        return {
+          ok: true,
+          commission_default_rate: next.commission_default_rate,
+          commission_small_job_rate: next.commission_small_job_rate,
+          small_job_threshold: next.small_job_threshold,
+          small_job_rule_enabled: next.small_job_rule_enabled,
+        };
+      },
+    }),
+  };
 
   const googleProvider = createGoogleGenerativeAI({ apiKey });
   for (const modelId of ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]) {
@@ -407,11 +680,13 @@ export async function generateAdminCopilotReply(params: {
         model: googleProvider(modelId),
         system: systemPrompt,
         messages: cleanMessages,
+        tools: adminTools,
+        stopWhen: stepCountIs(5),
         maxOutputTokens: 1400,
-        abortSignal: AbortSignal.timeout(14000),
+        abortSignal: AbortSignal.timeout(20000),
       });
       const text = result.text?.trim();
-      if (text) return { text, model: modelId, fallback: false };
+      if (text) return { text, model: modelId, fallback: false, actionsTaken };
     } catch (err) {
       console.error("[ai-admin] failed:", err instanceof Error ? err.message : "error");
     }
@@ -421,5 +696,6 @@ export async function generateAdminCopilotReply(params: {
     text: `Operations Summary: ${unassignedReqs.length} unassigned jobs, ${pendingPayments.length} pending payments, ${openComplaints.length} open complaints, ${unreadMsgs.length} unread messages, ${availablePlumbers.length} plumbers On Duty.`,
     model: "fallback-error",
     fallback: true,
+    actionsTaken,
   };
 }
