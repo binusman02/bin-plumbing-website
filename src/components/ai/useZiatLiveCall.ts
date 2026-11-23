@@ -10,8 +10,13 @@ interface UtterancePayload {
   durationSec: number;
 }
 
+export interface LiveCallReply {
+  audioDataUrl?: string;
+  replyText?: string;
+}
+
 export function useZiatLiveCall(
-  onUtterance: (payload: UtterancePayload) => Promise<string | undefined>
+  onUtterance: (payload: UtterancePayload) => Promise<LiveCallReply>
 ) {
   const [callState, setCallState] = useState<LiveCallState>("idle");
   const [callSeconds, setCallSeconds] = useState(0);
@@ -46,6 +51,11 @@ export function useZiatLiveCall(
       audioElRef.current.onerror = null;
       audioElRef.current.pause();
       audioElRef.current = null;
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
   }, []);
 
@@ -113,6 +123,11 @@ export function useZiatLiveCall(
     const startedAt = Date.now();
     let hasSpoken = false;
     let lastSpeechAt = 0;
+    let consecutiveSpeechFrames = 0;
+    let totalSpeechFrames = 0;
+    let noiseSamples = 0;
+    let noiseSum = 0;
+    let noiseFloor = 0.015;
 
     setStateSync("listening");
 
@@ -128,8 +143,8 @@ export function useZiatLiveCall(
       const blob = new Blob(chunksRef.current, { type: finalMime });
       const durationSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
 
-      if (!hasSpoken || blob.size < 600) {
-        // Nothing spoken; re-arm listening quietly
+      // Ignore background bumps/clicks or short noise bursts
+      if (!hasSpoken || totalSpeechFrames < 4 || blob.size < 900) {
         startListeningTurnRef.current();
         return;
       }
@@ -152,7 +167,7 @@ export function useZiatLiveCall(
         return;
       }
 
-      const audioDataUrl = await onUtteranceRef.current({
+      const { audioDataUrl, replyText } = await onUtteranceRef.current({
         audioBase64: base64,
         audioMimeType: finalMime,
         durationSec,
@@ -160,17 +175,40 @@ export function useZiatLiveCall(
 
       if (!activeRef.current) return;
 
+      const resumeAfterSpeak = () => {
+        audioElRef.current = null;
+        if (activeRef.current) startListeningTurnRef.current();
+      };
+
       if (audioDataUrl) {
         setStateSync("speaking");
         const audio = new Audio(audioDataUrl);
         audioElRef.current = audio;
-        const resumeAfterSpeak = () => {
-          audioElRef.current = null;
-          if (activeRef.current) startListeningTurnRef.current();
-        };
         audio.onended = resumeAfterSpeak;
         audio.onerror = resumeAfterSpeak;
         audio.play().catch(resumeAfterSpeak);
+      } else if (
+        replyText &&
+        typeof window !== "undefined" &&
+        "speechSynthesis" in window
+      ) {
+        // Browser speech fallback so Ziat never goes silent if cloud TTS fails
+        setStateSync("speaking");
+        try {
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(replyText);
+          const voices = window.speechSynthesis.getVoices();
+          const femaleVoice = voices.find((v) =>
+            /female|samantha|victoria|karen|zira|google.*uk|google.*us/i.test(v.name)
+          );
+          if (femaleVoice) utter.voice = femaleVoice;
+          utter.rate = 1.03;
+          utter.onend = resumeAfterSpeak;
+          utter.onerror = resumeAfterSpeak;
+          window.speechSynthesis.speak(utter);
+        } catch {
+          resumeAfterSpeak();
+        }
       } else {
         startListeningTurnRef.current();
       }
@@ -179,7 +217,7 @@ export function useZiatLiveCall(
     recorderRef.current = recorder;
     recorder.start(250);
 
-    // Silence detection loop via AnalyserNode
+    // Silence & noise-floor adaptive detection loop via AnalyserNode
     stopVadLoop();
     const analyser = analyserRef.current;
     if (analyser) {
@@ -195,17 +233,31 @@ export function useZiatLiveCall(
         const rms = Math.sqrt(sumSq / dataArray.length);
         setVoiceLevel(Math.min(1, rms * 6));
 
+        // Calibrate ambient room noise over the first ~350ms before speech
+        if (!hasSpoken && noiseSamples < 5) {
+          noiseSum += rms;
+          noiseSamples += 1;
+          noiseFloor = noiseSum / noiseSamples;
+        }
+
+        const speechThreshold = Math.max(0.045, noiseFloor * 2.3);
         const now = Date.now();
-        if (rms > 0.03) {
-          hasSpoken = true;
-          lastSpeechAt = now;
+        if (rms > speechThreshold) {
+          consecutiveSpeechFrames += 1;
+          totalSpeechFrames += 1;
+          if (consecutiveSpeechFrames >= 3) {
+            hasSpoken = true;
+            lastSpeechAt = now;
+          }
+        } else {
+          consecutiveSpeechFrames = 0;
         }
 
         const elapsed = now - startedAt;
         const silenceMs = hasSpoken ? now - lastSpeechAt : 0;
 
-        // Auto-send after ~1.25s of silence once speech started, or cap turn at 25s
-        if ((hasSpoken && silenceMs >= 1250) || (hasSpoken && elapsed >= 25000)) {
+        // Faster turn-around (~850ms silence after sustained speech), or cap at 25s
+        if ((hasSpoken && silenceMs >= 850) || (hasSpoken && elapsed >= 25000)) {
           if (recorder.state !== "inactive") {
             recorder.stop();
           }

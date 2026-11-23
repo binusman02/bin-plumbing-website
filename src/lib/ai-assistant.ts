@@ -366,13 +366,14 @@ export async function generateAdminCopilotReply(params: {
   messages: AiChatTurn[];
   adminActor?: string;
   audio?: AiAudioInput | null;
+  liveCall?: boolean;
 }): Promise<{ text: string; model: string; fallback: boolean; actionsTaken: string[] }> {
   const actorLabel = params.adminActor || "Admin AI";
   const actionsTaken: string[] = [];
   const modelMessages = buildModelMessages(params.messages, params.audio);
 
   const supabase = getServiceSupabase();
-  const [reqRes, plumberRes, payRes, compRes, msgRes] = await Promise.all([
+  const [reqRes, plumberRes, payRes, compRes, msgRes, quoteRes, enqRes] = await Promise.all([
     supabase
       .from("service_requests")
       .select(
@@ -380,7 +381,7 @@ export async function generateAdminCopilotReply(params: {
       )
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
-      .limit(40),
+      .limit(50),
     supabase
       .from("plumbers")
       .select(
@@ -401,9 +402,21 @@ export async function generateAdminCopilotReply(params: {
       .limit(20),
     supabase
       .from("messages")
-      .select("id, ticket_number, sender_role, admin_read")
+      .select("id, ticket_number, sender_name, sender_role, message, admin_read, created_at")
       .eq("admin_read", false)
-      .limit(50),
+      .order("created_at", { ascending: false })
+      .limit(30),
+    supabase
+      .from("quotations")
+      .select("ticket_number, total_amount, customer_approval_status, created_at")
+      .eq("customer_approval_status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("enquiries")
+      .select("id, full_name, service_category, area_in_kano, status, created_at")
+      .order("created_at", { ascending: false })
+      .limit(20),
   ]);
 
   const reqs = reqRes.data || [];
@@ -411,6 +424,8 @@ export async function generateAdminCopilotReply(params: {
   const payments = payRes.data || [];
   const complaints = compRes.data || [];
   const unreadMsgs = msgRes.data || [];
+  const pendingQuotes = quoteRes.data || [];
+  const enquiries = enqRes.data || [];
 
   const unassignedReqs = reqs.filter(
     (r) => !r.assigned_plumber_id && !["completed", "cancelled"].includes(String(r.status || ""))
@@ -444,14 +459,26 @@ export async function generateAdminCopilotReply(params: {
     `LIVE OPERATIONS SNAPSHOT (${new Date().toISOString()}):`,
     `- Active requests: ${activeReqs.length} (${unassignedReqs.length} unassigned)`,
     `- Plumbers: ${approvedPlumbers.length} approved (${availablePlumbers.length} currently On Duty / Available), ${pendingPlumbers.length} pending verification`,
+    `- Pending quotations awaiting customer approval: ${pendingQuotes.length}`,
     `- Payments (recent 50): ${pendingPayments.length} pending verification, ${verifiedPayments.length} verified (Revenue: ₦${totalVerifiedRevenue.toLocaleString()}, Commission: ₦${totalVerifiedCommission.toLocaleString()})`,
     `- Open complaints: ${openComplaints.length}`,
     `- Unread customer/plumber messages: ${unreadMsgs.length}`,
+    `- Recent direct enquiries: ${enquiries.length}`,
     "",
-    "UNASSIGNED / RECENT ACTIVE TICKETS:",
-    ...activeReqs.slice(0, 12).map(
+    "NEWEST / ACTIVE TICKETS (most recent first):",
+    ...activeReqs.slice(0, 15).map(
       (r) =>
-        `  • ${r.ticket_number} [${r.status}${r.urgency === "urgent" ? ", URGENT" : ""}] ${r.problem_category || "Plumbing"} @ ${r.city_lga || r.address_in_kano || "Kano"} | Customer: ${r.customer_name || "N/A"} | Plumber: ${r.assigned_technician || "UNASSIGNED"}`
+        `  • ${r.ticket_number} [${r.status}${r.urgency === "urgent" ? ", URGENT" : ""}] ${r.problem_category || "Plumbing"} @ ${r.city_lga || r.address_in_kano || "Kano"} | Customer: ${r.customer_name || "N/A"} | Plumber: ${r.assigned_technician || "UNASSIGNED"} | Created: ${r.created_at}`
+    ),
+    "",
+    "UNREAD MESSAGES:",
+    ...unreadMsgs.slice(0, 8).map(
+      (m) => `  • ${m.ticket_number} from ${m.sender_name || m.sender_role}: ${(m.message || "Voice note/attachment").slice(0, 80)}`
+    ),
+    "",
+    "PENDING PLUMBERS:",
+    ...pendingPlumbers.slice(0, 6).map(
+      (p) => `  • ${p.full_name} [${p.verification_status}] | Areas: ${Array.isArray(p.preferred_locations) ? p.preferred_locations.join(", ") : p.residential_location || "Kano"}`
     ),
     "",
     "APPROVED PLUMBERS:",
@@ -481,10 +508,17 @@ export async function generateAdminCopilotReply(params: {
     "- Never use robotic AI filler ('Certainly!', 'I have analyzed the data', 'Here is a breakdown:', 'Let me know if you need anything else').",
     "- Never output raw Markdown syntax such as **bold**, ### headings, * bullets, or `backticks`. Write clean, natural sentences; if listing multiple items, use simple lines with '• ' and plain readable text.",
     "- Languages: Admin or customers may speak/write in English, Hausa, or Nigerian Pidgin. Understand voice notes and text in all three and reply naturally in the same language used.",
+    ...(params.liveCall
+      ? [
+          "LIVE VOICE CALL MODE:",
+          "- You are on a live voice call with the Boss right now. Respond in 1 to 3 short, natural spoken sentences — warm, conversational, and fast to listen to. Avoid bullet lists or long readouts unless asked.",
+        ]
+      : []),
     "",
-    "ALWAYS ANALYZE BEFORE EXECUTING:",
-    "- Before assigning a plumber, updating a ticket, verifying a payment, or replying to a customer, first call your read/analysis tools (inspectTicket, findBestPlumbersForArea, inspectFinancialSummary) to verify exact facts, history, quotes, payments, and workload.",
-    "- Share your quick check naturally in plain language (what you saw and why it's safe or recommended).",
+    "FULL ACCESS & LIVE TRUTH:",
+    "- You have FULL live read and action access to FlowGuard's database (all service requests/tickets, enquiries, plumbers, quotations, payments, complaints, messages, and settings). NEVER claim you do not have access to tickets, enquiries, or live records.",
+    "- ALWAYS trust the latest LIVE OPERATIONS SNAPSHOT and your tools over earlier messages in chat history — new tickets and payments arrive in real time.",
+    "- Before assigning a plumber, updating a ticket, verifying a payment, or replying to a customer, first call your read/analysis tools (inspectTicket, findBestPlumbersForArea, inspectFinancialSummary, getLiveOperationsFeed) to verify exact facts.",
     "- For financial, approval, cancellation, or irreversible actions (verifyPayment, updatePlumberStatus, updateCommissionSettings, cancelling tickets), only execute when the Admin explicitly instructs you to execute — otherwise share what you found and ask if you should go ahead.",
     "- Never invent tickets, plumbers, or Naira figures not returned by the snapshot or tools.",
     "",
@@ -502,6 +536,49 @@ export async function generateAdminCopilotReply(params: {
   }
 
   const adminTools = {
+    getLiveOperationsFeed: tool({
+      description:
+        "Fetch the latest live tickets, unassigned jobs, pending payments, pending quotations, unread messages, and direct enquiries directly from the database right now.",
+      inputSchema: jsonSchema<Record<string, never>>({
+        type: "object",
+        properties: {},
+      }),
+      execute: async () => {
+        const [latestReqs, latestPays, latestUnread, latestEnqs] = await Promise.all([
+          supabase
+            .from("service_requests")
+            .select("ticket_number, status, urgency, problem_category, customer_name, city_lga, assigned_technician, created_at")
+            .is("deleted_at", null)
+            .order("created_at", { ascending: false })
+            .limit(15),
+          supabase
+            .from("payments")
+            .select("ticket_number, total_payment, verification_status, created_at")
+            .eq("verification_status", "pending")
+            .order("created_at", { ascending: false })
+            .limit(10),
+          supabase
+            .from("messages")
+            .select("ticket_number, sender_name, sender_role, message, created_at")
+            .eq("admin_read", false)
+            .order("created_at", { ascending: false })
+            .limit(10),
+          supabase
+            .from("enquiries")
+            .select("full_name, service_category, area_in_kano, status, created_at")
+            .order("created_at", { ascending: false })
+            .limit(8),
+        ]);
+        return {
+          ok: true,
+          newestTickets: latestReqs.data || [],
+          pendingPayments: latestPays.data || [],
+          unreadMessages: latestUnread.data || [],
+          recentEnquiries: latestEnqs.data || [],
+        };
+      },
+    }),
+
     inspectTicket: tool({
       description: "Analyze full details of a ticket (request info, quotations, payments, history, and recent messages) before taking action.",
       inputSchema: jsonSchema<{ ticketNumber: string }>({

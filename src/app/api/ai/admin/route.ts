@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       messages: turns,
       adminActor: actor.email || actor.name || "Admin",
       audio: hasAudio && audioBuffer ? { data: audioBuffer, mimeType: audioMimeType } : null,
+      liveCall: Boolean(body?.liveCall),
     });
     const speech = wantVoiceReply && res.text ? await synthesizeZiatSpeech(res.text) : null;
     const audioDataUrl = speech

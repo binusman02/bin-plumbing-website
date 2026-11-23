@@ -47,8 +47,9 @@ export async function synthesizeZiatSpeech(
     .slice(0, 1200);
   if (!apiKey || !cleanText) return null;
 
-  const ttsModels = ["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"];
-  for (const modelId of ttsModels) {
+  const ttsModels = ["gemini-2.5-flash-preview-tts", "gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"];
+  for (let i = 0; i < ttsModels.length; i++) {
+    const modelId = ttsModels[i];
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -68,11 +69,16 @@ export async function synthesizeZiatSpeech(
               },
             },
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(12000),
         }
       );
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        if ((res.status === 429 || res.status === 503) && i === 0) {
+          await new Promise((r) => setTimeout(r, 450));
+        }
+        continue;
+      }
       const json = (await res.json()) as {
         candidates?: Array<{
           content?: {

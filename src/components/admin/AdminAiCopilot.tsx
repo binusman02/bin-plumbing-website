@@ -117,12 +117,13 @@ export function AdminAiCopilot() {
       audioMimeType: string;
       durationSec: number;
       suppressAutoPlay?: boolean;
+      liveCall?: boolean;
     }
-  ): Promise<string | undefined> => {
+  ): Promise<{ audioDataUrl?: string; replyText?: string }> => {
     const text = voicePayload
       ? `Voice note (${voicePayload.durationSec}s)`
       : (textOverride ?? input).trim();
-    if ((!text && !voicePayload) || loading) return undefined;
+    if ((!text && !voicePayload) || loading) return {};
     const currentTurns = turnsRef.current;
     const nextTurns: AiTurn[] = [...currentTurns, { role: "user", content: text }];
     turnsRef.current = nextTurns;
@@ -139,6 +140,7 @@ export function AdminAiCopilot() {
             ? {
                 audioBase64: voicePayload.audioBase64,
                 audioMimeType: voicePayload.audioMimeType,
+                liveCall: Boolean(voicePayload.liveCall),
               }
             : {}),
           wantVoiceReply: voiceRepliesEnabled || Boolean(voicePayload),
@@ -168,7 +170,7 @@ export function AdminAiCopilot() {
         window.dispatchEvent(new Event("notifications-refresh"));
         router.refresh();
       }
-      return audioDataUrl;
+      return { audioDataUrl, replyText: reply };
     } catch {
       const errTurns = [
         ...nextTurns,
@@ -176,7 +178,7 @@ export function AdminAiCopilot() {
       ];
       turnsRef.current = errTurns;
       setTurns(errTurns);
-      return undefined;
+      return { replyText: "Connection error. Please try again." };
     } finally {
       setLoading(false);
     }
@@ -196,6 +198,7 @@ export function AdminAiCopilot() {
       audioMimeType,
       durationSec,
       suppressAutoPlay: true,
+      liveCall: true,
     });
   });
 
