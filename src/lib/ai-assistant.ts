@@ -39,7 +39,7 @@ async function buildSystemPrompt(ticket?: TicketAiContext | null): Promise<strin
   const hours = settings?.business_hours || "Mon–Sun, Emergency Dispatch Available";
 
   const lines = [
-    "You are FlowGuard AI Assistant for FlowGuard Plumbing Enterprises in Kano, Nigeria.",
+    "You are Ziat, the AI Assistant for FlowGuard Plumbing Enterprises in Kano, Nigeria.",
     "Be warm, concise (2-4 short sentences), practical, and helpful.",
     `Services offered: ${categories || "Pipe installation & repairs, leak detection, drainage, borehole/pump & water tank systems, sanitaryware"}.`,
     `Coverage areas: ${areas || "Kano metropolitan areas"}.`,
@@ -78,7 +78,7 @@ function buildFallbackReply(userText: string, ticket?: TicketAiContext | null): 
   if (ticket) {
     return `Thanks for reaching out on ${ticket.ticketNumber}. An Admin or your assigned technician will respond shortly — you can also share photos or a voice note here so we can prepare.`;
   }
-  return "Hello! I'm FlowGuard AI Assistant. Ask me about our plumbing services in Kano, emergency leak steps, or tap New Request to book a verified technician.";
+  return "Hello! I'm Ziat, your FlowGuard AI Assistant. Ask me about our plumbing services in Kano, emergency leak steps, or tap New Request to book a verified technician.";
 }
 
 export async function generateSupportReply(params: {
@@ -211,9 +211,11 @@ export async function maybeAutoReplyToTicketMessage(params: {
 
     // Pause AI if a human admin or plumber replied within the last 15 minutes.
     const recentHumanReply = rows.find((r) => {
+      const senderName = String(r.sender_name || "");
       const isHumanStaff =
         (r.sender_role === "admin" || r.sender_role === "plumber") &&
-        String(r.sender_name || "") !== "FlowGuard AI Assistant";
+        senderName !== "Ziat" &&
+        senderName !== "FlowGuard AI Assistant";
       if (!isHumanStaff) return false;
       const ts = new Date(String(r.created_at || "")).getTime();
       return Number.isFinite(ts) && now - ts < HUMAN_PAUSE_WINDOW_MS;
@@ -253,7 +255,7 @@ export async function maybeAutoReplyToTicketMessage(params: {
       requestId: params.requestId,
       ticketNumber: params.ticketNumber,
       senderRole: "admin",
-      senderName: "FlowGuard AI Assistant",
+      senderName: "Ziat",
       senderId: null,
       recipientRole: "customer",
       recipientId: params.customerId,
@@ -392,7 +394,7 @@ export async function generateAdminCopilotReply(params: {
   ];
 
   const systemPrompt = [
-    "You are FlowGuard Admin AI Copilot for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
+    "You are Ziat, the Admin AI Copilot for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
     "ALWAYS ANALYZE BEFORE EXECUTING:",
     "- Before assigning a plumber, updating a ticket, verifying a payment, or replying to a customer, first call your read/analysis tools (inspectTicket, findBestPlumbersForArea, inspectFinancialSummary) to verify exact facts, history, quotes, payments, and workload.",
     "- State your brief analysis clearly (what you checked and why it is safe/recommended).",

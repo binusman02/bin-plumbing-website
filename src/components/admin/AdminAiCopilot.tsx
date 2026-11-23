@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, Check, Copy, Loader2, Send, Sparkles, X } from "lucide-react";
+import { Check, Copy, Loader2, Send, X } from "lucide-react";
 
 interface AiTurn {
   role: "user" | "assistant";
@@ -26,7 +27,7 @@ export function AdminAiCopilot() {
     {
       role: "assistant",
       content:
-        "Hello Admin! Ask me for a daily briefing, plumber assignment recommendations, customer/plumber reply drafts, or live revenue & commission stats.",
+        "Hello Admin! I'm Ziat. Ask me for a daily briefing, plumber assignment recommendations, customer/plumber reply drafts, or live revenue & commission stats.",
     },
   ]);
 
@@ -67,10 +68,16 @@ export function AdminAiCopilot() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-20 right-4 z-40 inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-[#0B1F3A] px-4 text-xs font-bold text-white shadow-lg ring-2 ring-[#F5B301]/70 transition hover:bg-[#132f57] md:bottom-6 md:right-6"
+        className="fixed bottom-20 right-4 z-40 inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-[#0B1F3A] pl-1.5 pr-4 text-xs font-bold text-white shadow-lg ring-2 ring-[#F5B301]/80 transition hover:bg-[#132f57] md:bottom-6 md:right-6"
       >
-        <Sparkles className="h-4 w-4 shrink-0 text-[#F5B301]" />
-        Admin AI
+        <Image
+          src="/images/ai/ziat-avatar.jpg"
+          alt="Ziat"
+          width={32}
+          height={32}
+          className="h-8 w-8 shrink-0 rounded-full border border-[#F5B301] object-cover"
+        />
+        Ask Ziat
       </button>
     );
   }
@@ -79,12 +86,16 @@ export function AdminAiCopilot() {
     <div className="fixed bottom-20 right-3 z-50 flex max-h-[76vh] w-[calc(100vw-1.5rem)] max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl md:bottom-6 md:right-6">
       <div className="flex items-center justify-between bg-[#0B1F3A] px-4 py-3 text-white">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F5B301] text-[#07152B]">
-            <Bot className="h-4 w-4" />
-          </span>
+          <Image
+            src="/images/ai/ziat-avatar.jpg"
+            alt="Ziat"
+            width={36}
+            height={36}
+            className="h-9 w-9 shrink-0 rounded-full border-2 border-[#F5B301] object-cover"
+          />
           <div>
-            <p className="text-xs font-extrabold">FlowGuard Admin Copilot</p>
-            <p className="text-[10px] text-slate-300">Live Dispatch, Drafts & Financials</p>
+            <p className="text-xs font-extrabold">Ziat • Admin Copilot</p>
+            <p className="text-[10px] text-slate-300">Live Dispatch, Analysis &amp; Actions</p>
           </div>
         </div>
         <button

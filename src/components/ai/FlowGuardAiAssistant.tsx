@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
-import { Bot, Loader2, Send, Sparkles, X } from "lucide-react";
+import { Loader2, Send, X } from "lucide-react";
 
 interface AiTurn {
   role: "user" | "assistant";
@@ -20,7 +21,7 @@ export function FlowGuardAiAssistant({
     {
       role: "assistant",
       content:
-        "Hi! I'm FlowGuard AI Assistant. Ask me about our plumbing services in Kano, emergency leak steps, or how to book a technician.",
+        "Hi! I'm Ziat, your FlowGuard assistant. Ask me about our plumbing services in Kano, emergency leak steps, or how to book a technician.",
     },
   ]);
 
@@ -63,8 +64,14 @@ export function FlowGuardAiAssistant({
         onClick={() => setOpen(true)}
         className="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-[#0B1F3A]/20 bg-white px-3.5 text-xs font-bold text-[#0B1F3A] shadow-sm transition hover:bg-slate-50"
       >
-        <Sparkles className="h-4 w-4 text-[#F5B301]" />
-        Ask FlowGuard AI
+        <Image
+          src="/images/ai/ziat-avatar.jpg"
+          alt="Ziat"
+          width={24}
+          height={24}
+          className="h-6 w-6 rounded-full border border-[#F5B301] object-cover"
+        />
+        Ask Ziat
       </button>
     );
   }
@@ -73,15 +80,19 @@ export function FlowGuardAiAssistant({
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0B1F3A] text-[#F5B301]">
-            <Bot className="h-4 w-4" />
-          </span>
+          <Image
+            src="/images/ai/ziat-avatar.jpg"
+            alt="Ziat"
+            width={34}
+            height={34}
+            className="h-8.5 w-8.5 rounded-full border-2 border-[#F5B301] object-cover"
+          />
           <div>
             <p className="text-xs font-extrabold text-[#0B1F3A]">
-              FlowGuard AI Support
+              Ziat
             </p>
             <p className="text-[11px] text-slate-500">
-              Instant help • 24/7 Plumbing Triage
+              FlowGuard Assistant • 24/7 Plumbing Help
             </p>
           </div>
         </div>
