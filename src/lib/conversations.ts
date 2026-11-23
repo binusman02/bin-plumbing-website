@@ -64,6 +64,18 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
 }> {
   const supabase = getServiceSupabase();
 
+  let actorCustomerIds = [actor.id];
+  if (actor.role === "customer" && actor.authUserId) {
+    const { data: linkedCusts } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("auth_user_id", actor.authUserId)
+      .is("deleted_at", null);
+    if (linkedCusts && linkedCusts.length > 0) {
+      actorCustomerIds = Array.from(new Set([actor.id, ...linkedCusts.map((c) => String(c.id))]));
+    }
+  }
+
   const reqQuery =
     actor.role === "customer"
       ? supabase
@@ -71,7 +83,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
           .select(
             "id, ticket_number, category_slug, status, customer_id, customer_name, assigned_plumber_id, assigned_technician, created_at, updated_at, deleted_at"
           )
-          .eq("customer_id", actor.id)
+          .in("customer_id", actorCustomerIds)
           .order("updated_at", { ascending: false })
           .limit(50)
       : supabase

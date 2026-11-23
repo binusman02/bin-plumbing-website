@@ -300,14 +300,24 @@ export default function CustomerPortalClient({
 
   const myRequests = useMemo(() => {
     if (!currentCustomer) return [];
-    const norm = (s: string) => s.replace(/\D/g, "").slice(-10);
+    // Server already scopes `requests` to this customer (including linked auth_user_id rows)
+    // when a single authenticated customer profile is passed in.
+    if (customers.length <= 1) return requests;
+    const norm = (s?: string | null) => (s || "").replace(/\D/g, "").slice(-10);
     const cPhone = norm(currentCustomer.phone);
     return requests.filter((r) => {
-      if (r.customer_phone && norm(r.customer_phone) === cPhone) return true;
-      if (r.issue_description && r.issue_description.includes(currentCustomer.phone)) return true;
+      if (r.customer_id && r.customer_id === currentCustomer.id) return true;
+      if (cPhone && r.customer_phone && norm(r.customer_phone) === cPhone) return true;
+      if (
+        currentCustomer.phone &&
+        r.issue_description &&
+        r.issue_description.includes(currentCustomer.phone)
+      ) {
+        return true;
+      }
       return false;
     });
-  }, [requests, currentCustomer]);
+  }, [requests, customers.length, currentCustomer]);
 
   const myTicketSet = useMemo(
     () => new Set(myRequests.map((r) => r.ticket_number)),
