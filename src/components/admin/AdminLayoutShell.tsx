@@ -23,6 +23,7 @@ import {
   type PortalNavItem,
 } from "@/components/portal/PortalShell";
 import { logoutAdmin } from "@/app/actions/admin-auth";
+import { AdminAiCopilot } from "@/components/admin/AdminAiCopilot";
 import type { AdminNotificationItem } from "@/lib/admin-notifications";
 import { useRealtimeHub } from "@/lib/realtime-hub";
 
@@ -293,6 +294,7 @@ export function AdminLayoutShell({
       storageKey="bin_admin_rail_collapsed"
     >
       {children}
+      <AdminAiCopilot />
     </PortalShell>
   );
 }

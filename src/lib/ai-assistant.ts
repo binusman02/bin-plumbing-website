@@ -264,3 +264,162 @@ export async function maybeAutoReplyToTicketMessage(params: {
     return null;
   }
 }
+
+export async function generateAdminCopilotReply(params: {
+  messages: AiChatTurn[];
+}): Promise<{ text: string; model: string; fallback: boolean }> {
+  const cleanMessages = params.messages
+    .filter((m) => m.content && m.content.trim().length > 0)
+    .slice(-10)
+    .map((m) => ({
+      role: m.role,
+      content: m.content.trim().slice(0, 1500),
+    }));
+
+  const supabase = getServiceSupabase();
+  const [reqRes, plumberRes, payRes, compRes, msgRes] = await Promise.all([
+    supabase
+      .from("service_requests")
+      .select(
+        "ticket_number, status, urgency, problem_category, customer_name, city_lga, address_in_kano, assigned_plumber_id, assigned_technician, created_at"
+      )
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(40),
+    supabase
+      .from("plumbers")
+      .select(
+        "id, full_name, verification_status, is_available, preferred_locations, residential_location, rating, total_jobs"
+      )
+      .is("deleted_at", null),
+    supabase
+      .from("payments")
+      .select(
+        "ticket_number, total_payment, company_commission, labour_portion, materials_portion, verification_status, created_at"
+      )
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("complaints")
+      .select("id, ticket_number, subject, status, created_at")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("messages")
+      .select("id, ticket_number, sender_role, admin_read")
+      .eq("admin_read", false)
+      .limit(50),
+  ]);
+
+  const reqs = reqRes.data || [];
+  const plumbers = plumberRes.data || [];
+  const payments = payRes.data || [];
+  const complaints = compRes.data || [];
+  const unreadMsgs = msgRes.data || [];
+
+  const unassignedReqs = reqs.filter(
+    (r) => !r.assigned_plumber_id && !["completed", "cancelled"].includes(String(r.status || ""))
+  );
+  const activeReqs = reqs.filter((r) => !["completed", "cancelled"].includes(String(r.status || "")));
+  const approvedPlumbers = plumbers.filter((p) => p.verification_status === "approved");
+  const pendingPlumbers = plumbers.filter((p) => p.verification_status !== "approved");
+  const availablePlumbers = approvedPlumbers.filter((p) => p.is_available === true);
+
+  const activeCountByPlumber = new Map<string, number>();
+  for (const r of activeReqs) {
+    if (r.assigned_plumber_id) {
+      const pid = String(r.assigned_plumber_id);
+      activeCountByPlumber.set(pid, (activeCountByPlumber.get(pid) || 0) + 1);
+    }
+  }
+
+  const verifiedPayments = payments.filter((p) => p.verification_status === "verified");
+  const pendingPayments = payments.filter((p) => p.verification_status === "pending");
+  const totalVerifiedRevenue = verifiedPayments.reduce(
+    (s, p) => s + (Number(p.total_payment) || 0),
+    0
+  );
+  const totalVerifiedCommission = verifiedPayments.reduce(
+    (s, p) => s + (Number(p.company_commission) || 0),
+    0
+  );
+  const openComplaints = complaints.filter((c) => c.status !== "resolved" && c.status !== "closed");
+
+  const snapshotLines = [
+    `LIVE OPERATIONS SNAPSHOT (${new Date().toISOString()}):`,
+    `- Active requests: ${activeReqs.length} (${unassignedReqs.length} unassigned)`,
+    `- Plumbers: ${approvedPlumbers.length} approved (${availablePlumbers.length} currently On Duty / Available), ${pendingPlumbers.length} pending verification`,
+    `- Payments (recent 50): ${pendingPayments.length} pending verification, ${verifiedPayments.length} verified (Revenue: ₦${totalVerifiedRevenue.toLocaleString()}, Commission: ₦${totalVerifiedCommission.toLocaleString()})`,
+    `- Open complaints: ${openComplaints.length}`,
+    `- Unread customer/plumber messages: ${unreadMsgs.length}`,
+    "",
+    "UNASSIGNED / RECENT ACTIVE TICKETS:",
+    ...activeReqs.slice(0, 12).map(
+      (r) =>
+        `  • ${r.ticket_number} [${r.status}${r.urgency === "urgent" ? ", URGENT" : ""}] ${r.problem_category || "Plumbing"} @ ${r.city_lga || r.address_in_kano || "Kano"} | Customer: ${r.customer_name || "N/A"} | Plumber: ${r.assigned_technician || "UNASSIGNED"}`
+    ),
+    "",
+    "APPROVED PLUMBERS:",
+    ...approvedPlumbers.slice(0, 15).map((p) => {
+      const areas = Array.isArray(p.preferred_locations)
+        ? p.preferred_locations.join(", ")
+        : p.residential_location || "Kano";
+      const load = activeCountByPlumber.get(String(p.id)) || 0;
+      return `  • ${p.full_name} [${p.is_available ? "On Duty" : "Off Duty"}] | Areas: ${areas} | Active jobs: ${load} | Rating: ${p.rating ?? "N/A"} (${p.total_jobs || 0} jobs)`;
+    }),
+    "",
+    "PENDING PAYMENTS:",
+    ...pendingPayments.slice(0, 8).map(
+      (p) => `  • ${p.ticket_number}: ₦${Number(p.total_payment || 0).toLocaleString()} (Commission: ₦${Number(p.company_commission || 0).toLocaleString()})`
+    ),
+    "",
+    "OPEN COMPLAINTS:",
+    ...openComplaints.slice(0, 6).map(
+      (c) => `  • ${c.ticket_number || c.id}: ${c.subject || "Complaint"} [${c.status}]`
+    ),
+  ];
+
+  const systemPrompt = [
+    "You are FlowGuard Admin AI Copilot for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
+    "Help the Operations Admin with:",
+    "1. Daily Operations Briefing (prioritize unassigned urgent jobs, pending payment verifications, open complaints, unread messages).",
+    "2. Smart Plumber Assignment (recommend the best On-Duty approved plumber based on Kano area match, lowest active job load, and rating).",
+    "3. Drafting crisp, polite customer or plumber replies (for complaints, payment confirmations, or ticket updates).",
+    "4. Financial & Commission Q&A using ONLY the live numbers in the snapshot below.",
+    "Be concise, structured with short bullets, and strictly factual — never invent tickets, plumbers, or Naira figures not in the snapshot.",
+    "",
+    snapshotLines.join("\n"),
+  ].join("\n");
+
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+  if (!apiKey) {
+    return {
+      text: `Operations Summary: ${unassignedReqs.length} unassigned jobs, ${pendingPayments.length} pending payments, ${openComplaints.length} open complaints, ${unreadMsgs.length} unread messages, ${availablePlumbers.length} plumbers On Duty.`,
+      model: "fallback-rule",
+      fallback: true,
+    };
+  }
+
+  const googleProvider = createGoogleGenerativeAI({ apiKey });
+  for (const modelId of ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]) {
+    try {
+      const result = await generateText({
+        model: googleProvider(modelId),
+        system: systemPrompt,
+        messages: cleanMessages,
+        maxOutputTokens: 1400,
+        abortSignal: AbortSignal.timeout(14000),
+      });
+      const text = result.text?.trim();
+      if (text) return { text, model: modelId, fallback: false };
+    } catch (err) {
+      console.error("[ai-admin] failed:", err instanceof Error ? err.message : "error");
+    }
+  }
+
+  return {
+    text: `Operations Summary: ${unassignedReqs.length} unassigned jobs, ${pendingPayments.length} pending payments, ${openComplaints.length} open complaints, ${unreadMsgs.length} unread messages, ${availablePlumbers.length} plumbers On Duty.`,
+    model: "fallback-error",
+    fallback: true,
+  };
+}
