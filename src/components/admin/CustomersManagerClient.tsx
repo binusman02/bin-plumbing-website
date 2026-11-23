@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { ArrowLeft, Eye, Loader2, MapPin, MessageCircle, Pencil, Phone, Save, Search, Trash2, Users, X } from "lucide-react";
 import { adminUpdateCustomerRecordAction, deleteCustomerAction } from "@/app/actions/marketplace-actions";
 import { Avatar } from "@/components/ui";
@@ -31,6 +31,9 @@ interface CustomersManagerClientProps {
 
 export function CustomersManagerClient({ initialCustomers }: CustomersManagerClientProps) {
   const [customers, setCustomers] = useState<CustomerDirectoryEntry[]>(initialCustomers);
+  useEffect(() => {
+    setCustomers(initialCustomers);
+  }, [initialCustomers]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<CustomerDirectoryEntry | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Archive, ArrowLeft, CheckCircle2, Download, Eye, Mail, Search, Trash2, X } from "lucide-react";
 import { deleteEnquiry } from "@/app/actions/admin-management";
 import { saveEnquiryNoteAction } from "@/app/actions/marketplace-actions";
@@ -45,6 +45,12 @@ export function EnquiriesManagerClient({
 }: EnquiriesManagerClientProps) {
   const [enquiries, setEnquiries] = useState<EnquiryRow[]>(initialEnquiries);
   const [notesMap, setNotesMap] = useState<Record<string, EnquiryNoteState>>(initialNotesMap);
+  useEffect(() => {
+    setEnquiries(initialEnquiries);
+  }, [initialEnquiries]);
+  useEffect(() => {
+    setNotesMap(initialNotesMap);
+  }, [initialNotesMap]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<EnquiryRow | null>(null);

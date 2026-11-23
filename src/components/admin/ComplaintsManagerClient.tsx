@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { AlertCircle, CheckCircle2, MessageSquareWarning, Search, Star, X } from "lucide-react";
 import { ClassicSelect } from "@/components/ui/ClassicSelect";
 import type { ComplaintRecord, ReviewRecord } from "@/lib/marketplace";
@@ -24,6 +24,12 @@ const STATUS_FILTERS = [
 export function ComplaintsManagerClient({ initialComplaints, initialReviews = [] }: ComplaintsManagerClientProps) {
   const [complaints, setComplaints] = useState<ComplaintRecord[]>(initialComplaints);
   const [reviews, setReviews] = useState<ReviewRecord[]>(initialReviews);
+  useEffect(() => {
+    setComplaints(initialComplaints);
+  }, [initialComplaints]);
+  useEffect(() => {
+    setReviews(initialReviews);
+  }, [initialReviews]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<ComplaintRecord | null>(null);

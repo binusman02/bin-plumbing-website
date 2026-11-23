@@ -246,6 +246,12 @@ export function RequestsManagerClient({
   }, [vettedPlumbers]);
   const [requests, setRequests] = useState<ServiceRequestRecord[]>(initialRequests);
   const [quotations, setQuotations] = useState<StructuredQuotation[]>(initialQuotations);
+  useEffect(() => {
+    setRequests(initialRequests);
+  }, [initialRequests]);
+  useEffect(() => {
+    setQuotations(initialQuotations);
+  }, [initialQuotations]);
   const [viewMode, setViewMode] = useState<"list" | "board" | "map">("list");
   const [selectedMapRequestId, setSelectedMapRequestId] = useState<string | null>(null);
   const [focusedMapMarkerId, setFocusedMapMarkerId] = useState<string | null>(null);

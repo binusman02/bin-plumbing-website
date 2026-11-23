@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, CreditCard, Eye, ExternalLink, Loader2, Pencil, Plus, Save, Search, ShieldCheck, X, XCircle } from "lucide-react";
 import {
@@ -33,6 +33,9 @@ export default function FinancialsManagerClient({
   settings,
 }: FinancialsManagerClientProps) {
   const [payments, setPayments] = useState<PaymentRecord[]>(initialPayments);
+  useEffect(() => {
+    setPayments(initialPayments);
+  }, [initialPayments]);
   const [showModal, setShowModal] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);

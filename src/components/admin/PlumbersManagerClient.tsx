@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -71,6 +71,9 @@ export default function PlumbersManagerClient({
   const router = useRouter();
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [plumbers, setPlumbers] = useState<PlumberProfile[]>(initialPlumbers);
+  useEffect(() => {
+    setPlumbers(initialPlumbers);
+  }, [initialPlumbers]);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editEmail, setEditEmail] = useState("");

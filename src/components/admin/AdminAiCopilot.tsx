@@ -108,6 +108,8 @@ export function AdminAiCopilot() {
           : data?.error || "Admin AI unavailable right now.";
       setTurns([...nextTurns, { role: "assistant", content: reply }]);
       if (Array.isArray(data?.actionsTaken) && data.actionsTaken.length > 0) {
+        window.dispatchEvent(new Event("admin-signals-refresh"));
+        window.dispatchEvent(new Event("notifications-refresh"));
         router.refresh();
       }
     } catch {
