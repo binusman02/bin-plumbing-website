@@ -3,9 +3,10 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Mic, Pause, Play, RotateCcw, Send, Square, Volume2, VolumeX, X } from "lucide-react";
+import { Check, Copy, Mic, Pause, Phone, PhoneOff, Play, RotateCcw, Send, Square, Volume2, VolumeX, X } from "lucide-react";
 import { ChatMessageText } from "@/components/ai/ChatMessageText";
 import { useZiatVoice } from "@/components/ai/useZiatVoice";
+import { useZiatLiveCall } from "@/components/ai/useZiatLiveCall";
 
 interface AiTurn {
   role: "user" | "assistant";
@@ -38,6 +39,10 @@ export function AdminAiCopilot() {
   const [turns, setTurns] = useState<AiTurn[]>(INITIAL_TURNS);
   const hydratedRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const turnsRef = useRef<AiTurn[]>(turns);
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
   const {
     recording,
     recordSeconds,
@@ -107,13 +112,20 @@ export function AdminAiCopilot() {
 
   const askAdminAi = async (
     textOverride?: string,
-    voicePayload?: { audioBase64: string; audioMimeType: string; durationSec: number }
-  ) => {
+    voicePayload?: {
+      audioBase64: string;
+      audioMimeType: string;
+      durationSec: number;
+      suppressAutoPlay?: boolean;
+    }
+  ): Promise<string | undefined> => {
     const text = voicePayload
       ? `Voice note (${voicePayload.durationSec}s)`
       : (textOverride ?? input).trim();
-    if ((!text && !voicePayload) || loading) return;
-    const nextTurns: AiTurn[] = [...turns, { role: "user", content: text }];
+    if ((!text && !voicePayload) || loading) return undefined;
+    const currentTurns = turnsRef.current;
+    const nextTurns: AiTurn[] = [...currentTurns, { role: "user", content: text }];
+    turnsRef.current = nextTurns;
     setTurns(nextTurns);
     if (!textOverride && !voicePayload) setInput("");
     setLoading(true);
@@ -142,8 +154,13 @@ export function AdminAiCopilot() {
           ? data.audioDataUrl
           : undefined;
       const updated = [...nextTurns, { role: "assistant" as const, content: reply, audioDataUrl }];
+      turnsRef.current = updated;
       setTurns(updated);
-      if (audioDataUrl && (voiceRepliesEnabled || Boolean(voicePayload))) {
+      if (
+        audioDataUrl &&
+        !voicePayload?.suppressAutoPlay &&
+        (voiceRepliesEnabled || Boolean(voicePayload))
+      ) {
         playAudio(audioDataUrl, updated.length - 1);
       }
       if (Array.isArray(data?.actionsTaken) && data.actionsTaken.length > 0) {
@@ -151,15 +168,36 @@ export function AdminAiCopilot() {
         window.dispatchEvent(new Event("notifications-refresh"));
         router.refresh();
       }
+      return audioDataUrl;
     } catch {
-      setTurns([
+      const errTurns = [
         ...nextTurns,
-        { role: "assistant", content: "Connection error. Please try again." },
-      ]);
+        { role: "assistant" as const, content: "Connection error. Please try again." },
+      ];
+      turnsRef.current = errTurns;
+      setTurns(errTurns);
+      return undefined;
     } finally {
       setLoading(false);
     }
   };
+
+  const {
+    callState,
+    callSeconds,
+    voiceLevel,
+    callError,
+    startCall,
+    endCall,
+    interruptAndListen,
+  } = useZiatLiveCall(async ({ audioBase64, audioMimeType, durationSec }) => {
+    return askAdminAi(undefined, {
+      audioBase64,
+      audioMimeType,
+      durationSec,
+      suppressAutoPlay: true,
+    });
+  });
 
   if (!open) {
     return (
@@ -199,6 +237,30 @@ export function AdminAiCopilot() {
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            onClick={() => (callState === "idle" ? startCall() : endCall())}
+            disabled={loading && callState === "idle"}
+            className={`flex h-8 items-center gap-1 rounded-lg px-2 text-[11px] font-bold transition ${
+              callState === "idle"
+                ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                : "bg-rose-500 text-white hover:bg-rose-600"
+            }`}
+            aria-label={callState === "idle" ? "Start live voice call with Ziat" : "End live call"}
+            title={callState === "idle" ? "Live Call with Ziat" : "End Call"}
+          >
+            {callState === "idle" ? (
+              <>
+                <Phone className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Live</span>
+              </>
+            ) : (
+              <>
+                <PhoneOff className="h-3.5 w-3.5" />
+                <span>End</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={toggleVoiceReplies}
             className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
             aria-label={voiceRepliesEnabled ? "Mute Ziat voice replies" : "Enable Ziat voice replies"}
@@ -224,7 +286,10 @@ export function AdminAiCopilot() {
           )}
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              if (callState !== "idle") endCall();
+              setOpen(false);
+            }}
             className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
             aria-label="Close Admin AI"
           >
@@ -232,6 +297,63 @@ export function AdminAiCopilot() {
           </button>
         </div>
       </div>
+
+      {callState !== "idle" && (
+        <div className="flex items-center justify-between gap-2 border-b border-emerald-200 bg-emerald-50/90 px-3.5 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex items-center justify-center">
+              <span
+                className="absolute inset-0 rounded-full bg-emerald-400/40 transition-transform duration-100"
+                style={{
+                  transform: `scale(${
+                    callState === "listening"
+                      ? 1 + voiceLevel * 0.45
+                      : callState === "speaking"
+                        ? 1.25
+                        : 1.05
+                  })`,
+                }}
+              />
+              <Image
+                src="/images/ai/ziat-avatar.jpg"
+                alt="Ziat Live"
+                width={32}
+                height={32}
+                className="relative h-8 w-8 rounded-full border-2 border-emerald-500 object-cover"
+              />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-emerald-950">
+                {callState === "listening" && "Listening… speak naturally"}
+                {callState === "thinking" && "Ziat is checking & thinking…"}
+                {callState === "speaking" && "Ziat is speaking…"}
+              </p>
+              <p className="text-[10px] font-medium text-emerald-700">
+                Live Call • {String(Math.floor(callSeconds / 60)).padStart(2, "0")}:
+                {String(callSeconds % 60).padStart(2, "0")}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {(callState === "speaking" || callState === "listening") && (
+              <button
+                type="button"
+                onClick={interruptAndListen}
+                className="rounded-lg bg-white px-2.5 py-1 text-[10px] font-bold text-[#0B1F3A] shadow-xs ring-1 ring-slate-200 hover:bg-slate-50"
+              >
+                {callState === "speaking" ? "Interrupt" : "Send now"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={endCall}
+              className="rounded-lg bg-rose-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-rose-700"
+            >
+              End
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-1.5 overflow-x-auto border-b border-slate-100 bg-slate-50 px-3 py-2">
         {QUICK_PROMPTS.map((q) => (
@@ -329,9 +451,9 @@ export function AdminAiCopilot() {
         )}
       </div>
 
-      {micError && (
+      {(micError || callError) && (
         <p className="border-t border-rose-100 bg-rose-50 px-3 py-1 text-[11px] font-medium text-rose-600">
-          {micError}
+          {callError || micError}
         </p>
       )}
       <div className="flex items-center gap-2 border-t border-slate-200 bg-white p-2.5">
