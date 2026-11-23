@@ -152,4 +152,14 @@ test("AI Workforce Stage 2 — Free-First Model Policy & Orchestration", async (
     const cancelled = await orchestrator.cancelTask(queued.id);
     assert.equal(cancelled?.status, "cancelled");
   });
+
+  await t.test("7. Agreed model routes assign MiMo V2.6 Flash and Recursive Flint per agent", async () => {
+    const { listAgentDefinitions } = await import("../src/lib/ai-workforce/registry");
+    const byId = Object.fromEntries(listAgentDefinitions().map((a) => [a.id, a]));
+    assert.equal(byId.operations_manager.modelRoute, "mimo-v2-6-flash-free");
+    assert.equal(byId.sales_ai.modelRoute, "mimo-v2-6-flash-free");
+    assert.equal(byId.customer_support_ai.modelRoute, "mimo-v2-6-flash-free");
+    assert.equal(byId.research_ai.modelRoute, "mimo-v2-6-flash-free");
+    assert.equal(byId.engineering_ai.modelRoute, "flint-recursive-eval");
+  });
 });

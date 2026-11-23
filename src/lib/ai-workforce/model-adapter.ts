@@ -35,22 +35,22 @@ export const DEFAULT_MODEL_ROUTES: Record<string, ModelRouteConfig> = {
   "mimo-v2-6-flash-free": {
     routeId: "mimo-v2-6-flash-free",
     provider: "openai_compatible",
-    modelId: "mimo-v2.6-flash",
+    modelId: process.env.MIMO_MODEL_ID?.trim() || "mimo-v2.6-flash",
     billingTier: "free",
     envKeyName: "MIMO_FREE_API_KEY",
     baseUrl: process.env.MIMO_API_BASE_URL?.trim() || "",
     dataTermsVerified: false,
-    notes: "Candidate free model route; requires verified free-tier endpoint & data terms.",
+    notes: "Xiaomi MiMo V2.6 Flash (free-first): set MIMO_FREE_API_KEY & MIMO_API_BASE_URL after verifying free tier and data terms.",
   },
   "flint-recursive-eval": {
     routeId: "flint-recursive-eval",
     provider: "openai_compatible",
-    modelId: "flint-recursive",
+    modelId: process.env.FLINT_MODEL_ID?.trim() || "flint-recursive",
     billingTier: "free",
     envKeyName: "FLINT_API_KEY",
     baseUrl: process.env.FLINT_API_BASE_URL?.trim() || "",
     dataTermsVerified: false,
-    notes: "Sanitised evaluation only until hosted data retention terms are verified.",
+    notes: "Recursive Flint (sanitised eval only): set FLINT_API_KEY & FLINT_API_BASE_URL after verifying hosted data retention terms.",
   },
 };
 
