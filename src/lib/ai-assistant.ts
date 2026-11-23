@@ -393,15 +393,11 @@ export async function generateAdminCopilotReply(params: {
 
   const systemPrompt = [
     "You are FlowGuard Admin AI Copilot for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
-    "You can both advise AND execute real administrative actions using your tools:",
-    "1. Daily Operations Briefing (unassigned jobs, pending payment verifications, open complaints, unread messages).",
-    "2. Smart Plumber Assignment (recommend or assign an On-Duty approved plumber using assignPlumberToTicket).",
-    "3. Ticket Updates & Messaging (updateTicketStatus, sendTicketMessage).",
-    "4. Payment Verification, Plumber Approval, Complaints & Commission Settings (verifyPayment, updatePlumberStatus, resolveComplaint, updateCommissionSettings).",
-    "Safety rules:",
-    "- Only execute destructive or financial actions (verifyPayment, updatePlumberStatus, updateCommissionSettings, cancelling tickets) when the Admin explicitly asks you to do so; otherwise recommend first.",
-    "- Never invent tickets, plumbers, or Naira figures not in the snapshot.",
-    "- After calling a tool, clearly state what action succeeded or failed.",
+    "ALWAYS ANALYZE BEFORE EXECUTING:",
+    "- Before assigning a plumber, updating a ticket, verifying a payment, or replying to a customer, first call your read/analysis tools (inspectTicket, findBestPlumbersForArea, inspectFinancialSummary) to verify exact facts, history, quotes, payments, and workload.",
+    "- State your brief analysis clearly (what you checked and why it is safe/recommended).",
+    "- For financial, approval, cancellation, or irreversible actions (verifyPayment, updatePlumberStatus, updateCommissionSettings, cancelling tickets), only execute when the Admin explicitly instructs you to execute — otherwise present your analysis and ask for confirmation.",
+    "- Never invent tickets, plumbers, or Naira figures not returned by the snapshot or tools.",
     "",
     snapshotLines.join("\n"),
   ].join("\n");
@@ -417,6 +413,135 @@ export async function generateAdminCopilotReply(params: {
   }
 
   const adminTools = {
+    inspectTicket: tool({
+      description: "Analyze full details of a ticket (request info, quotations, payments, history, and recent messages) before taking action.",
+      inputSchema: jsonSchema<{ ticketNumber: string }>({
+        type: "object",
+        properties: {
+          ticketNumber: { type: "string", description: "Ticket number e.g. BP-261122-1234" },
+        },
+        required: ["ticketNumber"],
+      }),
+      execute: async ({ ticketNumber }) => {
+        const clean = ticketNumber.trim();
+        const [{ data: req }, { data: quotes }, { data: pays }, { data: msgs }] = await Promise.all([
+          supabase.from("service_requests").select("*").eq("ticket_number", clean).maybeSingle(),
+          supabase
+            .from("quotations")
+            .select("id, revision_number, total_amount, labour_charge, materials_cost, company_commission, plumber_payable, customer_approval_status, created_at")
+            .eq("ticket_number", clean)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("payments")
+            .select("id, total_payment, company_commission, verification_status, payment_method, proof_url, created_at")
+            .eq("ticket_number", clean)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("messages")
+            .select("sender_name, sender_role, message, is_internal, created_at")
+            .eq("ticket_number", clean)
+            .order("created_at", { ascending: false })
+            .limit(8),
+        ]);
+        if (!req) return { ok: false, error: `Ticket ${clean} not found.` };
+        return {
+          ok: true,
+          request: {
+            ticket_number: req.ticket_number,
+            status: req.status,
+            urgency: req.urgency,
+            category: req.problem_category,
+            description: req.issue_description,
+            address: req.address_in_kano,
+            city_lga: req.city_lga,
+            customer_name: req.customer_name,
+            assigned_technician: req.assigned_technician,
+          },
+          quotations: quotes || [],
+          payments: pays || [],
+          recentMessages: (msgs || []).reverse(),
+        };
+      },
+    }),
+
+    findBestPlumbersForArea: tool({
+      description: "Analyze and rank approved plumbers by availability (On Duty), Kano area match, active workload, and rating.",
+      inputSchema: jsonSchema<{ areaOrAddress: string }>({
+        type: "object",
+        properties: {
+          areaOrAddress: { type: "string", description: "Customer area, LGA, or address in Kano" },
+        },
+        required: ["areaOrAddress"],
+      }),
+      execute: async ({ areaOrAddress }) => {
+        const needle = areaOrAddress.trim().toLowerCase();
+        const ranked = approvedPlumbers
+          .map((p) => {
+            const areas = Array.isArray(p.preferred_locations)
+              ? p.preferred_locations.map((a) => String(a).toLowerCase())
+              : [];
+            const resLoc = String(p.residential_location || "").toLowerCase();
+            const areaMatch =
+              Boolean(needle) &&
+              (areas.some((a) => needle.includes(a) || a.includes(needle)) ||
+                resLoc.includes(needle));
+            const load = activeCountByPlumber.get(String(p.id)) || 0;
+            const score =
+              (p.is_available ? 50 : 0) +
+              (areaMatch ? 30 : 0) -
+              load * 10 +
+              (Number(p.rating) || 0) * 2;
+            return {
+              id: p.id,
+              name: p.full_name,
+              onDuty: Boolean(p.is_available),
+              areaMatch,
+              activeJobs: load,
+              rating: p.rating ?? null,
+              totalJobs: p.total_jobs || 0,
+              score,
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 6);
+        return { areaQueried: areaOrAddress, candidates: ranked };
+      },
+    }),
+
+    inspectFinancialSummary: tool({
+      description: "Analyze full payment totals, company commission, plumber payouts, and current commission settings.",
+      inputSchema: jsonSchema<Record<string, never>>({
+        type: "object",
+        properties: {},
+      }),
+      execute: async () => {
+        const [{ data: allPays }, settings] = await Promise.all([
+          supabase
+            .from("payments")
+            .select("ticket_number, total_payment, company_commission, plumber_payable, verification_status, created_at"),
+          getMarketplaceSettings(),
+        ]);
+        const list = allPays || [];
+        const verified = list.filter((p) => p.verification_status === "verified");
+        const pending = list.filter((p) => p.verification_status === "pending");
+        return {
+          verifiedCount: verified.length,
+          verifiedRevenue: verified.reduce((s, p) => s + (Number(p.total_payment) || 0), 0),
+          verifiedCommission: verified.reduce((s, p) => s + (Number(p.company_commission) || 0), 0),
+          verifiedPlumberPayable: verified.reduce((s, p) => s + (Number(p.plumber_payable) || 0), 0),
+          pendingCount: pending.length,
+          pendingTotal: pending.reduce((s, p) => s + (Number(p.total_payment) || 0), 0),
+          pendingTickets: pending.slice(0, 10).map((p) => p.ticket_number),
+          commissionSettings: {
+            defaultRate: settings.commission_default_rate,
+            smallJobRate: settings.commission_small_job_rate,
+            smallJobThreshold: settings.small_job_threshold,
+            smallJobRuleEnabled: settings.small_job_rule_enabled,
+          },
+        };
+      },
+    }),
+
     assignPlumberToTicket: tool({
       description: "Assign an approved plumber (by name or ID) to a service request ticket.",
       inputSchema: jsonSchema<{ ticketNumber: string; plumberNameOrId: string }>({
