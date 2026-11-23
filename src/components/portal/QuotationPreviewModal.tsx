@@ -300,7 +300,7 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
           </div>
 
           {/* Printable Quotation Sheet */}
-          <div id="bp-printable-quote" className="flex-1 overflow-y-auto bg-white p-6 sm:p-8">
+          <div id="bp-printable-quote" className="flex-1 overflow-y-auto bg-white p-4 sm:p-8">
             {/* Branded Letterhead */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-[#0B1F3A] pb-4">
               <div className="flex items-center gap-3">
@@ -359,14 +359,14 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
             </div>
 
             {/* Itemised Table */}
-            <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
-              <table className="w-full border-collapse text-left text-xs">
+            <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full border-collapse text-left text-[11px] sm:text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 bg-[#0B1F3A] text-white">
-                    <th className="px-4 py-2.5 font-semibold">Item / Description</th>
-                    <th className="px-3 py-2.5 text-center font-semibold">Qty</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Unit Price</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">Amount</th>
+                    <th className="px-2.5 py-2.5 font-semibold sm:px-4">Item / Description</th>
+                    <th className="px-1.5 py-2.5 text-center font-semibold sm:px-3">Qty</th>
+                    <th className="px-1.5 py-2.5 text-right font-semibold whitespace-nowrap sm:px-3">Unit Price</th>
+                    <th className="px-2.5 py-2.5 text-right font-semibold whitespace-nowrap sm:px-4">Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -376,12 +376,12 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
                       const unit = Math.max(0, Number(item.unitPrice) || 0);
                       return (
                         <tr key={item.id || idx} className="bg-white">
-                          <td className="px-4 py-2.5 font-medium text-slate-800">{item.name}</td>
-                          <td className="px-3 py-2.5 text-center text-slate-600">{qty}</td>
-                          <td className="px-3 py-2.5 text-right text-slate-600">
+                          <td className="px-2.5 py-2.5 font-medium text-slate-800 sm:px-4">{item.name}</td>
+                          <td className="px-1.5 py-2.5 text-center text-slate-600 sm:px-3">{qty}</td>
+                          <td className="px-1.5 py-2.5 text-right whitespace-nowrap text-slate-600 sm:px-3">
                             {formatNGN(unit)}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-semibold text-[#0B1F3A]">
+                          <td className="px-2.5 py-2.5 text-right font-semibold whitespace-nowrap text-[#0B1F3A] sm:px-4">
                             {formatNGN(qty * unit)}
                           </td>
                         </tr>
@@ -389,42 +389,42 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
                     })
                   ) : quote.materialsCost > 0 ? (
                     <tr className="bg-white">
-                      <td className="px-4 py-2.5 font-medium text-slate-800">
+                      <td className="px-2.5 py-2.5 font-medium text-slate-800 sm:px-4">
                         Materials & Plumbing Supplies
                       </td>
-                      <td className="px-3 py-2.5 text-center text-slate-600">1</td>
-                      <td className="px-3 py-2.5 text-right text-slate-600">
+                      <td className="px-1.5 py-2.5 text-center text-slate-600 sm:px-3">1</td>
+                      <td className="px-1.5 py-2.5 text-right whitespace-nowrap text-slate-600 sm:px-3">
                         {formatNGN(quote.materialsCost)}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-[#0B1F3A]">
+                      <td className="px-2.5 py-2.5 text-right font-semibold whitespace-nowrap text-[#0B1F3A] sm:px-4">
                         {formatNGN(quote.materialsCost)}
                       </td>
                     </tr>
                   ) : null}
 
                   <tr className="bg-slate-50/60">
-                    <td className="px-4 py-2.5 font-semibold text-[#0B1F3A]">
+                    <td className="px-2.5 py-2.5 font-semibold text-[#0B1F3A] sm:px-4">
                       Labour / Workmanship
                     </td>
-                    <td className="px-3 py-2.5 text-center text-slate-600">1</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">
+                    <td className="px-1.5 py-2.5 text-center text-slate-600 sm:px-3">1</td>
+                    <td className="px-1.5 py-2.5 text-right whitespace-nowrap text-slate-600 sm:px-3">
                       {formatNGN(quote.labourCharge)}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-[#0B1F3A]">
+                    <td className="px-2.5 py-2.5 text-right font-semibold whitespace-nowrap text-[#0B1F3A] sm:px-4">
                       {formatNGN(quote.labourCharge)}
                     </td>
                   </tr>
 
                   {quote.transportCharge > 0 && (
                     <tr className="bg-slate-50/60">
-                      <td className="px-4 py-2.5 font-medium text-slate-800">
+                      <td className="px-2.5 py-2.5 font-medium text-slate-800 sm:px-4">
                         Transport / Logistics
                       </td>
-                      <td className="px-3 py-2.5 text-center text-slate-600">1</td>
-                      <td className="px-3 py-2.5 text-right text-slate-600">
+                      <td className="px-1.5 py-2.5 text-center text-slate-600 sm:px-3">1</td>
+                      <td className="px-1.5 py-2.5 text-right whitespace-nowrap text-slate-600 sm:px-3">
                         {formatNGN(quote.transportCharge)}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-[#0B1F3A]">
+                      <td className="px-2.5 py-2.5 text-right font-semibold whitespace-nowrap text-[#0B1F3A] sm:px-4">
                         {formatNGN(quote.transportCharge)}
                       </td>
                     </tr>
@@ -432,12 +432,12 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
 
                   {quote.otherCharges > 0 && (
                     <tr className="bg-slate-50/60">
-                      <td className="px-4 py-2.5 font-medium text-slate-800">Other Charges</td>
-                      <td className="px-3 py-2.5 text-center text-slate-600">1</td>
-                      <td className="px-3 py-2.5 text-right text-slate-600">
+                      <td className="px-2.5 py-2.5 font-medium text-slate-800 sm:px-4">Other Charges</td>
+                      <td className="px-1.5 py-2.5 text-center text-slate-600 sm:px-3">1</td>
+                      <td className="px-1.5 py-2.5 text-right whitespace-nowrap text-slate-600 sm:px-3">
                         {formatNGN(quote.otherCharges)}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-[#0B1F3A]">
+                      <td className="px-2.5 py-2.5 text-right font-semibold whitespace-nowrap text-[#0B1F3A] sm:px-4">
                         {formatNGN(quote.otherCharges)}
                       </td>
                     </tr>
@@ -445,10 +445,10 @@ export function QuotationPreviewModal({ quote, onClose }: QuotationPreviewModalP
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-[#0B1F3A] bg-amber-50/70">
-                    <td colSpan={3} className="px-4 py-3 text-right text-sm font-bold text-[#0B1F3A]">
+                    <td colSpan={3} className="px-2.5 py-3 text-right text-xs font-bold text-[#0B1F3A] sm:px-4 sm:text-sm">
                       Total Quotation Amount
                     </td>
-                    <td className="px-4 py-3 text-right text-base font-extrabold text-[#0B1F3A]">
+                    <td className="px-2.5 py-3 text-right text-sm font-extrabold whitespace-nowrap text-[#0B1F3A] sm:px-4 sm:text-base">
                       {formatNGN(quote.totalAmount)}
                     </td>
                   </tr>
