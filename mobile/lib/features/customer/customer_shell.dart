@@ -11,6 +11,7 @@ import "package:flowguard_plumbing/core/service_assets.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/customer/customer_request_detail_page.dart";
 import "package:flowguard_plumbing/features/customer/new_request_sheet.dart";
+import "package:flowguard_plumbing/features/customer/ziat_assistant_sheet.dart";
 import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
 import "package:flowguard_plumbing/features/shared/profile_and_edit_pages.dart";
 import "package:flowguard_plumbing/features/shared/ticket_chat_view.dart";
@@ -426,6 +427,36 @@ class _CustomerShellState extends State<CustomerShell> {
           Expanded(child: IndexedStack(index: _tabIndex, children: pages)),
         ],
       ),
+      floatingActionButton: _tabIndex <= 1
+          ? FloatingActionButton.extended(
+              heroTag: "ask_ziat_fab",
+              onPressed: () => ZiatAssistantSheet.show(
+                context,
+                onBookRequest: _openNewRequestSheet,
+              ),
+              backgroundColor: FlowGuardTheme.navy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+                side: const BorderSide(color: FlowGuardTheme.gold, width: 1.5),
+              ),
+              icon: ClipOval(
+                child: Image.asset(
+                  "assets/images/ziat-avatar.jpg",
+                  width: 28,
+                  height: 28,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              label: const Text(
+                "Ask Ziat",
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            )
+          : null,
       bottomNavigationBar: ValueListenableBuilder<int>(
         valueListenable: AppStateBadges.unreadMessagesCount,
         builder: (context, unreadMsgs, _) => NavigationBar(
