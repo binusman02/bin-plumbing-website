@@ -196,6 +196,29 @@ export function WorkforceConsoleClient() {
     }
   }
 
+  async function handleKickoffAll() {
+    setSubmitting(true);
+    setBanner(null);
+    try {
+      const res = await fetch("/api/admin/workforce/kickoff", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Kickoff failed.");
+      setBanner({
+        type: "ok",
+        text: `All 5 agents started work (${json.tasksCompleted}/5 completed). Check the Tasks tab for their baseline reports.`,
+      });
+      setTab("tasks");
+      await loadOverview();
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Kickoff failed.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const pendingApprovals = (data?.approvals || []).filter((a) => a.status === "pending");
   const agentMap = Object.fromEntries((data?.agents || []).map((a) => [a.id, a]));
 
@@ -215,14 +238,25 @@ export function WorkforceConsoleClient() {
             {(data?.usage.globalPaidSpendCapUsd ?? 0).toFixed(2)}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadOverview()}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void handleKickoffAll()}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132f57] disabled:opacity-50"
+          >
+            <Bot className="h-3.5 w-3.5 text-[#F5B301]" />
+            {submitting ? "Running All 5..." : "Run All 5 Agents Now"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadOverview()}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {banner && (

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getAdminToolGateway, getOpenAiToolsForAgent } from "@/lib/ai-workforce/admin-tools";
+import { getFlowGuardKnowledgeContext } from "@/lib/ai-workforce/knowledge";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 import type { AgentId } from "@/lib/ai-workforce/types";
@@ -280,10 +281,11 @@ export class WorkforceOrchestrator {
     const runner = params.modelRunner ?? runWithFreeFirstModel;
     const gateway = getAdminToolGateway();
     const scopedTools = getOpenAiToolsForAgent(gateway, assignedAgentId);
+    const knowledge = getFlowGuardKnowledgeContext(assignedAgentId === "engineering_ai");
     const res = await runner({
       agentId: assignedAgentId,
       routeId: agent.modelRoute,
-      systemPrompt: `${agent.systemPrompt}\nAllowed tools for your role: ${agent.allowedTools.join(", ")}. Never claim to have executed an Amber action without Owner approval.`,
+      systemPrompt: `${agent.systemPrompt}\n\nAPPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}\n\nAllowed tools for your role: ${agent.allowedTools.join(", ")}. Never claim to have executed an Amber action without Owner approval.`,
       userPrompt: `Task Title: ${task.title}\nInstruction: ${task.description}`,
       maxTokens: agent.maxTokensPerRun,
       dailyRunCount,

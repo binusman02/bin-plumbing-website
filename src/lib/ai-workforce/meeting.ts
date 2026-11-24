@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
+import { getFlowGuardKnowledgeContext } from "@/lib/ai-workforce/knowledge";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
@@ -192,8 +193,10 @@ export async function runTeamMeetingTurn(params: {
     .map((t) => `${t.speakerName}: ${t.text}`)
     .join("\n");
 
+  const knowledge = getFlowGuardKnowledgeContext(speaker.id === "engineering_ai");
   const systemPrompt = [
     speaker.systemPrompt,
+    `APPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}`,
     `MEETING CONTEXT: You are in a live FlowGuard team meeting with the Founder (Boss) and colleagues in the room: ${otherInRoom || "just you and the Founder"}.`,
     "HOW TO SPEAK IN THE MEETING:",
     "- Talk like a real human teammate in a live meeting — natural, warm, concise (2–4 sentences), direct, zero corporate/AI filler.",
