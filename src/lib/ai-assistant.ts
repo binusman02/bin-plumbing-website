@@ -1,7 +1,8 @@
 import { generateText, jsonSchema, type ModelMessage, stepCountIs, tool } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getMarketplaceSettings } from "@/lib/marketplace";
-import { getAdminToolGateway } from "@/lib/ai-workforce/admin-tools";
+import { getAdminToolGateway, getOpenAiToolsForAgent } from "@/lib/ai-workforce/admin-tools";
+import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export interface AiChatTurn {
@@ -63,7 +64,7 @@ export async function generateAdminCopilotReply(params: {
   const modelMessages = buildModelMessages(params.messages, params.audio);
 
   const supabase = getServiceSupabase();
-  const [reqRes, plumberRes, payRes, compRes, msgRes, quoteRes, enqRes] = await Promise.all([
+  const [reqRes, plumberRes, payRes, compRes, msgRes, quoteRes, enqRes, aiTasksRes, aiApprRes] = await Promise.all([
     supabase
       .from("service_requests")
       .select(
@@ -107,6 +108,17 @@ export async function generateAdminCopilotReply(params: {
       .select("id, full_name, service_category, area_in_kano, status, created_at")
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("ai_tasks")
+      .select("id, title, assigned_agent_id, status, output_summary, error_message, created_at")
+      .order("created_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("ai_approvals")
+      .select("id, requested_by_agent, action_summary, target_resource, status, created_at")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(10),
   ]);
 
   const reqs = reqRes.data || [];
@@ -116,6 +128,8 @@ export async function generateAdminCopilotReply(params: {
   const unreadMsgs = msgRes.data || [];
   const pendingQuotes = quoteRes.data || [];
   const enquiries = enqRes.data || [];
+  const aiTasks = aiTasksRes.data || [];
+  const pendingApprovals = aiApprRes.data || [];
 
   const unassignedReqs = reqs.filter(
     (r) => !r.assigned_plumber_id && !["completed", "cancelled"].includes(String(r.status || ""))
@@ -189,6 +203,21 @@ export async function generateAdminCopilotReply(params: {
     ...openComplaints.slice(0, 6).map(
       (c) => `  • ${c.ticket_number || c.id}: ${c.subject || "Complaint"} [${c.status}]`
     ),
+    "",
+    "RECENT AI WORKFORCE TASKS (Bashir, Amina, Zainab, Faruk, Sadiq):",
+    ...(aiTasks.length > 0
+      ? aiTasks.slice(0, 10).map(
+          (t) =>
+            `  • [${t.assigned_agent_id}] ${t.title} (${t.status})${t.output_summary ? ` — ${String(t.output_summary).slice(0, 120)}` : ""}`
+        )
+      : ["  • None yet."]),
+    "",
+    "PENDING OWNER APPROVALS:",
+    ...(pendingApprovals.length > 0
+      ? pendingApprovals.map(
+          (a) => `  • [${a.requested_by_agent}] ${a.action_summary} (${a.target_resource})`
+        )
+      : ["  • None pending."]),
   ];
 
   const systemPrompt = [
@@ -649,22 +678,43 @@ export async function generateAdminCopilotReply(params: {
   };
 
   if (gatewayKey) {
-    try {
-      const mimoModel = process.env.MIMO_MODEL_ID?.trim() || "xiaomi/mimo-v2.6-flash";
-      const result = await generateText({
-        model: mimoModel,
-        system: systemPrompt,
-        messages: modelMessages,
-        tools: adminTools,
-        stopWhen: stepCountIs(5),
-        maxOutputTokens: 1400,
-        abortSignal: AbortSignal.timeout(20000),
-      });
-      const text = result.text?.trim();
-      if (text) return { text, model: mimoModel, fallback: false, actionsTaken };
-    } catch (err) {
-      console.error("[ai-admin] gateway failed:", err instanceof Error ? err.message : "error");
+    const gateway = getAdminToolGateway();
+    const historyTranscript = params.messages
+      .slice(-8)
+      .map((m) => `${m.role === "user" ? "Founder" : "Sadiq"}: ${m.content}`)
+      .join("\n");
+    const res = await runWithFreeFirstModel({
+      agentId: "operations_manager",
+      routeId: "mimo-v2-6-flash-free",
+      systemPrompt,
+      userPrompt: historyTranscript || "Give me a quick operations update.",
+      maxTokens: 1200,
+      tools: getOpenAiToolsForAgent(gateway, "operations_manager"),
+      onToolCall: async (toolName, args) => {
+        const outcome = await gateway.invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
+          },
+          toolName,
+          rawInput: args,
+        });
+        if (outcome.approvalId) {
+          actionsTaken.push(`Approval requested (${outcome.approvalId}) for ${toolName}`);
+        }
+        return outcome;
+      },
+    });
+    if (res.ok && res.text) {
+      return {
+        text: res.text,
+        model: res.modelId || "xiaomi/mimo-v2.6-flash",
+        fallback: false,
+        actionsTaken,
+      };
     }
+    console.error("[ai-admin] gateway failed:", res.error || "empty");
   }
 
   if (apiKey) {
