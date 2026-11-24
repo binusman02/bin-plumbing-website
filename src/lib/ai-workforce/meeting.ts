@@ -3,6 +3,7 @@ import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
 import { getFlowGuardKnowledgeContext } from "@/lib/ai-workforce/knowledge";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
+import { stripAudioTags } from "@/lib/ai-workforce/voice-profiles";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
 export interface MeetingTurn {
@@ -12,6 +13,7 @@ export interface MeetingTurn {
   speakerName: string;
   avatarUrl?: string;
   text: string;
+  spokenText?: string;
   createdAt: string;
 }
 
@@ -199,7 +201,8 @@ export async function runTeamMeetingTurn(params: {
     `APPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}`,
     `MEETING CONTEXT: You are in a live FlowGuard team meeting with the Founder (Boss) and colleagues in the room: ${otherInRoom || "just you and the Founder"}.`,
     "HOW TO SPEAK IN THE MEETING:",
-    "- Talk like a real human teammate in a live meeting — natural, warm, concise (2–4 sentences), direct, zero corporate/AI filler.",
+    "- Talk like a real human teammate on a live voice call — warm, natural, conversational (2–4 short sentences), using contractions ('I'm', 'we've', 'let's') and zero corporate/AI filler.",
+    "- Include 1 to 3 subtle ElevenLabs audio tags naturally inside your reply so your voice sounds genuinely human, such as [chuckles], [thoughtful], [short pause], or [sighs] (e.g. \"[chuckles] Ha, close enough — Amina here, Boss. [short pause] Quick update from my side...\"). Never overuse them.",
     "- You may ask the Founder a direct question if a business decision or clarification is needed.",
     "- Only mention facts from the LIVE FLOWGUARD SNAPSHOT or meeting history; never invent tickets, revenue, or completed work.",
     params.wrapUp
@@ -221,18 +224,22 @@ export async function runTeamMeetingTurn(params: {
   });
 
   let replyText = "";
+  let spokenText = "";
   let raisedHands: RaisedHand[] = [];
 
   if (modelRes.ok && modelRes.text) {
     if (params.wrapUp) {
-      replyText = modelRes.text;
+      spokenText = modelRes.text;
+      replyText = stripAudioTags(modelRes.text);
     } else {
       const parsed = parseStructuredMeetingOutput(modelRes.text, nextParticipants, speaker.id);
-      replyText = parsed.reply;
+      spokenText = parsed.reply;
+      replyText = stripAudioTags(parsed.reply);
       raisedHands = parsed.raisedHands;
     }
   } else {
     replyText = `I couldn't reach my model right now (${modelRes.error || "unavailable"}), Boss. Let's check Models & Audit or try again in a moment.`;
+    spokenText = replyText;
   }
 
   let wrappedUpTasksCreated = 0;
@@ -265,6 +272,7 @@ export async function runTeamMeetingTurn(params: {
       speakerName: speaker.displayName,
       avatarUrl: speaker.avatarUrl,
       text: replyText,
+      spokenText,
       createdAt: new Date().toISOString(),
     },
     raisedHands,

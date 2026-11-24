@@ -177,16 +177,26 @@ export function assignAgentVoices<T extends VoiceLike>(
   return result;
 }
 
-export function cleanTextForSpeech(text: string): string {
+export function stripAudioTags(text: string): string {
   return text
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/[*_`#>]/g, " ")
+    .replace(/\[[^\]]{1,30}\]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+export function cleanTextForSpeech(
+  text: string,
+  options: { keepAudioTags?: boolean } = {}
+): string {
+  const base = text
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[*_`#>]/g, " ");
+  const cleaned = options.keepAudioTags ? base : stripAudioTags(base);
+  return cleaned.replace(/\s+/g, " ").trim();
+}
+
 /**
- * 5 distinct pre-made ElevenLabs voices (3 male, 2 female), with optional env overrides.
+ * 5 distinct conversational ElevenLabs voices (3 male, 2 female), with optional env overrides.
  */
 export const ELEVENLABS_VOICE_IDS: Record<AgentId, string> = {
   operations_manager: "s3TPKV1kjDlVtZbl4Ksh", // Adam (calm, conversational male)
@@ -194,6 +204,18 @@ export const ELEVENLABS_VOICE_IDS: Record<AgentId, string> = {
   customer_support_ai: "b5RPB35vTODb3BEmR3Fc", // Serein (gentle, empathetic female)
   research_ai: "9uJH3xa9p4Sl1DQFGvnJ", // Mark2 (crisp, conversational male)
   engineering_ai: "hIreuBly94QFepU63yel", // Scotty (steady, conversational male)
+};
+
+/**
+ * Built-in ElevenLabs pre-made voices that work on the Free tier via API
+ * if a Voice Library voice returns 402 payment_required.
+ */
+export const FREE_TIER_ELEVENLABS_VOICE_IDS: Record<AgentId, string> = {
+  operations_manager: "CwhRBWXzGAHq8TQ4Fs17", // Roger - Laid-Back, Casual, Resonant (Male)
+  sales_ai: "EXAVITQu4vr4xnSDxMaL", // Sarah - Mature, Reassuring, Confident (Female)
+  customer_support_ai: "FGY2WhTYpPnrIDTdsKH5", // Laura - Enthusiast, Quirky Attitude (Female)
+  research_ai: "IKne3meq5aSn9XLyUdCD", // Charlie - Deep, Confident, Energetic (Male)
+  engineering_ai: "JBFqnCBsd6RMkjVDRZzb", // George - Warm, Captivating Storyteller (Male)
 };
 
 export function getElevenLabsVoiceId(

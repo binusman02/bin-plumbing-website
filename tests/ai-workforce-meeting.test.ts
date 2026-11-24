@@ -7,7 +7,9 @@ import {
 } from "../src/lib/ai-workforce/meeting";
 import {
   assignAgentVoices,
+  cleanTextForSpeech,
   getElevenLabsVoiceId,
+  stripAudioTags,
 } from "../src/lib/ai-workforce/voice-profiles";
 
 test("AI Workforce Live Team Meeting", async (t) => {
@@ -89,6 +91,18 @@ test("AI Workforce Live Team Meeting", async (t) => {
     assert.equal(
       getElevenLabsVoiceId("sales_ai", { ELEVENLABS_VOICE_AMINA: "custom-amina-id" }),
       "custom-amina-id"
+    );
+  });
+
+  await t.test("6. Strips audio tags for display while preserving them for ElevenLabs v3", () => {
+    const tagged = "[chuckles] Ha, close enough — Amina here, Boss. [short pause] Quick update.";
+    assert.equal(
+      stripAudioTags(tagged),
+      "Ha, close enough — Amina here, Boss. Quick update."
+    );
+    assert.equal(
+      cleanTextForSpeech(tagged, { keepAudioTags: true }),
+      "[chuckles] Ha, close enough — Amina here, Boss. [short pause] Quick update."
     );
   });
 });

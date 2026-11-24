@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Hand, Mic, Send, Sparkles, Square, Users, Volume2, VolumeX } from "lucide-react";
-import { assignAgentVoices, cleanTextForSpeech } from "@/lib/ai-workforce/voice-profiles";
+import { assignAgentVoices, cleanTextForSpeech, stripAudioTags } from "@/lib/ai-workforce/voice-profiles";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
 interface MeetingAgent {
@@ -19,6 +19,7 @@ interface MeetingTurn {
   speakerName: string;
   avatarUrl?: string;
   text: string;
+  spokenText?: string;
   createdAt: string;
 }
 
@@ -81,6 +82,8 @@ export function TeamMeetingPanel({
 
   function speakWithBrowserFallback(clean: string, agentId: string) {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const plain = stripAudioTags(clean);
+    if (!plain) return;
     try {
       const synth = window.speechSynthesis;
       synth.cancel();
@@ -88,7 +91,7 @@ export function TeamMeetingPanel({
       const assigned = assignAgentVoices(liveVoices);
       const profile = assigned[agentId as AgentId] ?? assigned.operations_manager;
 
-      const utter = new SpeechSynthesisUtterance(clean);
+      const utter = new SpeechSynthesisUtterance(plain);
       if (profile?.voice) {
         utter.voice = profile.voice;
         utter.lang = profile.voice.lang;
@@ -124,7 +127,7 @@ export function TeamMeetingPanel({
     // Skip spending ElevenLabs credits on timeout/error notices
     if (!opts?.force && text.startsWith("I couldn't reach my model right now")) return;
 
-    const clean = cleanTextForSpeech(text);
+    const clean = cleanTextForSpeech(text, { keepAudioTags: true });
     if (!clean) return;
 
     if (audioRef.current) {
@@ -292,8 +295,9 @@ export function TeamMeetingPanel({
         setParticipants(json.participants);
       }
       if (json.speakerTurn) {
-        setTurns((prev) => [...prev, json.speakerTurn as MeetingTurn]);
-        speakText(json.speakerTurn.text, json.speakerTurn.speakerId);
+        const turn = json.speakerTurn as MeetingTurn;
+        setTurns((prev) => [...prev, turn]);
+        void speakText(turn.spokenText || turn.text, turn.speakerId);
       }
       setRaisedHands(Array.isArray(json.raisedHands) ? json.raisedHands : []);
       if (opts?.wrapUp) {
@@ -454,7 +458,7 @@ export function TeamMeetingPanel({
                       type="button"
                       onClick={() => {
                         unlockAudio();
-                        void speakText(turn.text, turn.speakerId, { force: true });
+                        void speakText(turn.spokenText || turn.text, turn.speakerId, { force: true });
                       }}
                       className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-[#0B1F3A]"
                       title="Listen with this agent's ElevenLabs voice"
