@@ -217,7 +217,7 @@ export async function runTeamMeetingTurn(params: {
     routeId: speaker.modelRoute,
     systemPrompt,
     userPrompt,
-    maxTokens: 700,
+    maxTokens: speaker.id === "engineering_ai" ? 3000 : 1200,
   });
 
   let replyText = "";

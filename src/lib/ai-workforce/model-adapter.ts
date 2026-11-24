@@ -217,7 +217,7 @@ export async function runWithFreeFirstModel(
           model: route.modelId,
           messages,
           ...(hasTools ? { tools: req.tools, tool_choice: "auto" } : {}),
-          max_tokens: Math.min(req.maxTokens, 2048),
+          max_tokens: Math.min(Math.max(req.maxTokens, 512), 4096),
         }),
         signal: AbortSignal.timeout(25000),
       });
@@ -287,9 +287,22 @@ export async function runWithFreeFirstModel(
       outputTokens: totalOutputTokens,
     });
 
+    if (!finalText) {
+      return {
+        ok: false,
+        code: "PROVIDER_ERROR",
+        provider: route.provider,
+        modelId: route.modelId,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        latencyMs: Date.now() - startedAt,
+        error: "Model returned empty content (reasoning token budget exhausted).",
+      };
+    }
+
     return {
       ok: true,
-      text: finalText || "Task completed.",
+      text: finalText,
       provider: route.provider,
       modelId: route.modelId,
       inputTokens: totalInputTokens,
