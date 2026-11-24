@@ -189,11 +189,11 @@ export function cleanTextForSpeech(text: string): string {
  * 5 distinct pre-made ElevenLabs voices (3 male, 2 female), with optional env overrides.
  */
 export const ELEVENLABS_VOICE_IDS: Record<AgentId, string> = {
-  operations_manager: "pNInz6obpgDQGcFmaJgB", // Adam (calm, authoritative male)
-  sales_ai: "EXAVITQu4vr4xnSDxMaL", // Sarah (warm, energetic female)
-  customer_support_ai: "21m00Tcm4TlvDq8ikWAM", // Rachel (gentle, empathetic female)
-  research_ai: "onwK4e9ZLuTAKqWW03F9", // Daniel (crisp, analytical male)
-  engineering_ai: "N2lVS1w4EtoT3dr4eOWO", // Callum (steady, thoughtful male)
+  operations_manager: "s3TPKV1kjDlVtZbl4Ksh", // Adam (calm, conversational male)
+  sales_ai: "YWmufCrZ2agGoSoVL8je", // Valory B (warm, conversational female)
+  customer_support_ai: "b5RPB35vTODb3BEmR3Fc", // Serein (gentle, empathetic female)
+  research_ai: "9uJH3xa9p4Sl1DQFGvnJ", // Mark2 (crisp, conversational male)
+  engineering_ai: "hIreuBly94QFepU63yel", // Scotty (steady, conversational male)
 };
 
 export function getElevenLabsVoiceId(
