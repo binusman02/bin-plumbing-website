@@ -14,7 +14,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+  const apiKey =
+    process.env.ELEVENLABS_API_KEY?.trim() ||
+    process.env.FLOWGUARD_AI_VOICES?.trim();
   if (!apiKey) {
     return NextResponse.json({ fallback: true, error: "ELEVENLABS_API_KEY not configured." }, { status: 503 });
   }
