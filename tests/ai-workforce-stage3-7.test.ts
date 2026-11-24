@@ -202,4 +202,11 @@ test("AI Workforce Stages 3–7 — Specialists, Isolation, Prompt-Injection & D
       "/admin/workforce?tab=approvals&approvalId=appr-123"
     );
   });
+
+  await t.test("Stage 6/7: Zainab replies directly to routine questions and gates approval-needed messages", async () => {
+    const { assessSupportApprovalNeed } = await import("../src/lib/ai-workforce/auto-triggers");
+    assert.equal(assessSupportApprovalNeed("Hi, what is the status of my request?").needsApproval, false);
+    assert.equal(assessSupportApprovalNeed("Give me a 50% discount or refund my payment").needsApproval, true);
+    assert.equal(assessSupportApprovalNeed("Water is flooding my kitchen right now!").needsApproval, true);
+  });
 });

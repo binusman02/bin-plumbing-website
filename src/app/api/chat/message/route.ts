@@ -127,13 +127,32 @@ export async function POST(request: Request) {
       }).catch(() => {});
     }
 
-    const aiReply = null;
+    let aiReply = null;
     if (actor.role === "customer" && !isInternal && message.length > 0) {
-      await triggerWorkforceOnCustomerTicketMessage({
+      const outcome = await triggerWorkforceOnCustomerTicketMessage({
         ticketNumber: ctx.ticketNumber,
         customerName: actor.name,
         customerMessage: message,
-      }).catch(() => {});
+      }).catch(() => ({ action: "skipped" as const }));
+      if (outcome.action === "replied") {
+        aiReply = await postJobMessage({
+          requestId: ctx.requestId,
+          ticketNumber: ctx.ticketNumber,
+          senderRole: "admin",
+          senderName: "Zainab (Support)",
+          senderId: null,
+          recipientRole: "customer",
+          recipientId: ctx.customerId,
+          recipients: [
+            {
+              recipientId: ctx.customerId || "customer",
+              recipientRole: "customer",
+            },
+          ],
+          message: outcome.replyText,
+          isInternal: false,
+        }).catch(() => null);
+      }
     }
 
     return NextResponse.json({ success: true, message: created, aiReply });

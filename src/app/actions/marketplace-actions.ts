@@ -842,13 +842,32 @@ export async function postCommunicationMessageAction(params: {
       replyToId: params.replyToId || null,
     });
 
-    const aiReply = null;
+    let aiReply = null;
     if (actor.role === "customer" && !isInternal && params.message.trim().length > 0) {
-      await triggerWorkforceOnCustomerTicketMessage({
+      const outcome = await triggerWorkforceOnCustomerTicketMessage({
         ticketNumber: ticketCtx.ticketNumber,
         customerName: actor.name,
         customerMessage: params.message.trim(),
-      }).catch(() => {});
+      }).catch(() => ({ action: "skipped" as const }));
+      if (outcome.action === "replied") {
+        aiReply = await postJobMessage({
+          requestId: ticketCtx.requestId,
+          ticketNumber: ticketCtx.ticketNumber,
+          senderRole: "admin",
+          senderName: "Zainab (Support)",
+          senderId: null,
+          recipientRole: "customer",
+          recipientId: ticketCtx.customerId,
+          recipients: [
+            {
+              recipientId: ticketCtx.customerId || "customer",
+              recipientRole: "customer",
+            },
+          ],
+          message: outcome.replyText,
+          isInternal: false,
+        }).catch(() => null);
+      }
     }
 
     revalidatePath("/tracking");

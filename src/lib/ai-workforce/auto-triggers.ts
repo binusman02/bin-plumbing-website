@@ -6,6 +6,8 @@ import {
   getOwnerApprovalDeepLink,
 } from "@/lib/ai-workforce/admin-tools";
 import { triageSupportMessage } from "@/lib/ai-workforce/specialists/support";
+import { getAgentDefinition } from "@/lib/ai-workforce/registry";
+import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 
 async function recordAutoTask(params: {
   agentId: "operations_manager" | "sales_ai" | "customer_support_ai" | "engineering_ai";
@@ -336,65 +338,177 @@ export async function triggerEngineeringIncidentWatch(params: {
   }
 }
 
+const HUMAN_PAUSE_WINDOW_MS = 15 * 60 * 1000;
+
+export function assessSupportApprovalNeed(message: string): {
+  needsApproval: boolean;
+  reasons: string[];
+} {
+  const triage = triageSupportMessage(message);
+  const reasons = [...triage.escalationReasons];
+  const lower = message.toLowerCase();
+
+  if (/\b(discount|cheaper|reduce\s+price|waive|credit|compensation)\b/.test(lower)) {
+    reasons.push("Pricing / discount commitment");
+  }
+  if (/\b(cancel\s+my\s+request|cancel\s+job|complaint|rude|terrible|damaged|broken\s+by\s+plumber)\b/.test(lower)) {
+    reasons.push("Complaint / cancellation request");
+  }
+  if (/\b(confirm\s+payment|verify\s+payment|already\s+paid|transfer\s+failed)\b/.test(lower)) {
+    reasons.push("Payment verification / status inquiry");
+  }
+
+  return {
+    needsApproval: triage.escalateToOwner || reasons.length > 0,
+    reasons: Array.from(new Set(reasons)),
+  };
+}
+
 /**
  * Event 6: Customer sends a message in Ticket Chat
- * Replaces Ziat auto-reply: Zainab triages the message and queues an Approval
- * draft (support_send_reply) instead of replying directly to the customer.
+ * Zainab replies directly for routine/safe support questions using her
+ * personality and MiMo V2.6 Flash. If the message needs Founder attention or
+ * approval (emergencies, disputes, refunds, discounts, complaints), she pauses
+ * and queues a support_send_reply Approval instead.
  */
 export async function triggerWorkforceOnCustomerTicketMessage(params: {
   ticketNumber: string;
   customerName: string;
   customerMessage: string;
-}): Promise<void> {
+}): Promise<
+  | { action: "replied"; replyText: string }
+  | { action: "approval_queued"; approvalId: string }
+  | { action: "skipped" }
+> {
   const clean = params.customerMessage.trim();
-  if (!clean) return;
-  try {
-    const triage = triageSupportMessage(clean);
-    const draftReply = triage.escalateToOwner
-      ? `Hello ${params.customerName}, I'm sorry you're experiencing this. I've flagged your message on ${params.ticketNumber} as urgent for our team — if there is an active water leak, please shut off the main stopcock valve right away while we coordinate.`
-      : `Hello ${params.customerName}, thanks for your message on ${params.ticketNumber}. We've received it and will update you shortly.`;
+  if (!clean) return { action: "skipped" };
 
-    const res = await getAdminToolGateway().invoke({
-      ctx: {
-        agentId: "customer_support_ai",
-        actorUserId: "system_auto_trigger",
-        actorEmail: "zainab@flowguard.com.ng",
-      },
-      toolName: "support_send_reply",
-      rawInput: {
-        ticketNumber: params.ticketNumber,
-        replyBody: draftReply,
-      },
-      targetResource: params.ticketNumber,
-      actionSummary: `Send Zainab's reply on ${params.ticketNumber}`,
-      reason: triage.escalateToOwner
-        ? `URGENT (${triage.escalationReasons.join(", ")}) — Customer wrote: "${clean.slice(0, 120)}"`
-        : `Customer wrote: "${clean.slice(0, 120)}"`,
-      idempotencyKey: `auto:support_reply:${params.ticketNumber}:${clean.slice(0, 40)}`,
+  try {
+    const supabase = getServiceSupabase();
+    const { data: recentRows } = await supabase
+      .from("messages")
+      .select("sender_role, sender_name, message, is_internal, created_at")
+      .eq("ticket_number", params.ticketNumber)
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    const rows = (recentRows || []).filter((r) => !r.is_internal);
+    const now = Date.now();
+    const recentHumanReply = rows.find((r) => {
+      const senderName = String(r.sender_name || "");
+      const isHumanStaff =
+        (r.sender_role === "admin" || r.sender_role === "plumber") &&
+        senderName !== "Zainab (Support)" &&
+        senderName !== "FlowGuard Support" &&
+        senderName !== "Ziat" &&
+        senderName !== "FlowGuard AI Assistant";
+      if (!isHumanStaff) return false;
+      const ts = new Date(String(r.created_at || "")).getTime();
+      return Number.isFinite(ts) && now - ts < HUMAN_PAUSE_WINDOW_MS;
     });
 
-    if (res.approvalId) {
+    if (recentHumanReply) {
+      return { action: "skipped" };
+    }
+
+    const { data: reqRow } = await supabase
+      .from("service_requests")
+      .select("status, problem_category, city_lga, assigned_technician")
+      .eq("ticket_number", params.ticketNumber)
+      .maybeSingle();
+
+    const assessment = assessSupportApprovalNeed(clean);
+    const zainab = getAgentDefinition("customer_support_ai");
+    const recentContext = [...rows]
+      .reverse()
+      .map((r) => `${r.sender_name || r.sender_role}: ${String(r.message || "").slice(0, 200)}`)
+      .join("\n");
+
+    const ticketSummary = [
+      `Ticket: ${params.ticketNumber}`,
+      `Customer: ${params.customerName}`,
+      `Status: ${reqRow?.status || "new"}`,
+      `Service: ${reqRow?.problem_category || "Plumbing Service"} (${reqRow?.city_lga || "Kano"})`,
+      `Assigned Technician: ${reqRow?.assigned_technician || "Pending assignment"}`,
+    ].join(" | ");
+
+    const modelRes = zainab
+      ? await runWithFreeFirstModel({
+          agentId: "customer_support_ai",
+          routeId: zainab.modelRoute,
+          systemPrompt: [
+            zainab.systemPrompt,
+            "You are replying directly to the customer in their ticket chat. Keep it to 1-3 warm, natural sentences in plain text (no markdown, no **bold**). Match their language (English, Hausa, or Nigerian Pidgin). Never invent prices, discounts, or exact arrival times.",
+          ].join("\n\n"),
+          userPrompt: `${ticketSummary}\n\nRecent messages:\n${recentContext || "(none)"}\n\nLatest customer message:\n"${clean}"`,
+          maxTokens: 280,
+        })
+      : { ok: false, text: "" };
+
+    // If the message needs Founder attention or approval, queue support_send_reply Approval
+    if (assessment.needsApproval) {
+      const draftReply =
+        (modelRes.ok && modelRes.text) ||
+        `Hello ${params.customerName}, I'm sorry you're experiencing this. I've escalated your message on ${params.ticketNumber} to our management team so we can review it and get back to you right away.`;
+
+      const res = await getAdminToolGateway().invoke({
+        ctx: {
+          agentId: "customer_support_ai",
+          actorUserId: "system_auto_trigger",
+          actorEmail: "zainab@flowguard.com.ng",
+        },
+        toolName: "support_send_reply",
+        rawInput: {
+          ticketNumber: params.ticketNumber,
+          replyBody: draftReply,
+        },
+        targetResource: params.ticketNumber,
+        actionSummary: `Approve Zainab's reply on ${params.ticketNumber}`,
+        reason: `Needs attention (${assessment.reasons.join(", ")}) — Customer wrote: "${clean.slice(0, 120)}"`,
+        idempotencyKey: `auto:support_reply:${params.ticketNumber}:${Date.now()}`,
+      });
+
+      if (res.approvalId) {
+        await recordAutoTask({
+          agentId: "customer_support_ai",
+          title: `Needs Approval: ${params.ticketNumber}`,
+          description: clean,
+          status: "waiting_approval",
+          priority: "urgent",
+          outputSummary: `Zainab flagged "${assessment.reasons.join(", ")}" and queued reply draft (${res.approvalId}).`,
+        });
+        await createNotification({
+          recipientId: "admin",
+          recipientRole: "admin",
+          actorRole: "admin",
+          type: "ai_approval_pending",
+          title: `Zainab needs your approval on ${params.ticketNumber}`,
+          body: `${assessment.reasons[0] || "Attention needed"}: "${clean.slice(0, 80)}"`,
+          entityType: "ai_approval",
+          entityId: res.approvalId,
+          destination: getOwnerApprovalDeepLink(res.approvalId),
+        });
+        return { action: "approval_queued", approvalId: res.approvalId };
+      }
+      return { action: "skipped" };
+    }
+
+    // Safe, routine customer support message -> Zainab replies directly
+    if (modelRes.ok && modelRes.text) {
       await recordAutoTask({
         agentId: "customer_support_ai",
-        title: `Support Reply Ready: ${params.ticketNumber}`,
+        title: `Zainab Replied: ${params.ticketNumber}`,
         description: clean,
-        status: "waiting_approval",
-        priority: triage.escalateToOwner ? "urgent" : "normal",
-        outputSummary: `Zainab triaged message (${triage.urgency}) and prepared reply draft for Approval (${res.approvalId}).`,
+        status: "completed",
+        priority: "normal",
+        outputSummary: `Zainab replied to ${params.customerName}: "${modelRes.text.slice(0, 180)}"`,
       });
-      await createNotification({
-        recipientId: "admin",
-        recipientRole: "admin",
-        actorRole: "admin",
-        type: "ai_approval_pending",
-        title: `Zainab: Approve reply for ${params.ticketNumber}`,
-        body: `${params.customerName}: "${clean.slice(0, 80)}"`,
-        entityType: "ai_approval",
-        entityId: res.approvalId,
-        destination: getOwnerApprovalDeepLink(res.approvalId),
-      });
+      return { action: "replied", replyText: modelRes.text };
     }
+
+    return { action: "skipped" };
   } catch (err) {
     console.error("[auto-trigger:ticket_message]", err instanceof Error ? err.message : err);
+    return { action: "skipped" };
   }
 }
