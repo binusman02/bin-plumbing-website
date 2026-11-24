@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Hand, Mic, Send, Sparkles, Square, Users, Volume2, VolumeX } from "lucide-react";
+import { Hand, Mic, Phone, PhoneOff, Send, Sparkles, Square, Users, Volume2, VolumeX } from "lucide-react";
 import { assignAgentVoices, cleanTextForSpeech, stripAudioTags } from "@/lib/ai-workforce/voice-profiles";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
@@ -54,6 +54,7 @@ export function TeamMeetingPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [speakOutLoud, setSpeakOutLoud] = useState(false);
+  const [liveCall, setLiveCall] = useState(false);
   const [voiceNote, setVoiceNote] = useState<string>("");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [recording, setRecording] = useState(false);
@@ -63,6 +64,24 @@ export function TeamMeetingPanel({
   const audioUrlRef = useRef<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const liveCallRef = useRef(false);
+  const speakOutLoudRef = useRef(false);
+  const turnsRef = useRef<MeetingTurn[]>(turns);
+  const participantsRef = useRef<string[]>(participants);
+  const vadTimerRef = useRef<number | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  useEffect(() => {
+    speakOutLoudRef.current = speakOutLoud;
+  }, [speakOutLoud]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -98,6 +117,9 @@ export function TeamMeetingPanel({
       }
       utter.rate = profile?.rate ?? 1.0;
       utter.pitch = profile?.pitch ?? 1.0;
+      utter.onend = () => {
+        if (liveCallRef.current) void startVoiceRecording(true);
+      };
       synth.speak(utter);
     } catch {
       // Ignore speech synthesis errors
@@ -123,7 +145,7 @@ export function TeamMeetingPanel({
   }
 
   async function speakText(text: string, agentId: string, opts?: { force?: boolean }) {
-    if (!speakOutLoud && !opts?.force) return;
+    if (!speakOutLoudRef.current && !opts?.force) return;
     // Skip spending ElevenLabs credits on timeout/error notices
     if (!opts?.force && text.startsWith("I couldn't reach my model right now")) return;
 
@@ -159,6 +181,9 @@ export function TeamMeetingPanel({
             URL.revokeObjectURL(url);
             audioUrlRef.current = null;
           }
+          if (liveCallRef.current) {
+            void startVoiceRecording(true);
+          }
         };
         await audio.play();
         setVoiceNote("ElevenLabs HD");
@@ -174,15 +199,21 @@ export function TeamMeetingPanel({
     speakWithBrowserFallback(clean, agentId);
   }
 
-  async function toggleRecording() {
-    if (recording && mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-      return;
+  function stopVadMonitor() {
+    if (vadTimerRef.current !== null) {
+      window.clearInterval(vadTimerRef.current);
+      vadTimerRef.current = null;
     }
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      return;
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
     }
+  }
+
+  async function startVoiceRecording(autoStopOnSilence: boolean) {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") return;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -190,7 +221,45 @@ export function TeamMeetingPanel({
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
+
+      if (autoStopOnSilence && typeof AudioContext !== "undefined") {
+        try {
+          const ctx = new AudioContext();
+          audioCtxRef.current = ctx;
+          const src = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          src.connect(analyser);
+          const data = new Uint8Array(analyser.fftSize);
+          let heardSpeech = false;
+          let silenceSince = Date.now();
+
+          vadTimerRef.current = window.setInterval(() => {
+            analyser.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i += 1) {
+              const v = (data[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / data.length);
+            if (rms > 0.025) {
+              heardSpeech = true;
+              silenceSince = Date.now();
+            } else if (heardSpeech && Date.now() - silenceSince > 1500) {
+              stopVadMonitor();
+              if (recorder.state === "recording") {
+                recorder.stop();
+                setRecording(false);
+              }
+            }
+          }, 150);
+        } catch {
+          // Ignore VAD setup errors; user can still click Stop manually
+        }
+      }
+
       recorder.onstop = async () => {
+        stopVadMonitor();
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         if (blob.size === 0) return;
@@ -225,6 +294,8 @@ export function TeamMeetingPanel({
       recorder.start();
       setRecording(true);
     } catch {
+      setLiveCall(false);
+      liveCallRef.current = false;
       setTurns((prev) => [
         ...prev,
         {
@@ -237,6 +308,39 @@ export function TeamMeetingPanel({
         },
       ]);
     }
+  }
+
+  async function toggleRecording() {
+    if (recording && mediaRecorderRef.current) {
+      stopVadMonitor();
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+      return;
+    }
+    await startVoiceRecording(liveCallRef.current);
+  }
+
+  function toggleLiveCall() {
+    if (liveCallRef.current) {
+      liveCallRef.current = false;
+      setLiveCall(false);
+      stopVadMonitor();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+        setRecording(false);
+      }
+      if (audioRef.current) audioRef.current.pause();
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      return;
+    }
+    unlockAudio();
+    liveCallRef.current = true;
+    setLiveCall(true);
+    speakOutLoudRef.current = true;
+    setSpeakOutLoud(true);
+    void startVoiceRecording(true);
   }
 
   function toggleParticipant(id: string) {
@@ -259,7 +363,7 @@ export function TeamMeetingPanel({
     const text = (customText ?? input).trim();
     if (!text && !opts?.callOnAgent && !opts?.wrapUp) return;
 
-    const nextHistory = [...turns];
+    const nextHistory = [...turnsRef.current];
     if (text && !opts?.callOnAgent) {
       const founderTurn: MeetingTurn = {
         id: `founder-${Date.now()}`,
@@ -270,11 +374,12 @@ export function TeamMeetingPanel({
         createdAt: new Date().toISOString(),
       };
       nextHistory.push(founderTurn);
+      turnsRef.current = nextHistory;
       setTurns(nextHistory);
       if (!customText) setInput("");
     }
 
-    if (speakOutLoud) unlockAudio();
+    if (speakOutLoudRef.current) unlockAudio();
     setBusy(true);
     try {
       const res = await fetch("/api/admin/workforce/meeting", {
@@ -282,7 +387,7 @@ export function TeamMeetingPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          participants,
+          participants: participantsRef.current,
           history: nextHistory.slice(-12),
           callOnAgent: opts?.callOnAgent,
           wrapUp: opts?.wrapUp,
@@ -332,6 +437,28 @@ export function TeamMeetingPanel({
             </h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleLiveCall}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-bold transition ${
+                liveCall
+                  ? "bg-emerald-600 text-white animate-pulse"
+                  : "border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+              }`}
+              title="Hands-free live voice conversation with the team"
+            >
+              {liveCall ? (
+                <>
+                  <PhoneOff className="h-3.5 w-3.5" />
+                  End Live Call
+                </>
+              ) : (
+                <>
+                  <Phone className="h-3.5 w-3.5" />
+                  Live Call
+                </>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => {

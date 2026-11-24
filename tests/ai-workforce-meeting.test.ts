@@ -105,4 +105,18 @@ test("AI Workforce Live Team Meeting", async (t) => {
       "[chuckles] Ha, close enough — Amina here, Boss. [short pause] Quick update."
     );
   });
+
+  await t.test("7. Keeps floor with active specialist on follow-ups so Sadiq does not interrupt", () => {
+    const room = ["operations_manager", "sales_ai", "engineering_ai"] as const;
+    // Follow-up without naming anyone stays with Amina
+    assert.equal(
+      detectPrimarySpeaker("Okay, send me that draft", [...room], undefined, "sales_ai"),
+      "sales_ai"
+    );
+    // Explicitly naming Sadiq switches back to Sadiq
+    assert.equal(
+      detectPrimarySpeaker("Sadiq, what do you think?", [...room], undefined, "sales_ai"),
+      "operations_manager"
+    );
+  });
 });

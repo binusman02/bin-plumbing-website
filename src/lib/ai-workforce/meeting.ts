@@ -26,11 +26,11 @@ export interface RaisedHand {
 }
 
 const AGENT_NAME_PATTERNS: Array<{ id: AgentId; rx: RegExp }> = [
-  { id: "engineering_ai", rx: /\b(bashir|engineer(?:ing)?)\b/i },
-  { id: "sales_ai", rx: /\b(amina|sales)\b/i },
-  { id: "customer_support_ai", rx: /\b(zainab|support)\b/i },
-  { id: "research_ai", rx: /\b(faruk|research)\b/i },
-  { id: "operations_manager", rx: /\b(sadiq|ops|operations)\b/i },
+  { id: "engineering_ai", rx: /\b(bashir|basheer|engineer(?:ing)?)\b/i },
+  { id: "sales_ai", rx: /\b(amina|amin|ameena|sales)\b/i },
+  { id: "customer_support_ai", rx: /\b(zainab|zenab|support)\b/i },
+  { id: "research_ai", rx: /\b(faruk|farooq|research)\b/i },
+  { id: "operations_manager", rx: /\b(sadiq|sadi|ops|operations)\b/i },
 ];
 
 export function detectInvitedAgents(message: string, current: AgentId[]): AgentId[] {
@@ -53,7 +53,8 @@ export function detectInvitedAgents(message: string, current: AgentId[]): AgentI
 export function detectPrimarySpeaker(
   message: string,
   participants: AgentId[],
-  explicitCallOn?: AgentId
+  explicitCallOn?: AgentId,
+  lastSpeakerId?: AgentId
 ): AgentId {
   if (explicitCallOn && participants.includes(explicitCallOn)) {
     return explicitCallOn;
@@ -76,6 +77,17 @@ export function detectPrimarySpeaker(
         return entry.id;
       }
     }
+  }
+
+  // If founder explicitly addressed Sadiq, route to him
+  const sadiqEntry = AGENT_NAME_PATTERNS.find((e) => e.id === "operations_manager");
+  if (sadiqEntry && sadiqEntry.rx.test(trimmed)) {
+    return "operations_manager";
+  }
+
+  // Keep the floor with the specialist currently speaking so Sadiq doesn't interrupt
+  if (lastSpeakerId && lastSpeakerId !== "operations_manager" && participants.includes(lastSpeakerId)) {
+    return lastSpeakerId;
   }
 
   return "operations_manager";
@@ -179,9 +191,15 @@ export async function runTeamMeetingTurn(params: {
   wrappedUpTasksCreated?: number;
 }> {
   const nextParticipants = detectInvitedAgents(params.founderMessage, params.participants);
+  const lastAgentTurn = [...params.history].reverse().find((t) => t.speakerType === "agent");
   const speakerId: AgentId = params.wrapUp
     ? "operations_manager"
-    : detectPrimarySpeaker(params.founderMessage, nextParticipants, params.callOnAgent);
+    : detectPrimarySpeaker(
+        params.founderMessage,
+        nextParticipants,
+        params.callOnAgent,
+        lastAgentTurn?.speakerId as AgentId | undefined
+      );
 
   const speaker = getAgentDefinition(speakerId) ?? getAgentDefinition("operations_manager")!;
   const snapshot = await fetchMeetingSnapshot();
