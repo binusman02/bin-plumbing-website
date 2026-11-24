@@ -53,11 +53,13 @@ export function TeamMeetingPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [speakOutLoud, setSpeakOutLoud] = useState(false);
+  const [voiceNote, setVoiceNote] = useState<string>("");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
@@ -99,17 +101,38 @@ export function TeamMeetingPanel({
     }
   }
 
-  async function speakText(text: string, agentId: string) {
-    if (!speakOutLoud) return;
+  function unlockAudio() {
+    if (typeof window === "undefined") return;
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+    }
+    try {
+      // Tiny silent wav to unlock HTMLAudioElement inside user gesture for Chrome autoplay
+      const a = audioRef.current;
+      if (!a.src) {
+        a.src =
+          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+        void a.play().catch(() => {});
+      }
+    } catch {
+      // Ignore unlock errors
+    }
+  }
+
+  async function speakText(text: string, agentId: string, opts?: { force?: boolean }) {
+    if (!speakOutLoud && !opts?.force) return;
     // Skip spending ElevenLabs credits on timeout/error notices
-    if (text.startsWith("I couldn't reach my model right now")) return;
+    if (!opts?.force && text.startsWith("I couldn't reach my model right now")) return;
 
     const clean = cleanTextForSpeech(text);
     if (!clean) return;
 
     if (audioRef.current) {
       audioRef.current.pause();
-      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -124,15 +147,25 @@ export function TeamMeetingPanel({
       if (res.ok && res.headers.get("content-type")?.includes("audio/mpeg")) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        audio.onended = () => URL.revokeObjectURL(url);
-        audio.onerror = () => URL.revokeObjectURL(url);
+        audioUrlRef.current = url;
+        if (!audioRef.current) audioRef.current = new Audio();
+        const audio = audioRef.current;
+        audio.src = url;
+        audio.onended = () => {
+          if (audioUrlRef.current === url) {
+            URL.revokeObjectURL(url);
+            audioUrlRef.current = null;
+          }
+        };
         await audio.play();
+        setVoiceNote("ElevenLabs HD");
         return;
       }
-    } catch {
-      // Fall back to browser speech below
+      const errJson = (await res.json().catch(() => ({}))) as { error?: string };
+      setVoiceNote(errJson.error ? `Fallback (${errJson.error.slice(0, 60)})` : "Browser fallback");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "playback blocked";
+      setVoiceNote(`Fallback (${msg.slice(0, 45)})`);
     }
 
     speakWithBrowserFallback(clean, agentId);
@@ -238,6 +271,7 @@ export function TeamMeetingPanel({
       if (!customText) setInput("");
     }
 
+    if (speakOutLoud) unlockAudio();
     setBusy(true);
     try {
       const res = await fetch("/api/admin/workforce/meeting", {
@@ -296,8 +330,12 @@ export function TeamMeetingPanel({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setSpeakOutLoud((v) => !v)}
+              onClick={() => {
+                unlockAudio();
+                setSpeakOutLoud((v) => !v);
+              }}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-bold text-[#0B1F3A]"
+              title={voiceNote || "Toggle ElevenLabs natural voices"}
             >
               {speakOutLoud ? (
                 <Volume2 className="h-3.5 w-3.5 text-emerald-600" />
@@ -305,6 +343,11 @@ export function TeamMeetingPanel({
                 <VolumeX className="h-3.5 w-3.5 text-slate-400" />
               )}
               {speakOutLoud ? "Voice On" : "Voice Off"}
+              {speakOutLoud && voiceNote && (
+                <span className="ml-1 text-[10px] font-normal text-slate-500">
+                  · {voiceNote}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -398,13 +441,29 @@ export function TeamMeetingPanel({
                     : "border border-slate-200 bg-white text-slate-800"
                 }`}
               >
-                <p
-                  className={`mb-1 text-[10px] font-extrabold ${
-                    isFounder ? "text-[#F5B301]" : "text-[#0B1F3A]"
-                  }`}
-                >
-                  {turn.speakerName}
-                </p>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p
+                    className={`text-[10px] font-extrabold ${
+                      isFounder ? "text-[#F5B301]" : "text-[#0B1F3A]"
+                    }`}
+                  >
+                    {turn.speakerName}
+                  </p>
+                  {!isFounder && turn.speakerType === "agent" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        unlockAudio();
+                        void speakText(turn.text, turn.speakerId, { force: true });
+                      }}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-[#0B1F3A]"
+                      title="Listen with this agent's ElevenLabs voice"
+                    >
+                      <Volume2 className="h-3 w-3" />
+                      Listen
+                    </button>
+                  )}
+                </div>
                 <p className="whitespace-pre-wrap">{turn.text}</p>
               </div>
             </div>
