@@ -127,9 +127,12 @@ export function WorkforceConsoleClient() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Dispatch failed.");
       setInstruction("");
+      const taskFailed = json.task?.status === "failed";
       setBanner({
-        type: "ok",
-        text: `Task routed to ${json.task?.assignedAgentId || "workforce"} (${json.task?.status}).`,
+        type: taskFailed ? "err" : "ok",
+        text: taskFailed
+          ? `Task failed (${json.task?.assignedAgentId || "workforce"}): ${json.task?.errorMessage || "Check Tasks tab"}`
+          : `Task routed to ${json.task?.assignedAgentId || "workforce"} (${json.task?.status}).`,
       });
       await loadOverview();
     } catch (err) {

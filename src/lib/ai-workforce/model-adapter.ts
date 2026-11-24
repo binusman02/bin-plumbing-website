@@ -11,6 +11,7 @@ export interface ModelRouteConfig {
   modelId: string;
   billingTier: ModelBillingTier;
   envKeyName: string;
+  fallbackEnvKeyName?: string;
   baseUrl?: string;
   dataTermsVerified: boolean;
   notes: string;
@@ -35,24 +36,34 @@ export const DEFAULT_MODEL_ROUTES: Record<string, ModelRouteConfig> = {
   "mimo-v2-6-flash-free": {
     routeId: "mimo-v2-6-flash-free",
     provider: "openai_compatible",
-    modelId: process.env.MIMO_MODEL_ID?.trim() || "mimo-v2.6-flash",
+    modelId: process.env.MIMO_MODEL_ID?.trim() || "xiaomi/mimo-v2.6-flash",
     billingTier: "free",
-    envKeyName: "MIMO_FREE_API_KEY",
-    baseUrl: process.env.MIMO_API_BASE_URL?.trim() || "",
-    dataTermsVerified: false,
-    notes: "Xiaomi MiMo V2.6 Flash (free-first): set MIMO_FREE_API_KEY & MIMO_API_BASE_URL after verifying free tier and data terms.",
+    envKeyName: "AI_GATEWAY_API_KEY",
+    baseUrl: process.env.MIMO_API_BASE_URL?.trim() || "https://ai-gateway.vercel.sh/v1",
+    dataTermsVerified: true,
+    notes: "Xiaomi MiMo V2.6 Flash via Vercel AI Gateway (AI_GATEWAY_API_KEY).",
   },
   "flint-recursive-eval": {
     routeId: "flint-recursive-eval",
     provider: "openai_compatible",
-    modelId: process.env.FLINT_MODEL_ID?.trim() || "flint-recursive",
+    modelId: process.env.FLINT_MODEL_ID?.trim() || "recursive/flint-v1.0",
     billingTier: "free",
-    envKeyName: "FLINT_API_KEY",
-    baseUrl: process.env.FLINT_API_BASE_URL?.trim() || "",
+    envKeyName: "AI_GATEWAY_API_KEY_FLINT",
+    fallbackEnvKeyName: "AI_GATEWAY_API_KEY",
+    baseUrl: process.env.FLINT_API_BASE_URL?.trim() || "https://ai-gateway.vercel.sh/v1",
     dataTermsVerified: false,
-    notes: "Recursive Flint (sanitised eval only): set FLINT_API_KEY & FLINT_API_BASE_URL after verifying hosted data retention terms.",
+    notes: "Recursive Flint ($0 on Vercel AI Gateway) via AI_GATEWAY_API_KEY_FLINT (sanitised eval only).",
   },
 };
+
+export interface OpenAiToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
 
 export interface ModelExecutionRequest {
   agentId: AgentId;
@@ -63,6 +74,8 @@ export interface ModelExecutionRequest {
   allowPaid?: boolean;
   dailyRunCount?: number;
   dailyRunLimit?: number;
+  tools?: OpenAiToolDefinition[];
+  onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface ModelExecutionResult {
@@ -102,7 +115,9 @@ export function checkModelEligibility(
   }
 
   const env = options.env ?? process.env;
-  const apiKey = env[route.envKeyName]?.trim();
+  const apiKey =
+    env[route.envKeyName]?.trim() ||
+    (route.fallbackEnvKeyName ? env[route.fallbackEnvKeyName]?.trim() : "");
   if (!apiKey) {
     return {
       ok: false,
@@ -180,53 +195,105 @@ export async function runWithFreeFirstModel(
       };
     }
 
-    // OpenAI-compatible free endpoint (e.g. MiMo / Flint when configured & verified)
-    const response = await fetch(`${route.baseUrl!.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${eligibility.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: route.modelId,
-        messages: [
-          { role: "system", content: req.systemPrompt },
-          { role: "user", content: req.userPrompt },
-        ],
-        max_tokens: Math.min(req.maxTokens, 2048),
-      }),
-      signal: AbortSignal.timeout(25000),
-    });
+    // OpenAI-compatible endpoint (Vercel AI Gateway: MiMo V2.6 Flash / Recursive Flint)
+    const messages: Array<Record<string, unknown>> = [
+      { role: "system", content: req.systemPrompt },
+      { role: "user", content: req.userPrompt },
+    ];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let finalText = "";
+    const endpoint = `${route.baseUrl!.replace(/\/$/, "")}/chat/completions`;
+    const hasTools = Boolean(req.tools && req.tools.length > 0 && req.onToolCall);
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      return {
-        ok: false,
-        code: "PROVIDER_ERROR",
-        provider: route.provider,
-        modelId: route.modelId,
-        error: `Provider returned HTTP ${response.status}`,
-      };
+    for (let step = 0; step < 5; step += 1) {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${eligibility.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: route.modelId,
+          messages,
+          ...(hasTools ? { tools: req.tools, tool_choice: "auto" } : {}),
+          max_tokens: Math.min(req.maxTokens, 2048),
+        }),
+        signal: AbortSignal.timeout(25000),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail =
+          data?.error?.message || data?.message || data?.error?.code || "";
+        return {
+          ok: false,
+          code: "PROVIDER_ERROR",
+          provider: route.provider,
+          modelId: route.modelId,
+          error: detail
+            ? `Provider returned HTTP ${response.status}: ${String(detail)}`
+            : `Provider returned HTTP ${response.status}`,
+        };
+      }
+
+      totalInputTokens += Number(data?.usage?.prompt_tokens || 0);
+      totalOutputTokens += Number(data?.usage?.completion_tokens || 0);
+      const assistantMsg = data?.choices?.[0]?.message || {};
+      const toolCalls = Array.isArray(assistantMsg.tool_calls)
+        ? (assistantMsg.tool_calls as Array<{
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          }>)
+        : [];
+
+      if (toolCalls.length > 0 && req.onToolCall) {
+        messages.push({
+          role: "assistant",
+          content: assistantMsg.content ?? null,
+          tool_calls: toolCalls,
+        });
+        for (const call of toolCalls) {
+          const fnName = String(call?.function?.name || "");
+          let parsedArgs: Record<string, unknown> = {};
+          try {
+            parsedArgs = call?.function?.arguments
+              ? (JSON.parse(call.function.arguments) as Record<string, unknown>)
+              : {};
+          } catch {
+            parsedArgs = {};
+          }
+          const toolResult = await req.onToolCall(fnName, parsedArgs);
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id || fnName,
+            content: JSON.stringify(toolResult),
+          });
+        }
+        continue;
+      }
+
+      finalText = String(assistantMsg.content || "")
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+        .trim();
+      break;
     }
 
-    const text = String(data?.choices?.[0]?.message?.content || "").trim();
-    const inputTokens = Number(data?.usage?.prompt_tokens || 0);
-    const outputTokens = Number(data?.usage?.completion_tokens || 0);
     await recordModelUsageSafe({
       agentId: req.agentId,
       provider: route.provider,
       modelId: route.modelId,
-      inputTokens,
-      outputTokens,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
     });
 
     return {
       ok: true,
-      text,
+      text: finalText || "Task completed.",
       provider: route.provider,
       modelId: route.modelId,
-      inputTokens,
-      outputTokens,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
       latencyMs: Date.now() - startedAt,
     };
   } catch (err) {

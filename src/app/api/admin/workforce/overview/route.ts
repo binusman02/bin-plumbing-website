@@ -55,7 +55,10 @@ export async function GET() {
         modelId: r.modelId,
         billingTier: r.billingTier,
         dataTermsVerified: r.dataTermsVerified,
-        configured: Boolean(process.env[r.envKeyName]?.trim()),
+        configured: Boolean(
+          process.env[r.envKeyName]?.trim() ||
+            (r.fallbackEnvKeyName ? process.env[r.fallbackEnvKeyName]?.trim() : "")
+        ),
         notes: r.notes,
       })),
       recentRuns: usageRows,

@@ -510,12 +510,13 @@ export async function generateAdminCopilotReply(params: {
   ];
 
   const systemPrompt = [
-    "You are the FlowGuard AI Operations Manager for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
-    "VOICE & WRITING STYLE:",
-    "- Write like a sharp, reliable human operations manager talking directly to the boss — natural, warm, concise, and clear.",
-    "- Never use robotic AI filler ('Certainly!', 'I have analyzed the data', 'Here is a breakdown:', 'Let me know if you need anything else').",
-    "- Never output raw Markdown syntax such as **bold**, ### headings, * bullets, or `backticks`. Write clean, natural sentences; if listing multiple items, use simple lines with '• ' and plain readable text.",
-    "- Languages: Admin or customers may speak/write in English, Hausa, or Nigerian Pidgin. Understand voice notes and text in all three and reply naturally in the same language used.",
+    "You are Sadiq, the FlowGuard AI Operations Manager at FlowGuard Plumbing Enterprises in Kano, Nigeria.",
+    "PERSONALITY & COMMUNICATION STYLE:",
+    "- Calm, organised, thoughtful, and dependable — sound like a capable, approachable human colleague on the team, never like a scripted bot or corporate announcement.",
+    "- Give direct answers first, keep simple updates short, and never repeat the Founder's question or recite a list of job duties when greeted or asked your name.",
+    "- Skip robotic AI openers ('Certainly!', 'I'd be happy to help!', 'Here is a breakdown:', 'Anything else I can assist with?').",
+    "- Never output raw Markdown syntax such as **bold**, ### headings, * bullets, or `backticks`. Write clean, natural prose; if listing items, use simple lines with '• '.",
+    "- Language: Use clear English by default; understand and reply naturally in Hausa or Nigerian Pidgin when used, without forcing slang.",
     ...(params.liveCall
       ? [
           "LIVE VOICE CALL MODE:",
@@ -534,7 +535,8 @@ export async function generateAdminCopilotReply(params: {
   ].join("\n");
 
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
-  if (!apiKey) {
+  const gatewayKey = process.env.AI_GATEWAY_API_KEY?.trim();
+  if (!apiKey && !gatewayKey) {
     return {
       text: `Operations Summary: ${unassignedReqs.length} unassigned jobs, ${pendingPayments.length} pending payments, ${openComplaints.length} open complaints, ${unreadMsgs.length} unread messages, ${availablePlumbers.length} plumbers On Duty.`,
       model: "fallback-rule",
@@ -964,11 +966,11 @@ export async function generateAdminCopilotReply(params: {
     }),
   };
 
-  const googleProvider = createGoogleGenerativeAI({ apiKey });
-  for (const modelId of ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]) {
+  if (gatewayKey) {
     try {
+      const mimoModel = process.env.MIMO_MODEL_ID?.trim() || "xiaomi/mimo-v2.6-flash";
       const result = await generateText({
-        model: googleProvider(modelId),
+        model: mimoModel,
         system: systemPrompt,
         messages: modelMessages,
         tools: adminTools,
@@ -977,9 +979,30 @@ export async function generateAdminCopilotReply(params: {
         abortSignal: AbortSignal.timeout(20000),
       });
       const text = result.text?.trim();
-      if (text) return { text, model: modelId, fallback: false, actionsTaken };
+      if (text) return { text, model: mimoModel, fallback: false, actionsTaken };
     } catch (err) {
-      console.error("[ai-admin] failed:", err instanceof Error ? err.message : "error");
+      console.error("[ai-admin] gateway failed:", err instanceof Error ? err.message : "error");
+    }
+  }
+
+  if (apiKey) {
+    const googleProvider = createGoogleGenerativeAI({ apiKey });
+    for (const modelId of ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]) {
+      try {
+        const result = await generateText({
+          model: googleProvider(modelId),
+          system: systemPrompt,
+          messages: modelMessages,
+          tools: adminTools,
+          stopWhen: stepCountIs(5),
+          maxOutputTokens: 1400,
+          abortSignal: AbortSignal.timeout(20000),
+        });
+        const text = result.text?.trim();
+        if (text) return { text, model: modelId, fallback: false, actionsTaken };
+      } catch (err) {
+        console.error("[ai-admin] failed:", err instanceof Error ? err.message : "error");
+      }
     }
   }
 

@@ -9,11 +9,12 @@ import {
 } from "@/lib/marketplace";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { ToolGateway } from "@/lib/ai-workforce/tool-gateway";
+import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
 import { registerEngineeringTools } from "@/lib/ai-workforce/specialists/engineering";
 import { registerResearchTools } from "@/lib/ai-workforce/specialists/research";
 import { registerSalesTools } from "@/lib/ai-workforce/specialists/sales";
 import { registerSupportTools } from "@/lib/ai-workforce/specialists/support";
-import type { ToolExecutionContext } from "@/lib/ai-workforce/types";
+import type { AgentId, ToolExecutionContext } from "@/lib/ai-workforce/types";
 
 function asNonEmptyString(val: unknown): string | null {
   return typeof val === "string" && val.trim().length > 0 ? val.trim() : null;
@@ -37,6 +38,14 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Assign an approved plumber to a service request ticket",
     tier: "amber",
     requiredScope: "admin:requests:assign",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        ticketNumber: { type: "string", description: "Ticket number e.g. BP-261122-1234" },
+        plumberNameOrId: { type: "string", description: "Approved plumber full name or ID" },
+      },
+      required: ["ticketNumber", "plumberNameOrId"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const ticketNumber = asNonEmptyString(obj.ticketNumber);
@@ -91,6 +100,28 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Update the status or internal notes of a service request ticket",
     tier: "amber",
     requiredScope: "admin:requests:status",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        ticketNumber: { type: "string" },
+        status: {
+          type: "string",
+          enum: [
+            "new",
+            "contacted",
+            "scheduled",
+            "inspection_required",
+            "in_progress",
+            "work_completed",
+            "awaiting_final_payment",
+            "completed",
+            "cancelled",
+          ],
+        },
+        internalNote: { type: "string" },
+      },
+      required: ["ticketNumber", "status"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const ticketNumber = asNonEmptyString(obj.ticketNumber);
@@ -124,6 +155,16 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Send a chat message on a ticket to a customer or plumber",
     tier: "amber",
     requiredScope: "admin:messages:send",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        ticketNumber: { type: "string" },
+        recipientRole: { type: "string", enum: ["customer", "plumber"] },
+        message: { type: "string" },
+        isInternal: { type: "boolean" },
+      },
+      required: ["ticketNumber", "recipientRole", "message"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const ticketNumber = asNonEmptyString(obj.ticketNumber);
@@ -179,6 +220,14 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Verify or reject a pending payment by ticket number",
     tier: "amber",
     requiredScope: "admin:payments:verify",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        ticketNumber: { type: "string" },
+        decision: { type: "string", enum: ["verified", "rejected"] },
+      },
+      required: ["ticketNumber", "decision"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const ticketNumber = asNonEmptyString(obj.ticketNumber);
@@ -214,6 +263,15 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Approve, reject, or suspend a plumber account",
     tier: "amber",
     requiredScope: "admin:plumbers:verify",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        plumberNameOrId: { type: "string" },
+        status: { type: "string", enum: ["approved", "rejected", "suspended"] },
+        notes: { type: "string" },
+      },
+      required: ["plumberNameOrId", "status"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const plumberNameOrId = asNonEmptyString(obj.plumberNameOrId);
@@ -255,6 +313,15 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Update a complaint status with a resolution note",
     tier: "amber",
     requiredScope: "admin:complaints:update",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        complaintIdOrTicket: { type: "string" },
+        status: { type: "string", enum: ["under_review", "investigating", "resolved"] },
+        adminNote: { type: "string" },
+      },
+      required: ["complaintIdOrTicket", "status"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const complaintIdOrTicket = asNonEmptyString(obj.complaintIdOrTicket);
@@ -301,6 +368,15 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
     description: "Update marketplace commission rates or small-job threshold",
     tier: "amber",
     requiredScope: "admin:settings:commission",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        commissionDefaultRate: { type: "number" },
+        commissionSmallJobRate: { type: "number" },
+        smallJobThreshold: { type: "number" },
+        smallJobRuleEnabled: { type: "boolean" },
+      },
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const patch: Record<string, unknown> = {};
@@ -347,6 +423,216 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
       };
     },
   });
+
+  // Green read-only operations & workforce tools for Sadiq (Operations Manager)
+  gateway.registerTool({
+    name: "get_live_operations_feed",
+    description: "Fetch latest live tickets, pending payments, unread messages, and recent enquiries",
+    tier: "green",
+    requiredScope: "admin:operations:read",
+    inputJsonSchema: { type: "object", properties: {} },
+    validateInput() {
+      return { ok: true, data: {} };
+    },
+    async execute() {
+      const supabase = getServiceSupabase();
+      const [reqs, pays, unread, enqs] = await Promise.all([
+        supabase
+          .from("service_requests")
+          .select("ticket_number, status, urgency, problem_category, customer_name, city_lga, assigned_technician, created_at")
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false })
+          .limit(12),
+        supabase
+          .from("payments")
+          .select("ticket_number, total_payment, verification_status, created_at")
+          .eq("verification_status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(10),
+        supabase
+          .from("messages")
+          .select("ticket_number, sender_name, sender_role, message, created_at")
+          .eq("admin_read", false)
+          .order("created_at", { ascending: false })
+          .limit(10),
+        supabase
+          .from("enquiries")
+          .select("id, full_name, service_category, area_in_kano, status, created_at")
+          .order("created_at", { ascending: false })
+          .limit(10),
+      ]);
+      return {
+        recentRequests: reqs.data || [],
+        pendingPayments: pays.data || [],
+        unreadMessages: unread.data || [],
+        recentEnquiries: enqs.data || [],
+      };
+    },
+  });
+
+  gateway.registerTool({
+    name: "inspect_ticket",
+    description: "Inspect full details of a specific ticket by ticketNumber",
+    tier: "green",
+    requiredScope: "admin:requests:read",
+    inputJsonSchema: {
+      type: "object",
+      properties: { ticketNumber: { type: "string" } },
+      required: ["ticketNumber"],
+    },
+    validateInput(raw) {
+      const obj = (raw || {}) as Record<string, unknown>;
+      const ticketNumber = asNonEmptyString(obj.ticketNumber);
+      if (!ticketNumber) return { ok: false, error: "ticketNumber is required." };
+      return { ok: true, data: { ticketNumber } };
+    },
+    async execute(input) {
+      const supabase = getServiceSupabase();
+      const { data } = await supabase
+        .from("service_requests")
+        .select("ticket_number, status, urgency, problem_category, customer_name, city_lga, assigned_technician, created_at")
+        .eq("ticket_number", input.ticketNumber)
+        .maybeSingle();
+      if (!data) throw new Error(`Ticket ${input.ticketNumber} not found.`);
+      return data;
+    },
+  });
+
+  gateway.registerTool({
+    name: "find_best_plumbers_for_area",
+    description: "Rank approved plumbers by availability, area match, and active workload",
+    tier: "green",
+    requiredScope: "admin:plumbers:read",
+    inputJsonSchema: {
+      type: "object",
+      properties: { area: { type: "string" } },
+    },
+    validateInput(raw) {
+      const obj = (raw || {}) as Record<string, unknown>;
+      return { ok: true, data: { area: asNonEmptyString(obj.area) ?? "" } };
+    },
+    async execute(input) {
+      const supabase = getServiceSupabase();
+      const { data } = await supabase
+        .from("plumbers")
+        .select("id, full_name, is_available, preferred_locations, residential_location, rating, total_jobs")
+        .eq("verification_status", "approved")
+        .is("deleted_at", null)
+        .limit(25);
+      const areaLower = input.area.toLowerCase();
+      return (data || []).map((p) => {
+        const locs = Array.isArray(p.preferred_locations)
+          ? p.preferred_locations.join(", ")
+          : String(p.residential_location || "Kano");
+        return {
+          id: p.id,
+          name: p.full_name,
+          onDuty: Boolean(p.is_available),
+          areas: locs,
+          areaMatch: areaLower ? locs.toLowerCase().includes(areaLower) : true,
+          rating: p.rating,
+        };
+      });
+    },
+  });
+
+  gateway.registerTool({
+    name: "inspect_financial_summary",
+    description: "Summarize verified revenue, commission, and pending payments",
+    tier: "green",
+    requiredScope: "admin:financials:read",
+    inputJsonSchema: { type: "object", properties: {} },
+    validateInput() {
+      return { ok: true, data: {} };
+    },
+    async execute() {
+      const supabase = getServiceSupabase();
+      const { data: payments } = await supabase
+        .from("payments")
+        .select("total_payment, company_commission, verification_status")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      const rows = payments || [];
+      const verified = rows.filter((p) => p.verification_status === "verified");
+      const pending = rows.filter((p) => p.verification_status === "pending");
+      return {
+        verifiedCount: verified.length,
+        pendingCount: pending.length,
+        verifiedRevenueNGN: verified.reduce((s, p) => s + (Number(p.total_payment) || 0), 0),
+        verifiedCommissionNGN: verified.reduce((s, p) => s + (Number(p.company_commission) || 0), 0),
+        pendingAmountNGN: pending.reduce((s, p) => s + (Number(p.total_payment) || 0), 0),
+      };
+    },
+  });
+
+  gateway.registerTool({
+    name: "workforce_read_agent_status",
+    description: "List all 5 AI Workforce agents, their names, roles, and configured model routes",
+    tier: "green",
+    requiredScope: "workforce:agents:read",
+    inputJsonSchema: { type: "object", properties: {} },
+    validateInput() {
+      return { ok: true, data: {} };
+    },
+    async execute() {
+      return listAgentDefinitions().map((a) => ({
+        id: a.id,
+        displayName: a.displayName,
+        roleTitle: a.roleTitle,
+        modelRoute: a.modelRoute,
+        enabled: a.enabled,
+      }));
+    },
+  });
+
+  gateway.registerTool({
+    name: "workforce_read_tasks",
+    description: "Read recent AI Workforce tasks and statuses",
+    tier: "green",
+    requiredScope: "workforce:tasks:read",
+    inputJsonSchema: { type: "object", properties: {} },
+    validateInput() {
+      return { ok: true, data: {} };
+    },
+    async execute() {
+      const supabase = getServiceSupabase();
+      const { data } = await supabase
+        .from("ai_tasks")
+        .select("id, title, assigned_agent_id, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(15);
+      return data || [];
+    },
+  });
+}
+
+export function getOpenAiToolsForAgent(
+  gateway: ToolGateway,
+  agentId: AgentId
+): Array<{
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}> {
+  const agent = getAgentDefinition(agentId);
+  if (!agent) return [];
+  const defs: Array<{
+    type: "function";
+    function: { name: string; description: string; parameters: Record<string, unknown> };
+  }> = [];
+
+  for (const toolName of agent.allowedTools) {
+    const spec = gateway.getTool(toolName);
+    if (!spec || spec.tier === "red") continue;
+    defs.push({
+      type: "function",
+      function: {
+        name: spec.name,
+        description: spec.description,
+        parameters: spec.inputJsonSchema ?? { type: "object", properties: {} },
+      },
+    });
+  }
+  return defs;
 }
 
 let _defaultGateway: ToolGateway | null = null;

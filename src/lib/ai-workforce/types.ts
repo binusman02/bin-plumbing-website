@@ -35,6 +35,7 @@ export interface ToolSpec<TInput = Record<string, unknown>, TOutput = unknown> {
   description: string;
   tier: PermissionTier;
   requiredScope: string;
+  inputJsonSchema?: Record<string, unknown>;
   validateInput: (raw: unknown) => { ok: true; data: TInput } | { ok: false; error: string };
   execute: (input: TInput, ctx: ToolExecutionContext) => Promise<TOutput>;
 }

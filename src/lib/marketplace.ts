@@ -3,6 +3,11 @@ import { cacheLife, cacheTag, revalidateTag } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { getRequiredAnonKey, getRequiredSupabaseUrl, getServiceSupabase } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/notifications";
+import {
+  triggerWorkforceOnComplaint,
+  triggerWorkforceOnPaymentSubmitted,
+  triggerWorkforceOnServiceRequest,
+} from "@/lib/ai-workforce/auto-triggers";
 import { reconcilePlumberSharing, reconcileSharingForRequest } from "@/lib/live-location-server";
 import {
   decodeQuotationNotes,
@@ -1081,6 +1086,15 @@ export async function createUniversalServiceRequest(data: {
     });
   }
 
+  await triggerWorkforceOnServiceRequest({
+    ticketNumber,
+    customerName: data.customerName || "Customer",
+    problemCategory: data.problemCategory || "General Plumbing",
+    cityLga: data.cityLga || "Kano",
+    issueDescription: data.issueDescription || "",
+    urgency: data.priority,
+  });
+
   return mapRequestRow(insertedReq, [historyPayload]);
 }
 
@@ -1989,6 +2003,12 @@ export async function recordPayment(params: {
   if (error || !inserted) {
     throw new Error(`Failed to record payment: ${error?.message || "Unknown error"}`);
   }
+  await triggerWorkforceOnPaymentSubmitted({
+    ticketNumber: params.ticketNumber,
+    customerName: params.customerName || "Customer",
+    amount: params.totalPayment,
+  });
+
   return mapPaymentRow(inserted);
 }
 
@@ -3070,6 +3090,13 @@ export async function createComplaint(
   if (complaintErr) {
     throw new Error(`Failed to save complaint: ${complaintErr.message}`);
   }
+  await triggerWorkforceOnComplaint({
+    complaintId: id,
+    ticketNumber: payload.ticket_number,
+    customerName: payload.customer_name,
+    message: desc,
+  });
+
   return {
     id,
     ticket_number: payload.ticket_number,

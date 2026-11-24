@@ -3,6 +3,7 @@ import { generateAdminCopilotReply, type AiChatTurn } from "@/lib/ai-assistant";
 import { synthesizeZiatSpeech } from "@/lib/ai-voice";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { enforceTrackingRateLimit } from "@/lib/tracking-api";
+import { triggerEngineeringIncidentWatch } from "@/lib/ai-workforce/auto-triggers";
 
 export async function POST(request: Request) {
   try {
@@ -73,8 +74,13 @@ export async function POST(request: Request) {
       actionsTaken: res.actionsTaken,
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "Admin AI failed.";
+    void triggerEngineeringIncidentWatch({
+      source: "/api/ai/admin",
+      errorMessage: msg,
+    });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Admin AI failed." },
+      { error: msg },
       { status: 500 }
     );
   }

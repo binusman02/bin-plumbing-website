@@ -19,7 +19,7 @@ const INITIAL_TURNS: AiTurn[] = [
   {
     role: "assistant",
     content:
-      "Hello, I'm your FlowGuard AI Operations Manager. Tell me what you'd like to review or prepare today — any mutating action I propose will wait for your explicit approval.",
+      "Hello, I'm Sadiq, your FlowGuard AI Operations Manager. Tell me what you'd like to review or prepare today — any mutating action I propose will wait for your explicit approval.",
   },
 ];
 
@@ -211,12 +211,12 @@ export function AdminAiCopilot() {
       >
         <Image
           src="/images/ai/ziat-avatar.jpg"
-          alt="Ziat"
+          alt="Sadiq"
           width={32}
           height={32}
           className="h-8 w-8 shrink-0 rounded-full border border-[#F5B301] object-cover"
         />
-        Ask Ziat
+        Ask Sadiq
       </button>
     );
   }
@@ -227,14 +227,14 @@ export function AdminAiCopilot() {
         <div className="flex items-center gap-2.5">
           <Image
             src="/images/ai/ziat-avatar.jpg"
-            alt="Ziat"
+            alt="Sadiq"
             width={36}
             height={36}
             className="h-9 w-9 shrink-0 rounded-full border-2 border-[#F5B301] object-cover"
           />
           <div>
-            <p className="text-xs font-extrabold">Ziat • Admin Copilot</p>
-            <p className="text-[10px] text-slate-300">Live Dispatch, Analysis &amp; Actions</p>
+            <p className="text-xs font-extrabold">Sadiq • Operations Manager</p>
+            <p className="text-[10px] text-slate-300">Live Dispatch, Analysis &amp; Approvals</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -247,8 +247,8 @@ export function AdminAiCopilot() {
                 ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
                 : "bg-rose-500 text-white hover:bg-rose-600"
             }`}
-            aria-label={callState === "idle" ? "Start live voice call with Ziat" : "End live call"}
-            title={callState === "idle" ? "Live Call with Ziat" : "End Call"}
+            aria-label={callState === "idle" ? "Start live voice call with Sadiq" : "End live call"}
+            title={callState === "idle" ? "Live Call with Sadiq" : "End Call"}
           >
             {callState === "idle" ? (
               <>
@@ -266,7 +266,7 @@ export function AdminAiCopilot() {
             type="button"
             onClick={toggleVoiceReplies}
             className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
-            aria-label={voiceRepliesEnabled ? "Mute Ziat voice replies" : "Enable Ziat voice replies"}
+            aria-label={voiceRepliesEnabled ? "Mute Sadiq voice replies" : "Enable Sadiq voice replies"}
             title={voiceRepliesEnabled ? "Voice replies on" : "Voice replies off"}
           >
             {voiceRepliesEnabled ? (
@@ -498,8 +498,8 @@ export function AdminAiCopilot() {
                 })
               }
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-[#0B1F3A] hover:bg-slate-100 disabled:opacity-40"
-              aria-label="Send voice note to Ziat"
-              title="Speak to Ziat"
+              aria-label="Send voice note to Sadiq"
+              title="Speak to Sadiq"
             >
               <Mic className="h-4 w-4" />
             </button>

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+import { getAdminToolGateway, getOpenAiToolsForAgent } from "@/lib/ai-workforce/admin-tools";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 import type { AgentId } from "@/lib/ai-workforce/types";
@@ -277,6 +278,8 @@ export class WorkforceOrchestrator {
 
     const dailyRunCount = await this.store.countTodayRuns(assignedAgentId);
     const runner = params.modelRunner ?? runWithFreeFirstModel;
+    const gateway = getAdminToolGateway();
+    const scopedTools = getOpenAiToolsForAgent(gateway, assignedAgentId);
     const res = await runner({
       agentId: assignedAgentId,
       routeId: agent.modelRoute,
@@ -285,6 +288,30 @@ export class WorkforceOrchestrator {
       maxTokens: agent.maxTokensPerRun,
       dailyRunCount,
       dailyRunLimit: agent.dailyRunLimit,
+      tools: scopedTools,
+      onToolCall: async (toolName, args) => {
+        const outcome = await gateway.invoke({
+          ctx: {
+            agentId: assignedAgentId,
+            actorUserId: params.requesterId,
+            actorEmail: "owner@flowguard.com.ng",
+            taskId: task.id,
+          },
+          toolName,
+          rawInput: args,
+        });
+        if (outcome.status === "pending_approval" && outcome.approvalId) {
+          await this.store.appendEvent({
+            id: randomUUID(),
+            taskId: task.id,
+            agentId: assignedAgentId,
+            eventType: "approval_requested",
+            message: `Approval ${outcome.approvalId} requested for ${toolName}.`,
+            createdAt: new Date().toISOString(),
+          });
+        }
+        return outcome;
+      },
     });
 
     if (!res.ok) {
