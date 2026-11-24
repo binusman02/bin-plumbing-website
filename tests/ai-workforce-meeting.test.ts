@@ -5,7 +5,10 @@ import {
   detectPrimarySpeaker,
   parseStructuredMeetingOutput,
 } from "../src/lib/ai-workforce/meeting";
-import { assignAgentVoices } from "../src/lib/ai-workforce/voice-profiles";
+import {
+  assignAgentVoices,
+  getElevenLabsVoiceId,
+} from "../src/lib/ai-workforce/voice-profiles";
 
 test("AI Workforce Live Team Meeting", async (t) => {
   await t.test("1. Inviting specialists by name or 'everyone' adds them to the room", () => {
@@ -72,5 +75,20 @@ test("AI Workforce Live Team Meeting", async (t) => {
     assert.match(assigned.customer_support_ai.voice?.name || "", /Jenny/i);
     assert.match(assigned.research_ai.voice?.name || "", /Andrew/i);
     assert.match(assigned.engineering_ai.voice?.name || "", /Steffan/i);
+  });
+
+  await t.test("5. Assigns 5 distinct ElevenLabs voice IDs with optional env overrides", () => {
+    const ids = [
+      getElevenLabsVoiceId("operations_manager", {}),
+      getElevenLabsVoiceId("sales_ai", {}),
+      getElevenLabsVoiceId("customer_support_ai", {}),
+      getElevenLabsVoiceId("research_ai", {}),
+      getElevenLabsVoiceId("engineering_ai", {}),
+    ];
+    assert.equal(new Set(ids).size, 5);
+    assert.equal(
+      getElevenLabsVoiceId("sales_ai", { ELEVENLABS_VOICE_AMINA: "custom-amina-id" }),
+      "custom-amina-id"
+    );
   });
 });

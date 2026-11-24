@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Hand, Send, Sparkles, Users, Volume2, VolumeX } from "lucide-react";
+import { Hand, Mic, Send, Sparkles, Square, Users, Volume2, VolumeX } from "lucide-react";
 import { assignAgentVoices, cleanTextForSpeech } from "@/lib/ai-workforce/voice-profiles";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
@@ -54,7 +54,12 @@ export function TeamMeetingPanel({
   const [busy, setBusy] = useState(false);
   const [speakOutLoud, setSpeakOutLoud] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -72,12 +77,8 @@ export function TeamMeetingPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, raisedHands]);
 
-  function speakText(text: string, agentId: string) {
-    if (!speakOutLoud || typeof window === "undefined" || !("speechSynthesis" in window)) {
-      return;
-    }
-    const clean = cleanTextForSpeech(text);
-    if (!clean) return;
+  function speakWithBrowserFallback(clean: string, agentId: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     try {
       const synth = window.speechSynthesis;
       synth.cancel();
@@ -95,6 +96,110 @@ export function TeamMeetingPanel({
       synth.speak(utter);
     } catch {
       // Ignore speech synthesis errors
+    }
+  }
+
+  async function speakText(text: string, agentId: string) {
+    if (!speakOutLoud) return;
+    // Skip spending ElevenLabs credits on timeout/error notices
+    if (text.startsWith("I couldn't reach my model right now")) return;
+
+    const clean = cleanTextForSpeech(text);
+    if (!clean) return;
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    try {
+      const res = await fetch("/api/admin/workforce/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: clean, agentId }),
+      });
+      if (res.ok && res.headers.get("content-type")?.includes("audio/mpeg")) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => URL.revokeObjectURL(url);
+        audio.onerror = () => URL.revokeObjectURL(url);
+        await audio.play();
+        return;
+      }
+    } catch {
+      // Fall back to browser speech below
+    }
+
+    speakWithBrowserFallback(clean, agentId);
+  }
+
+  async function toggleRecording() {
+    if (recording && mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (blob.size === 0) return;
+
+        setTranscribing(true);
+        try {
+          const fd = new FormData();
+          fd.append("audio", blob, "founder-voice.webm");
+          const res = await fetch("/api/admin/workforce/stt", { method: "POST", body: fd });
+          const json = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+          if (!res.ok || !json.text) {
+            throw new Error(json.error || "Could not transcribe voice note.");
+          }
+          await sendMeetingTurn(json.text);
+        } catch (err) {
+          setTurns((prev) => [
+            ...prev,
+            {
+              id: `err-stt-${Date.now()}`,
+              speakerType: "system",
+              speakerId: "system",
+              speakerName: "Meeting Room",
+              text: err instanceof Error ? err.message : "Voice transcription failed.",
+              createdAt: new Date().toISOString(),
+            },
+          ]);
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: `err-mic-${Date.now()}`,
+          speakerType: "system",
+          speakerId: "system",
+          speakerName: "Meeting Room",
+          text: "Microphone access was denied. Please allow mic permission in your browser.",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
     }
   }
 
@@ -360,12 +465,41 @@ export function TeamMeetingPanel({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Speak to the room, e.g. 'Sadiq, bring Bashir in' or '@Bashir what happened?'..."
+          placeholder={
+            recording
+              ? "Recording your voice... tap Stop when done"
+              : transcribing
+                ? "Transcribing your voice..."
+                : "Speak to the room, e.g. 'Sadiq, bring Bashir in' or '@Bashir what happened?'..."
+          }
           className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-[#0B1F3A] focus:border-[#0B1F3A] focus:outline-none"
         />
         <button
+          type="button"
+          disabled={busy || transcribing}
+          onClick={() => void toggleRecording()}
+          title={recording ? "Stop recording" : "Speak using your microphone"}
+          className={`inline-flex h-11 items-center justify-center gap-1.5 rounded-xl px-4 text-xs font-extrabold transition disabled:opacity-50 ${
+            recording
+              ? "bg-red-600 text-white animate-pulse"
+              : "border border-slate-200 bg-white text-[#0B1F3A] hover:bg-slate-50"
+          }`}
+        >
+          {recording ? (
+            <>
+              <Square className="h-3.5 w-3.5" />
+              Stop
+            </>
+          ) : (
+            <>
+              <Mic className="h-3.5 w-3.5 text-[#0B1F3A]" />
+              {transcribing ? "Sending..." : "Mic"}
+            </>
+          )}
+        </button>
+        <button
           type="submit"
-          disabled={busy || !input.trim()}
+          disabled={busy || transcribing || recording || !input.trim()}
           className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] px-5 text-xs font-extrabold text-white disabled:opacity-50"
         >
           <Send className="h-3.5 w-3.5 text-[#F5B301]" />

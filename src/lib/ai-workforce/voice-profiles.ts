@@ -184,3 +184,28 @@ export function cleanTextForSpeech(text: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/**
+ * 5 distinct pre-made ElevenLabs voices (3 male, 2 female), with optional env overrides.
+ */
+export const ELEVENLABS_VOICE_IDS: Record<AgentId, string> = {
+  operations_manager: "pNInz6obpgDQGcFmaJgB", // Adam (calm, authoritative male)
+  sales_ai: "EXAVITQu4vr4xnSDxMaL", // Sarah (warm, energetic female)
+  customer_support_ai: "21m00Tcm4TlvDq8ikWAM", // Rachel (gentle, empathetic female)
+  research_ai: "onwK4e9ZLuTAKqWW03F9", // Daniel (crisp, analytical male)
+  engineering_ai: "N2lVS1w4EtoT3dr4eOWO", // Callum (steady, thoughtful male)
+};
+
+export function getElevenLabsVoiceId(
+  agentId: AgentId,
+  env: Record<string, string | undefined> = process.env
+): string {
+  const overrideMap: Record<AgentId, string | undefined> = {
+    operations_manager: env.ELEVENLABS_VOICE_SADIQ,
+    sales_ai: env.ELEVENLABS_VOICE_AMINA,
+    customer_support_ai: env.ELEVENLABS_VOICE_ZAINAB,
+    research_ai: env.ELEVENLABS_VOICE_FARUK,
+    engineering_ai: env.ELEVENLABS_VOICE_BASHIR,
+  };
+  return overrideMap[agentId]?.trim() || ELEVENLABS_VOICE_IDS[agentId] || ELEVENLABS_VOICE_IDS.operations_manager;
+}
