@@ -34,6 +34,46 @@ export class UnconfiguredWebResearchProvider implements WebResearchProvider {
   }
 }
 
+export class TavilyWebResearchProvider implements WebResearchProvider {
+  constructor(private readonly apiKey: string) {}
+
+  async search(query: string): Promise<Array<{ title: string; url: string; snippet: string }>> {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: this.apiKey,
+        query,
+        search_depth: "basic",
+        max_results: 5,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as {
+      results?: Array<{ title?: string; url?: string; content?: string }>;
+      detail?: string;
+      error?: string;
+    };
+    if (!res.ok) {
+      throw new Error(data.detail || data.error || `Tavily search failed (HTTP ${res.status}).`);
+    }
+
+    return (data.results || []).map((r) => ({
+      title: String(r.title || "Web result"),
+      url: String(r.url || "https://flowguard.com.ng"),
+      snippet: String(r.content || ""),
+    }));
+  }
+}
+
+export function createDefaultWebResearchProvider(
+  env: Record<string, string | undefined> = process.env
+): WebResearchProvider {
+  const tavilyKey = env.TAVILY_API_KEY?.trim();
+  return tavilyKey ? new TavilyWebResearchProvider(tavilyKey) : new UnconfiguredWebResearchProvider();
+}
+
 export function sanitizeUntrustedWebSnippet(raw: string): string {
   return raw
     .replace(/ignore\s+(all\s+)?previous\s+instructions/gi, "[STRIPPED_UNTRUSTED_DIRECTIVE]")
@@ -44,7 +84,7 @@ export function sanitizeUntrustedWebSnippet(raw: string): string {
 
 export function registerResearchTools(
   gateway: ToolGateway,
-  provider: WebResearchProvider = new UnconfiguredWebResearchProvider()
+  provider: WebResearchProvider = createDefaultWebResearchProvider()
 ): void {
   gateway.registerTool({
     name: "research_web_search",

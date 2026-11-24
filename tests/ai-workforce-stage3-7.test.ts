@@ -4,15 +4,23 @@ import { ApprovalService, InMemoryApprovalStore } from "../src/lib/ai-workforce/
 import { getOwnerApprovalDeepLink } from "../src/lib/ai-workforce/admin-tools";
 import { InMemoryToolExecutionLogger, ToolGateway } from "../src/lib/ai-workforce/tool-gateway";
 import {
+  GitHubApiConnector,
   LocalSafeRepoConnector,
+  createDefaultGitHubConnector,
   isPathBlockedForEngineeringAi,
   registerEngineeringTools,
 } from "../src/lib/ai-workforce/specialists/engineering";
 import {
+  TavilyWebResearchProvider,
+  UnconfiguredWebResearchProvider,
+  createDefaultWebResearchProvider,
   registerResearchTools,
   sanitizeUntrustedWebSnippet,
 } from "../src/lib/ai-workforce/specialists/research";
 import {
+  ResendEmailAdapter,
+  UnconfiguredEmailAdapter,
+  createDefaultEmailAdapter,
   deduplicateEnquiries,
   registerSalesTools,
 } from "../src/lib/ai-workforce/specialists/sales";
@@ -208,5 +216,24 @@ test("AI Workforce Stages 3–7 — Specialists, Isolation, Prompt-Injection & D
     assert.equal(assessSupportApprovalNeed("Hi, what is the status of my request?").needsApproval, false);
     assert.equal(assessSupportApprovalNeed("Give me a 50% discount or refund my payment").needsApproval, true);
     assert.equal(assessSupportApprovalNeed("Water is flooding my kitchen right now!").needsApproval, true);
+  });
+
+  await t.test("Live external connectors activate from env vars and fall back safely when unset", () => {
+    assert.ok(createDefaultWebResearchProvider({}) instanceof UnconfiguredWebResearchProvider);
+    assert.ok(
+      createDefaultWebResearchProvider({ TAVILY_API_KEY: "tvly-test" }) instanceof
+        TavilyWebResearchProvider
+    );
+
+    assert.ok(createDefaultEmailAdapter({}) instanceof UnconfiguredEmailAdapter);
+    assert.ok(
+      createDefaultEmailAdapter({ RESEND_API_KEY: "re_test" }) instanceof ResendEmailAdapter
+    );
+
+    assert.ok(createDefaultGitHubConnector({}) instanceof LocalSafeRepoConnector);
+    assert.ok(
+      createDefaultGitHubConnector({ GITHUB_TOKEN: "github_pat_test" }) instanceof
+        GitHubApiConnector
+    );
   });
 });

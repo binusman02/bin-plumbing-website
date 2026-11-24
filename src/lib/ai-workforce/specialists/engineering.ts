@@ -82,9 +82,176 @@ export class LocalSafeRepoConnector implements GitHubConnector {
   }
 }
 
+export class GitHubApiConnector implements GitHubConnector {
+  public readonly providerName = "github-api";
+  private readonly localFallback = new LocalSafeRepoConnector();
+
+  constructor(
+    private readonly token: string,
+    private readonly repo: string = "binusman02/bin-plumbing-website"
+  ) {}
+
+  private async githubFetch<T>(
+    apiPath: string,
+    init: RequestInit = {}
+  ): Promise<{ ok: boolean; status: number; data: T }> {
+    const res = await fetch(`https://api.github.com/repos/${this.repo}${apiPath}`, {
+      ...init,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${this.token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = (await res.json().catch(() => ({}))) as T;
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  async readRepoFile(relPath: string): Promise<{ ok: boolean; content?: string; error?: string }> {
+    if (isPathBlockedForEngineeringAi(relPath)) {
+      return { ok: false, error: `Access denied to sensitive/restricted path "${relPath}".` };
+    }
+    const local = await this.localFallback.readRepoFile(relPath);
+    if (local.ok) return local;
+
+    const cleanPath = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
+    const res = await this.githubFetch<{ content?: string; encoding?: string; message?: string }>(
+      `/contents/${cleanPath.split("/").map(encodeURIComponent).join("/")}`
+    );
+    if (!res.ok || !res.data.content) {
+      return { ok: false, error: res.data.message || `File "${relPath}" not found.` };
+    }
+    const decoded = Buffer.from(res.data.content, "base64").toString("utf8");
+    return { ok: true, content: decoded.slice(0, 20000) };
+  }
+
+  async prepareDraftPr(input: {
+    branchName: string;
+    title: string;
+    summary: string;
+    testEvidence: string;
+    changedFiles: string[];
+  }): Promise<{ ok: boolean; draftPrUrl?: string; branchName: string; error?: string }> {
+    if (!input.testEvidence.trim()) {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: "Test evidence is required before preparing a pull request.",
+      };
+    }
+    if (input.branchName === "master" || input.branchName === "main") {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: "Direct work on protected branches (master/main) is forbidden.",
+      };
+    }
+
+    const baseBranch = "master";
+    const baseRef = await this.githubFetch<{ object?: { sha?: string }; message?: string }>(
+      `/git/ref/heads/${baseBranch}`
+    );
+    if (!baseRef.ok || !baseRef.data.object?.sha) {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: baseRef.data.message || "Could not resolve base branch SHA on GitHub.",
+      };
+    }
+
+    // Create branch if it doesn't exist yet (422 means branch already exists)
+    const createRef = await this.githubFetch<{ message?: string }>("/git/refs", {
+      method: "POST",
+      body: JSON.stringify({
+        ref: `refs/heads/${input.branchName}`,
+        sha: baseRef.data.object.sha,
+      }),
+    });
+    if (!createRef.ok && createRef.status !== 422) {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: createRef.data.message || "Failed to create feature branch on GitHub.",
+      };
+    }
+
+    const prBody = [
+      `## Summary`,
+      input.summary,
+      ``,
+      `## Test Evidence`,
+      input.testEvidence,
+      ``,
+      `## Target Files`,
+      input.changedFiles.length > 0 ? input.changedFiles.map((f) => `- \`${f}\``).join("\n") : "- Proposal only",
+    ].join("\n");
+
+    let prRes = await this.githubFetch<{ html_url?: string; message?: string }>("/pulls", {
+      method: "POST",
+      body: JSON.stringify({
+        title: input.title,
+        head: input.branchName,
+        base: baseBranch,
+        body: prBody,
+        draft: true,
+      }),
+    });
+
+    // GitHub rejects PRs when head has 0 commits ahead of base; add a proposal doc commit on the feature branch
+    if (!prRes.ok && prRes.status === 422) {
+      const slug = input.branchName.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 60) || "proposal";
+      const filePath = `.flowguard-proposals/${slug}.md`;
+      await this.githubFetch(`/contents/${filePath}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          message: `chore(ai-proposal): ${input.title}`,
+          content: Buffer.from(`# ${input.title}\n\n${prBody}\n`, "utf8").toString("base64"),
+          branch: input.branchName,
+        }),
+      });
+
+      prRes = await this.githubFetch<{ html_url?: string; message?: string }>("/pulls", {
+        method: "POST",
+        body: JSON.stringify({
+          title: input.title,
+          head: input.branchName,
+          base: baseBranch,
+          body: prBody,
+          draft: true,
+        }),
+      });
+    }
+
+    if (!prRes.ok || !prRes.data.html_url) {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: prRes.data.message || `GitHub PR creation failed (HTTP ${prRes.status}).`,
+      };
+    }
+
+    return {
+      ok: true,
+      branchName: input.branchName,
+      draftPrUrl: prRes.data.html_url,
+    };
+  }
+}
+
+export function createDefaultGitHubConnector(
+  env: Record<string, string | undefined> = process.env
+): GitHubConnector {
+  const token = env.GITHUB_TOKEN?.trim();
+  const repo = env.GITHUB_REPO?.trim() || "binusman02/bin-plumbing-website";
+  return token ? new GitHubApiConnector(token, repo) : new LocalSafeRepoConnector();
+}
+
 export function registerEngineeringTools(
   gateway: ToolGateway,
-  connector: GitHubConnector = new LocalSafeRepoConnector()
+  connector: GitHubConnector = createDefaultGitHubConnector()
 ): void {
   gateway.registerTool({
     name: "eng_read_repo",

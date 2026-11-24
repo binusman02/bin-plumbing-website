@@ -24,6 +24,56 @@ export class UnconfiguredEmailAdapter implements EmailProviderAdapter {
   }
 }
 
+export class ResendEmailAdapter implements EmailProviderAdapter {
+  public readonly providerName = "resend";
+
+  constructor(
+    private readonly apiKey: string,
+    private readonly fromAddress: string
+  ) {}
+
+  async sendApprovedEmail(
+    draft: EmailDraft
+  ): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        from: this.fromAddress,
+        to: [draft.to],
+        subject: draft.subject,
+        text: draft.body,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      message?: string;
+      name?: string;
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: data.message || `Resend returned HTTP ${res.status}`,
+      };
+    }
+
+    return { ok: true, messageId: data.id };
+  }
+}
+
+export function createDefaultEmailAdapter(
+  env: Record<string, string | undefined> = process.env
+): EmailProviderAdapter {
+  const apiKey = env.RESEND_API_KEY?.trim();
+  const from = env.EMAIL_FROM?.trim() || "FlowGuard <onboarding@resend.dev>";
+  return apiKey ? new ResendEmailAdapter(apiKey, from) : new UnconfiguredEmailAdapter();
+}
+
 export interface RawEnquiryRecord {
   id: string;
   full_name?: string | null;
@@ -59,7 +109,7 @@ export function deduplicateEnquiries<T extends RawEnquiryRecord>(rows: T[]): {
 
 export function registerSalesTools(
   gateway: ToolGateway,
-  emailAdapter: EmailProviderAdapter = new UnconfiguredEmailAdapter()
+  emailAdapter: EmailProviderAdapter = createDefaultEmailAdapter()
 ): void {
   gateway.registerTool({
     name: "sales_read_enquiries",
