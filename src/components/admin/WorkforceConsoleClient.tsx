@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
+import { TeamMeetingPanel } from "@/components/admin/TeamMeetingPanel";
 
 interface AgentItem {
   id: string;
@@ -74,7 +75,7 @@ interface OverviewPayload {
 export function WorkforceConsoleClient() {
   const [data, setData] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"overview" | "tasks" | "approvals" | "usage">("overview");
+  const [tab, setTab] = useState<"overview" | "meeting" | "tasks" | "approvals" | "usage">("overview");
   const [instruction, setInstruction] = useState("");
   const [targetAgent, setTargetAgent] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +103,7 @@ export function WorkforceConsoleClient() {
     const initialTab = params.get("tab");
     if (
       initialTab === "overview" ||
+      initialTab === "meeting" ||
       initialTab === "tasks" ||
       initialTab === "approvals" ||
       initialTab === "usage"
@@ -239,6 +241,7 @@ export function WorkforceConsoleClient() {
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {[
           { id: "overview" as const, label: "Overview & Agents" },
+          { id: "meeting" as const, label: "Team Meeting" },
           { id: "tasks" as const, label: `Tasks (${data?.tasks.length || 0})` },
           {
             id: "approvals" as const,
@@ -303,6 +306,13 @@ export function WorkforceConsoleClient() {
       </form>
 
       {/* Tab Content */}
+      {tab === "meeting" && (
+        <TeamMeetingPanel
+          agents={data?.agents || []}
+          onMeetingWrappedUp={() => void loadOverview()}
+        />
+      )}
+
       {tab === "overview" && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {(data?.agents || []).map((agent) => (
