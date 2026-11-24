@@ -70,6 +70,8 @@ export function TeamMeetingPanel({
   const participantsRef = useRef<string[]>(participants);
   const vadTimerRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const ttsSeqRef = useRef(0);
+  const discardRecordingRef = useRef(false);
 
   useEffect(() => {
     turnsRef.current = turns;
@@ -144,6 +146,15 @@ export function TeamMeetingPanel({
     }
   }
 
+  function abortRecordingWithoutSend() {
+    stopVadMonitor();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      discardRecordingRef.current = true;
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+    }
+  }
+
   async function speakText(text: string, agentId: string, opts?: { force?: boolean }) {
     if (!speakOutLoudRef.current && !opts?.force) return;
     // Skip spending ElevenLabs credits on timeout/error notices
@@ -151,6 +162,10 @@ export function TeamMeetingPanel({
 
     const clean = cleanTextForSpeech(text, { keepAudioTags: true });
     if (!clean) return;
+
+    const mySeq = ++ttsSeqRef.current;
+    // Never leave the mic open while an agent is about to speak
+    abortRecordingWithoutSend();
 
     if (audioRef.current) {
       audioRef.current.pause();
@@ -169,8 +184,12 @@ export function TeamMeetingPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: clean, agentId }),
       });
+      if (mySeq !== ttsSeqRef.current) return;
+
       if (res.ok && res.headers.get("content-type")?.includes("audio/mpeg")) {
         const blob = await res.blob();
+        if (mySeq !== ttsSeqRef.current) return;
+
         const url = URL.createObjectURL(blob);
         audioUrlRef.current = url;
         if (!audioRef.current) audioRef.current = new Audio();
@@ -181,7 +200,7 @@ export function TeamMeetingPanel({
             URL.revokeObjectURL(url);
             audioUrlRef.current = null;
           }
-          if (liveCallRef.current) {
+          if (liveCallRef.current && mySeq === ttsSeqRef.current) {
             void startVoiceRecording(true);
           }
         };
@@ -192,11 +211,15 @@ export function TeamMeetingPanel({
       const errJson = (await res.json().catch(() => ({}))) as { error?: string };
       setVoiceNote(errJson.error ? `Fallback (${errJson.error.slice(0, 60)})` : "Browser fallback");
     } catch (err) {
+      if (mySeq !== ttsSeqRef.current) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
       const msg = err instanceof Error ? err.message : "playback blocked";
       setVoiceNote(`Fallback (${msg.slice(0, 45)})`);
     }
 
-    speakWithBrowserFallback(clean, agentId);
+    if (mySeq === ttsSeqRef.current) {
+      speakWithBrowserFallback(clean, agentId);
+    }
   }
 
   function stopVadMonitor() {
@@ -215,7 +238,10 @@ export function TeamMeetingPanel({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") return;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      discardRecordingRef.current = false;
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
@@ -261,6 +287,11 @@ export function TeamMeetingPanel({
       recorder.onstop = async () => {
         stopVadMonitor();
         stream.getTracks().forEach((t) => t.stop());
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          chunksRef.current = [];
+          return;
+        }
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         if (blob.size === 0) return;
 
@@ -324,11 +355,8 @@ export function TeamMeetingPanel({
     if (liveCallRef.current) {
       liveCallRef.current = false;
       setLiveCall(false);
-      stopVadMonitor();
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.stop();
-        setRecording(false);
-      }
+      ttsSeqRef.current += 1;
+      abortRecordingWithoutSend();
       if (audioRef.current) audioRef.current.pause();
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
