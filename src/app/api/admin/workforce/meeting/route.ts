@@ -3,6 +3,8 @@ import { runTeamMeetingTurn, type MeetingTurn } from "@/lib/ai-workforce/meeting
 import type { AgentId } from "@/lib/ai-workforce/types";
 import { requireAdminUser } from "@/lib/security";
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const admin = await requireAdminUser();
   if (!admin) {

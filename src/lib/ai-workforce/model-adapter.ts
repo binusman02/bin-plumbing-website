@@ -172,7 +172,7 @@ export async function runWithFreeFirstModel(
         system: req.systemPrompt,
         prompt: req.userPrompt,
         maxOutputTokens: Math.min(req.maxTokens, 2048),
-        abortSignal: AbortSignal.timeout(25000),
+        abortSignal: AbortSignal.timeout(50000),
       });
       const latencyMs = Date.now() - startedAt;
       const inputTokens = res.usage?.inputTokens ?? 0;
@@ -219,7 +219,7 @@ export async function runWithFreeFirstModel(
           ...(hasTools ? { tools: req.tools, tool_choice: "auto" } : {}),
           max_tokens: Math.min(Math.max(req.maxTokens, 512), 4096),
         }),
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(50000),
       });
 
       const data = await response.json().catch(() => ({}));
