@@ -5,6 +5,7 @@ import {
   detectPrimarySpeaker,
   parseStructuredMeetingOutput,
 } from "../src/lib/ai-workforce/meeting";
+import { assignAgentVoices } from "../src/lib/ai-workforce/voice-profiles";
 
 test("AI Workforce Live Team Meeting", async (t) => {
   await t.test("1. Inviting specialists by name or 'everyone' adds them to the room", () => {
@@ -52,5 +53,24 @@ test("AI Workforce Live Team Meeting", async (t) => {
     assert.equal(parsed.raisedHands.length, 1);
     assert.equal(parsed.raisedHands[0].agentId, "customer_support_ai");
     assert.equal(parsed.raisedHands[0].kind, "question");
+  });
+
+  await t.test("4. Assigns 5 distinct natural voices matching each agent's persona", () => {
+    const mockVoices = [
+      { name: "Microsoft David - English (United States)", lang: "en-US" },
+      { name: "Microsoft Abeo Online (Natural) - English (Nigeria)", lang: "en-NG" },
+      { name: "Microsoft Ezinne Online (Natural) - English (Nigeria)", lang: "en-NG" },
+      { name: "Microsoft Jenny Online (Natural) - English (United States)", lang: "en-US" },
+      { name: "Microsoft Andrew Online (Natural) - English (United States)", lang: "en-US" },
+      { name: "Microsoft Steffan Online (Natural) - English (United States)", lang: "en-US" },
+    ];
+    const assigned = assignAgentVoices(mockVoices);
+    const chosenNames = Object.values(assigned).map((v) => v.voice?.name);
+    assert.equal(new Set(chosenNames).size, 5);
+    assert.match(assigned.operations_manager.voice?.name || "", /Abeo/i);
+    assert.match(assigned.sales_ai.voice?.name || "", /Ezinne/i);
+    assert.match(assigned.customer_support_ai.voice?.name || "", /Jenny/i);
+    assert.match(assigned.research_ai.voice?.name || "", /Andrew/i);
+    assert.match(assigned.engineering_ai.voice?.name || "", /Steffan/i);
   });
 });

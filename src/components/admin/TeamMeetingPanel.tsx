@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Hand, Send, Sparkles, Users, Volume2, VolumeX } from "lucide-react";
+import { assignAgentVoices, cleanTextForSpeech } from "@/lib/ai-workforce/voice-profiles";
+import type { AgentId } from "@/lib/ai-workforce/types";
 
 interface MeetingAgent {
   id: string;
@@ -51,7 +53,20 @@ export function TeamMeetingPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [speakOutLoud, setSpeakOutLoud] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    const updateVoices = () => {
+      const list = synth.getVoices();
+      if (list.length > 0) setVoices(list);
+    };
+    updateVoices();
+    synth.addEventListener("voiceschanged", updateVoices);
+    return () => synth.removeEventListener("voiceschanged", updateVoices);
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -61,13 +76,23 @@ export function TeamMeetingPanel({
     if (!speakOutLoud || typeof window === "undefined" || !("speechSynthesis" in window)) {
       return;
     }
+    const clean = cleanTextForSpeech(text);
+    if (!clean) return;
     try {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1.02;
-      utter.pitch =
-        agentId === "sales_ai" || agentId === "customer_support_ai" ? 1.12 : 0.92;
-      window.speechSynthesis.speak(utter);
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const liveVoices = voices.length > 0 ? voices : synth.getVoices();
+      const assigned = assignAgentVoices(liveVoices);
+      const profile = assigned[agentId as AgentId] ?? assigned.operations_manager;
+
+      const utter = new SpeechSynthesisUtterance(clean);
+      if (profile?.voice) {
+        utter.voice = profile.voice;
+        utter.lang = profile.voice.lang;
+      }
+      utter.rate = profile?.rate ?? 1.0;
+      utter.pitch = profile?.pitch ?? 1.0;
+      synth.speak(utter);
     } catch {
       // Ignore speech synthesis errors
     }
