@@ -2,7 +2,7 @@
 
 import path from "path";
 import { revalidatePath, updateTag } from "next/cache";
-import { maybeAutoReplyToTicketMessage } from "@/lib/ai-assistant";
+import { triggerWorkforceOnCustomerTicketMessage } from "@/lib/ai-workforce/auto-triggers";
 import { validateJobTransition, type JobAction } from "@/lib/job-lifecycle";
 import { PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 import {
@@ -842,24 +842,13 @@ export async function postCommunicationMessageAction(params: {
       replyToId: params.replyToId || null,
     });
 
-    let aiReply = null;
-    const isAudioAttachment = Boolean(
-      params.attachment?.url &&
-        (String(params.attachment?.mimeType || "").startsWith("audio/") ||
-          /\.(webm|ogg|mp3|wav|m4a|mp4|aac)$/i.test(String(params.attachment?.name || "")))
-    );
-    if (
-      actor.role === "customer" &&
-      !isInternal &&
-      (params.message.trim().length > 0 || isAudioAttachment)
-    ) {
-      aiReply = await maybeAutoReplyToTicketMessage({
-        requestId: ticketCtx.requestId,
+    const aiReply = null;
+    if (actor.role === "customer" && !isInternal && params.message.trim().length > 0) {
+      await triggerWorkforceOnCustomerTicketMessage({
         ticketNumber: ticketCtx.ticketNumber,
-        customerId: ticketCtx.customerId,
+        customerName: actor.name,
         customerMessage: params.message.trim(),
-        attachment: params.attachment || null,
-      }).catch(() => null);
+      }).catch(() => {});
     }
 
     revalidatePath("/tracking");

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { maybeAutoReplyToTicketMessage } from "@/lib/ai-assistant";
+import { triggerWorkforceOnCustomerTicketMessage } from "@/lib/ai-workforce/auto-triggers";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
 import { dispatchFcmPush } from "@/lib/fcm-push";
 import {
@@ -127,20 +127,13 @@ export async function POST(request: Request) {
       }).catch(() => {});
     }
 
-    let aiReply = null;
-    const isAudioAttachment = Boolean(
-      body?.attachment?.url &&
-        (String(body?.attachment?.mimeType || "").startsWith("audio/") ||
-          /\.(webm|ogg|mp3|wav|m4a|mp4|aac)$/i.test(String(body?.attachment?.name || "")))
-    );
-    if (actor.role === "customer" && !isInternal && (message.length > 0 || isAudioAttachment)) {
-      aiReply = await maybeAutoReplyToTicketMessage({
-        requestId: ctx.requestId,
+    const aiReply = null;
+    if (actor.role === "customer" && !isInternal && message.length > 0) {
+      await triggerWorkforceOnCustomerTicketMessage({
         ticketNumber: ctx.ticketNumber,
-        customerId: ctx.customerId,
+        customerName: actor.name,
         customerMessage: message,
-        attachment: body?.attachment || null,
-      }).catch(() => null);
+      }).catch(() => {});
     }
 
     return NextResponse.json({ success: true, message: created, aiReply });

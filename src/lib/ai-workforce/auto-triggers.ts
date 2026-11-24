@@ -335,3 +335,66 @@ export async function triggerEngineeringIncidentWatch(params: {
     // Non-blocking
   }
 }
+
+/**
+ * Event 6: Customer sends a message in Ticket Chat
+ * Replaces Ziat auto-reply: Zainab triages the message and queues an Approval
+ * draft (support_send_reply) instead of replying directly to the customer.
+ */
+export async function triggerWorkforceOnCustomerTicketMessage(params: {
+  ticketNumber: string;
+  customerName: string;
+  customerMessage: string;
+}): Promise<void> {
+  const clean = params.customerMessage.trim();
+  if (!clean) return;
+  try {
+    const triage = triageSupportMessage(clean);
+    const draftReply = triage.escalateToOwner
+      ? `Hello ${params.customerName}, I'm sorry you're experiencing this. I've flagged your message on ${params.ticketNumber} as urgent for our team — if there is an active water leak, please shut off the main stopcock valve right away while we coordinate.`
+      : `Hello ${params.customerName}, thanks for your message on ${params.ticketNumber}. We've received it and will update you shortly.`;
+
+    const res = await getAdminToolGateway().invoke({
+      ctx: {
+        agentId: "customer_support_ai",
+        actorUserId: "system_auto_trigger",
+        actorEmail: "zainab@flowguard.com.ng",
+      },
+      toolName: "support_send_reply",
+      rawInput: {
+        ticketNumber: params.ticketNumber,
+        replyBody: draftReply,
+      },
+      targetResource: params.ticketNumber,
+      actionSummary: `Send Zainab's reply on ${params.ticketNumber}`,
+      reason: triage.escalateToOwner
+        ? `URGENT (${triage.escalationReasons.join(", ")}) — Customer wrote: "${clean.slice(0, 120)}"`
+        : `Customer wrote: "${clean.slice(0, 120)}"`,
+      idempotencyKey: `auto:support_reply:${params.ticketNumber}:${clean.slice(0, 40)}`,
+    });
+
+    if (res.approvalId) {
+      await recordAutoTask({
+        agentId: "customer_support_ai",
+        title: `Support Reply Ready: ${params.ticketNumber}`,
+        description: clean,
+        status: "waiting_approval",
+        priority: triage.escalateToOwner ? "urgent" : "normal",
+        outputSummary: `Zainab triaged message (${triage.urgency}) and prepared reply draft for Approval (${res.approvalId}).`,
+      });
+      await createNotification({
+        recipientId: "admin",
+        recipientRole: "admin",
+        actorRole: "admin",
+        type: "ai_approval_pending",
+        title: `Zainab: Approve reply for ${params.ticketNumber}`,
+        body: `${params.customerName}: "${clean.slice(0, 80)}"`,
+        entityType: "ai_approval",
+        entityId: res.approvalId,
+        destination: getOwnerApprovalDeepLink(res.approvalId),
+      });
+    }
+  } catch (err) {
+    console.error("[auto-trigger:ticket_message]", err instanceof Error ? err.message : err);
+  }
+}

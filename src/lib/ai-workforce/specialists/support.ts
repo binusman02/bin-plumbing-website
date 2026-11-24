@@ -1,4 +1,5 @@
 import { getServiceSupabase } from "@/lib/supabase/admin";
+import { postJobMessage } from "@/lib/marketplace";
 import type { ToolGateway } from "@/lib/ai-workforce/tool-gateway";
 
 export interface SupportTriageResult {
@@ -146,6 +147,14 @@ export function registerSupportTools(gateway: ToolGateway): void {
     description: "Send an approved customer support reply (Amber: requires Owner approval)",
     tier: "amber",
     requiredScope: "support:reply:send",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        ticketNumber: { type: "string" },
+        replyBody: { type: "string" },
+      },
+      required: ["ticketNumber", "replyBody"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const ticketNumber = typeof obj.ticketNumber === "string" ? obj.ticketNumber.trim() : "";
@@ -156,6 +165,25 @@ export function registerSupportTools(gateway: ToolGateway): void {
       return { ok: true, data: { ticketNumber, replyBody } };
     },
     async execute(input) {
+      const supabase = getServiceSupabase();
+      const { data: reqRow } = await supabase
+        .from("service_requests")
+        .select("id, customer_id")
+        .eq("ticket_number", input.ticketNumber)
+        .maybeSingle();
+
+      if (reqRow) {
+        await postJobMessage({
+          requestId: String(reqRow.id),
+          ticketNumber: input.ticketNumber,
+          senderRole: "admin",
+          senderName: "FlowGuard Support",
+          recipientRole: "customer",
+          recipientId: reqRow.customer_id ? String(reqRow.customer_id) : null,
+          message: input.replyBody,
+          isInternal: false,
+        });
+      }
       return { sent: true, ticketNumber: input.ticketNumber, replyBody: input.replyBody };
     },
   });
