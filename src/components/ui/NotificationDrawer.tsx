@@ -80,11 +80,17 @@ export function NotificationDrawer({
             `/api/notifications?role=${role}&limit=30&offset=${offset}`,
             { cache: "no-store" }
           ).then(async (res) => {
-            if (!res.ok) throw new Error("Could not load notifications.");
+            if (res.status === 401) {
+              return { items: [], hasMore: false, unreadCount: 0 };
+            }
+            if (!res.ok) {
+              inFlightNotifications.delete(cacheKey);
+              throw new Error("Could not load notifications.");
+            }
             return res.json();
           });
           inFlightNotifications.set(cacheKey, reqPromise);
-          reqPromise.finally(() => {
+          void reqPromise.catch(() => {}).finally(() => {
             window.setTimeout(() => {
               if (inFlightNotifications.get(cacheKey) === reqPromise) {
                 inFlightNotifications.delete(cacheKey);

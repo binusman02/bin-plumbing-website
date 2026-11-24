@@ -720,39 +720,6 @@ class FlowGuardApiClient {
     throw Exception(_extractError(body, "Attachment upload failed."));
   }
 
-  static Future<Map<String, dynamic>> askZiat({
-    required List<Map<String, String>> messages,
-    String? audioBase64,
-    String? audioMimeType,
-    bool wantVoiceReply = true,
-  }) async {
-    final uri = Uri.parse("${SupabaseConfig.webBaseUrl}/api/ai/chat");
-    final token = _accessToken;
-    final headers = <String, String>{
-      "Content-Type": "application/json",
-      if (token != null && token.isNotEmpty) "Authorization": "Bearer $token",
-    };
-    final res = await http
-        .post(
-          uri,
-          headers: headers,
-          body: jsonEncode({
-            "messages": messages,
-            if (audioBase64 != null && audioBase64.isNotEmpty) ...{
-              "audioBase64": audioBase64,
-              "audioMimeType": audioMimeType ?? "audio/mp4",
-            },
-            "wantVoiceReply": wantVoiceReply,
-          }),
-        )
-        .timeout(const Duration(seconds: 25));
-    final decoded = jsonDecode(res.body);
-    if (res.statusCode >= 200 && res.statusCode < 300 && decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    }
-    throw Exception(_extractError(res.body, "Unable to reach Ziat right now."));
-  }
-
   static String _extractError(String rawBody, String fallback) {
     try {
       final decoded = jsonDecode(rawBody);

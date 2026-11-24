@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   BookOpen,
+  Bot,
   ClipboardList,
   DollarSign,
   History,
@@ -49,6 +50,7 @@ const PAGE_TITLES: Array<{ prefix: string; title: string }> = [
   { prefix: "/admin/audit-log", title: "Audit Log" },
   { prefix: "/admin/notifications", title: "Notifications" },
   { prefix: "/admin/settings", title: "Settings" },
+  { prefix: "/admin/workforce", title: "AI Workforce" },
   { prefix: "/admin", title: "Overview" },
 ];
 
@@ -166,7 +168,9 @@ export function AdminLayoutShell({
                           ? "audit-log"
                           : pathname.startsWith("/admin/settings")
                             ? "settings"
-                            : "overview";
+                            : pathname.startsWith("/admin/workforce")
+                              ? "workforce"
+                              : "overview";
 
   const navGroups: PortalNavGroup[] = [
     {
@@ -206,6 +210,13 @@ export function AdminLayoutShell({
           shortLabel: "Finance",
           href: "/admin/financials",
           icon: DollarSign,
+        },
+        {
+          id: "workforce",
+          label: "AI Workforce",
+          shortLabel: "Workforce",
+          href: "/admin/workforce",
+          icon: Bot,
         },
       ],
     },

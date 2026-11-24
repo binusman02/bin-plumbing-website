@@ -8,13 +8,8 @@ import {
 import {
   getMarketplaceSettings,
   postJobMessage,
-  type RequestStatus,
-  updateComplaintStatus,
-  updateMarketplaceSettings,
-  updatePlumberVerification,
-  updateServiceRequest,
-  verifyPaymentById,
 } from "@/lib/marketplace";
+import { getAdminToolGateway } from "@/lib/ai-workforce/admin-tools";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export interface AiChatTurn {
@@ -515,12 +510,13 @@ export async function generateAdminCopilotReply(params: {
   ];
 
   const systemPrompt = [
-    "You are Ziat, the trusted operations partner for FlowGuard Plumbing Enterprises (Kano, Nigeria).",
-    "VOICE & WRITING STYLE:",
-    "- Write like a sharp, reliable human operations manager talking directly to the boss — natural, warm, concise, and clear.",
-    "- Never use robotic AI filler ('Certainly!', 'I have analyzed the data', 'Here is a breakdown:', 'Let me know if you need anything else').",
-    "- Never output raw Markdown syntax such as **bold**, ### headings, * bullets, or `backticks`. Write clean, natural sentences; if listing multiple items, use simple lines with '• ' and plain readable text.",
-    "- Languages: Admin or customers may speak/write in English, Hausa, or Nigerian Pidgin. Understand voice notes and text in all three and reply naturally in the same language used.",
+    "You are Sadiq, the FlowGuard AI Operations Manager at FlowGuard Plumbing Enterprises in Kano, Nigeria.",
+    "PERSONALITY & COMMUNICATION STYLE:",
+    "- Calm, organised, thoughtful, and dependable — sound like a capable, approachable human colleague on the team, never like a scripted bot or corporate announcement.",
+    "- Give direct answers first, keep simple updates short, and never repeat the Founder's question or recite a list of job duties when greeted or asked your name.",
+    "- Skip robotic AI openers ('Certainly!', 'I'd be happy to help!', 'Here is a breakdown:', 'Anything else I can assist with?').",
+    "- Never output raw Markdown syntax such as **bold**, ### headings, * bullets, or `backticks`. Write clean, natural prose; if listing items, use simple lines with '• '.",
+    "- Language: Use clear English by default; understand and reply naturally in Hausa or Nigerian Pidgin when used, without forcing slang.",
     ...(params.liveCall
       ? [
           "LIVE VOICE CALL MODE:",
@@ -539,7 +535,8 @@ export async function generateAdminCopilotReply(params: {
   ].join("\n");
 
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
-  if (!apiKey) {
+  const gatewayKey = process.env.AI_GATEWAY_API_KEY?.trim();
+  if (!apiKey && !gatewayKey) {
     return {
       text: `Operations Summary: ${unassignedReqs.length} unassigned jobs, ${pendingPayments.length} pending payments, ${openComplaints.length} open complaints, ${unreadMsgs.length} unread messages, ${availablePlumbers.length} plumbers On Duty.`,
       model: "fallback-rule",
@@ -722,7 +719,7 @@ export async function generateAdminCopilotReply(params: {
     }),
 
     assignPlumberToTicket: tool({
-      description: "Assign an approved plumber (by name or ID) to a service request ticket.",
+      description: "Propose assigning an approved plumber (by name or ID) to a service request ticket. Requires Owner approval.",
       inputSchema: jsonSchema<{ ticketNumber: string; plumberNameOrId: string }>({
         type: "object",
         properties: {
@@ -732,36 +729,27 @@ export async function generateAdminCopilotReply(params: {
         required: ["ticketNumber", "plumberNameOrId"],
       }),
       execute: async ({ ticketNumber, plumberNameOrId }) => {
-        const needle = plumberNameOrId.trim().toLowerCase();
-        const match = approvedPlumbers.find(
-          (p) =>
-            String(p.id).toLowerCase() === needle ||
-            String(p.full_name || "").toLowerCase().includes(needle)
-        );
-        if (!match) {
-          return { ok: false, error: `No approved plumber matching "${plumberNameOrId}" found.` };
-        }
-        const updated = await updateServiceRequest(
-          ticketNumber.trim(),
-          {
-            assigned_plumber_id: String(match.id),
-            assigned_technician: String(match.full_name),
-            status: "scheduled",
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
           },
-          {
-            actor: actorLabel,
-            action: "Assigned Technician",
-            details: `Assigned ${match.full_name} via Admin AI`,
-          }
-        );
-        if (!updated) return { ok: false, error: `Ticket ${ticketNumber} not found.` };
-        actionsTaken.push(`Assigned ${match.full_name} to ${updated.ticket_number}`);
-        return { ok: true, ticketNumber: updated.ticket_number, plumber: match.full_name, status: updated.status };
+          toolName: "assign_plumber_to_ticket",
+          rawInput: { ticketNumber: ticketNumber.trim(), plumberNameOrId: plumberNameOrId.trim() },
+          targetResource: ticketNumber.trim(),
+          actionSummary: `Assign ${plumberNameOrId.trim()} to ${ticketNumber.trim()}`,
+          reason: "Requested via Admin Operations Manager",
+        });
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to assign ${plumberNameOrId} to ${ticketNumber}`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
 
     updateTicketStatus: tool({
-      description: "Update the status or internal notes of a service request ticket.",
+      description: "Propose updating the status or internal notes of a service request ticket. Requires Owner approval.",
       inputSchema: jsonSchema<{ ticketNumber: string; status: string; internalNote?: string }>({
         type: "object",
         properties: {
@@ -785,26 +773,27 @@ export async function generateAdminCopilotReply(params: {
         required: ["ticketNumber", "status"],
       }),
       execute: async ({ ticketNumber, status, internalNote }) => {
-        const updated = await updateServiceRequest(
-          ticketNumber.trim(),
-          {
-            status: status as RequestStatus,
-            ...(internalNote ? { internal_notes: internalNote } : {}),
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
           },
-          {
-            actor: actorLabel,
-            action: `Status updated to ${status}`,
-            details: internalNote || "Updated via Admin AI",
-          }
-        );
-        if (!updated) return { ok: false, error: `Ticket ${ticketNumber} not found.` };
-        actionsTaken.push(`Updated ${updated.ticket_number} to ${status}`);
-        return { ok: true, ticketNumber: updated.ticket_number, status: updated.status };
+          toolName: "update_ticket_status",
+          rawInput: { ticketNumber: ticketNumber.trim(), status, internalNote },
+          targetResource: ticketNumber.trim(),
+          actionSummary: `Update ${ticketNumber.trim()} status to ${status}`,
+          reason: internalNote || "Requested via Admin Operations Manager",
+        });
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to set ${ticketNumber} to ${status}`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
 
     sendTicketMessage: tool({
-      description: "Send a chat message on a ticket to the customer or plumber (or internal team note).",
+      description: "Propose sending a chat message on a ticket to the customer or plumber. Requires Owner approval.",
       inputSchema: jsonSchema<{
         ticketNumber: string;
         recipientRole: "customer" | "plumber";
@@ -821,34 +810,27 @@ export async function generateAdminCopilotReply(params: {
         required: ["ticketNumber", "recipientRole", "message"],
       }),
       execute: async ({ ticketNumber, recipientRole, message, isInternal }) => {
-        const cleanTicket = ticketNumber.trim();
-        const { data: reqRow } = await supabase
-          .from("service_requests")
-          .select("id, customer_id, assigned_plumber_id")
-          .eq("ticket_number", cleanTicket)
-          .maybeSingle();
-        if (!reqRow) return { ok: false, error: `Ticket ${cleanTicket} not found.` };
-        const recId =
-          recipientRole === "customer"
-            ? (reqRow.customer_id ? String(reqRow.customer_id) : null)
-            : (reqRow.assigned_plumber_id ? String(reqRow.assigned_plumber_id) : null);
-        await postJobMessage({
-          requestId: String(reqRow.id),
-          ticketNumber: cleanTicket,
-          senderRole: "admin",
-          senderName: "FlowGuard Admin",
-          recipientRole,
-          recipientId: recId,
-          message: message.trim(),
-          isInternal: Boolean(isInternal),
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
+          },
+          toolName: "send_ticket_message",
+          rawInput: { ticketNumber: ticketNumber.trim(), recipientRole, message: message.trim(), isInternal: Boolean(isInternal) },
+          targetResource: ticketNumber.trim(),
+          actionSummary: `Send message on ${ticketNumber.trim()} to ${recipientRole}`,
+          reason: "Requested via Admin Operations Manager",
         });
-        actionsTaken.push(`Sent message on ${cleanTicket} to ${recipientRole}`);
-        return { ok: true, ticketNumber: cleanTicket, recipientRole };
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to message ${recipientRole} on ${ticketNumber}`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
 
     verifyPayment: tool({
-      description: "Verify (confirm) or reject a pending payment by ticketNumber.",
+      description: "Propose verifying or rejecting a pending payment by ticketNumber. Requires Owner approval.",
       inputSchema: jsonSchema<{ ticketNumber: string; decision: "verified" | "rejected" }>({
         type: "object",
         properties: {
@@ -858,23 +840,27 @@ export async function generateAdminCopilotReply(params: {
         required: ["ticketNumber", "decision"],
       }),
       execute: async ({ ticketNumber, decision }) => {
-        const { data: payRows } = await supabase
-          .from("payments")
-          .select("id, verification_status")
-          .eq("ticket_number", ticketNumber.trim())
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const pay = payRows?.[0];
-        if (!pay) return { ok: false, error: `No payment record found for ${ticketNumber}.` };
-        const ok = await verifyPaymentById(String(pay.id), decision, actorLabel);
-        if (!ok) return { ok: false, error: "Could not update payment status." };
-        actionsTaken.push(`Marked payment for ${ticketNumber} as ${decision}`);
-        return { ok: true, ticketNumber, decision };
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
+          },
+          toolName: "verify_payment",
+          rawInput: { ticketNumber: ticketNumber.trim(), decision },
+          targetResource: ticketNumber.trim(),
+          actionSummary: `Mark payment for ${ticketNumber.trim()} as ${decision}`,
+          reason: "Requested via Admin Operations Manager",
+        });
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to mark payment for ${ticketNumber} as ${decision}`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
 
     updatePlumberStatus: tool({
-      description: "Approve, reject, or suspend a plumber by name or ID.",
+      description: "Propose approving, rejecting, or suspending a plumber by name or ID. Requires Owner approval.",
       inputSchema: jsonSchema<{
         plumberNameOrId: string;
         status: "approved" | "rejected" | "suspended";
@@ -889,22 +875,27 @@ export async function generateAdminCopilotReply(params: {
         required: ["plumberNameOrId", "status"],
       }),
       execute: async ({ plumberNameOrId, status, notes }) => {
-        const needle = plumberNameOrId.trim().toLowerCase();
-        const match = plumbers.find(
-          (p) =>
-            String(p.id).toLowerCase() === needle ||
-            String(p.full_name || "").toLowerCase().includes(needle)
-        );
-        if (!match) return { ok: false, error: `No plumber matching "${plumberNameOrId}" found.` };
-        const ok = await updatePlumberVerification(String(match.id), status, notes);
-        if (!ok) return { ok: false, error: "Could not update plumber verification." };
-        actionsTaken.push(`Set plumber ${match.full_name} status to ${status}`);
-        return { ok: true, plumber: match.full_name, status };
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
+          },
+          toolName: "update_plumber_status",
+          rawInput: { plumberNameOrId: plumberNameOrId.trim(), status, notes },
+          targetResource: plumberNameOrId.trim(),
+          actionSummary: `Set plumber ${plumberNameOrId.trim()} status to ${status}`,
+          reason: notes || "Requested via Admin Operations Manager",
+        });
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to set plumber ${plumberNameOrId} to ${status}`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
 
     resolveComplaint: tool({
-      description: "Update a complaint status (under_review, investigating, resolved) with a resolution note.",
+      description: "Propose updating a complaint status with a resolution note. Requires Owner approval.",
       inputSchema: jsonSchema<{
         complaintIdOrTicket: string;
         status: "under_review" | "investigating" | "resolved";
@@ -919,20 +910,27 @@ export async function generateAdminCopilotReply(params: {
         required: ["complaintIdOrTicket", "status"],
       }),
       execute: async ({ complaintIdOrTicket, status, adminNote }) => {
-        const clean = complaintIdOrTicket.trim();
-        const match = complaints.find(
-          (c) => String(c.id) === clean || String(c.ticket_number || "") === clean
-        );
-        if (!match) return { ok: false, error: `Complaint "${clean}" not found.` };
-        const ok = await updateComplaintStatus(String(match.id), status, adminNote, actorLabel);
-        if (!ok) return { ok: false, error: "Could not update complaint." };
-        actionsTaken.push(`Updated complaint ${match.ticket_number || match.id} to ${status}`);
-        return { ok: true, id: match.id, status };
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
+          },
+          toolName: "resolve_complaint",
+          rawInput: { complaintIdOrTicket: complaintIdOrTicket.trim(), status, adminNote },
+          targetResource: complaintIdOrTicket.trim(),
+          actionSummary: `Set complaint ${complaintIdOrTicket.trim()} to ${status}`,
+          reason: adminNote || "Requested via Admin Operations Manager",
+        });
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to update complaint ${complaintIdOrTicket}`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
 
     updateCommissionSettings: tool({
-      description: "Update global commission rates or small-job threshold in marketplace settings.",
+      description: "Propose updating global commission rates or small-job threshold. Requires Owner approval.",
       inputSchema: jsonSchema<{
         commissionDefaultRate?: number;
         commissionSmallJobRate?: number;
@@ -948,40 +946,31 @@ export async function generateAdminCopilotReply(params: {
         },
       }),
       execute: async (input) => {
-        const next = await updateMarketplaceSettings(
-          {
-            ...(input.commissionDefaultRate !== undefined
-              ? { commission_default_rate: input.commissionDefaultRate }
-              : {}),
-            ...(input.commissionSmallJobRate !== undefined
-              ? { commission_small_job_rate: input.commissionSmallJobRate }
-              : {}),
-            ...(input.smallJobThreshold !== undefined
-              ? { small_job_threshold: input.smallJobThreshold }
-              : {}),
-            ...(input.smallJobRuleEnabled !== undefined
-              ? { small_job_rule_enabled: input.smallJobRuleEnabled }
-              : {}),
+        const res = await getAdminToolGateway().invoke({
+          ctx: {
+            agentId: "operations_manager",
+            actorUserId: actorLabel,
+            actorEmail: actorLabel,
           },
-          actorLabel
-        );
-        actionsTaken.push("Updated marketplace commission settings");
-        return {
-          ok: true,
-          commission_default_rate: next.commission_default_rate,
-          commission_small_job_rate: next.commission_small_job_rate,
-          small_job_threshold: next.small_job_threshold,
-          small_job_rule_enabled: next.small_job_rule_enabled,
-        };
+          toolName: "update_commission_settings",
+          rawInput: input,
+          targetResource: "marketplace_settings",
+          actionSummary: "Update marketplace commission settings",
+          reason: "Requested via Admin Operations Manager",
+        });
+        if (res.approvalId) {
+          actionsTaken.push(`Approval requested (${res.approvalId}) to update commission settings`);
+        }
+        return res.data ?? { ok: res.ok, error: res.error };
       },
     }),
   };
 
-  const googleProvider = createGoogleGenerativeAI({ apiKey });
-  for (const modelId of ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]) {
+  if (gatewayKey) {
     try {
+      const mimoModel = process.env.MIMO_MODEL_ID?.trim() || "xiaomi/mimo-v2.6-flash";
       const result = await generateText({
-        model: googleProvider(modelId),
+        model: mimoModel,
         system: systemPrompt,
         messages: modelMessages,
         tools: adminTools,
@@ -990,9 +979,30 @@ export async function generateAdminCopilotReply(params: {
         abortSignal: AbortSignal.timeout(20000),
       });
       const text = result.text?.trim();
-      if (text) return { text, model: modelId, fallback: false, actionsTaken };
+      if (text) return { text, model: mimoModel, fallback: false, actionsTaken };
     } catch (err) {
-      console.error("[ai-admin] failed:", err instanceof Error ? err.message : "error");
+      console.error("[ai-admin] gateway failed:", err instanceof Error ? err.message : "error");
+    }
+  }
+
+  if (apiKey) {
+    const googleProvider = createGoogleGenerativeAI({ apiKey });
+    for (const modelId of ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]) {
+      try {
+        const result = await generateText({
+          model: googleProvider(modelId),
+          system: systemPrompt,
+          messages: modelMessages,
+          tools: adminTools,
+          stopWhen: stepCountIs(5),
+          maxOutputTokens: 1400,
+          abortSignal: AbortSignal.timeout(20000),
+        });
+        const text = result.text?.trim();
+        if (text) return { text, model: modelId, fallback: false, actionsTaken };
+      } catch (err) {
+        console.error("[ai-admin] failed:", err instanceof Error ? err.message : "error");
+      }
     }
   }
 

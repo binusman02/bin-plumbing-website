@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createNotification } from "@/lib/notifications";
+import { triggerWorkforceOnEnquiry } from "@/lib/ai-workforce/auto-triggers";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { checkRateLimit, isHoneypotTriggered, verifyTurnstileToken } from "@/lib/security";
 
@@ -91,6 +92,15 @@ export async function submitContactEnquiry(data: ContactEnquiryInput) {
       entityId: inserted?.id ? String(inserted.id) : "",
       destination: "/admin/enquiries",
       dedupeKey: inserted?.id ? `enquiry:${inserted.id}` : undefined,
+    });
+
+    await triggerWorkforceOnEnquiry({
+      enquiryId: inserted?.id ? String(inserted.id) : `enq-${Date.now()}`,
+      fullName,
+      phone,
+      serviceType,
+      location,
+      message,
     });
 
     revalidatePath("/admin/enquiries");
