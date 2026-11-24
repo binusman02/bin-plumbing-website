@@ -9,7 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { items, unreadEnquiriesCount, unreadCommunicationsCount } =
+    const { items, unreadEnquiriesCount, unreadCommunicationsCount, unreadWorkforceCount } =
       await getAdminNotifications();
 
     return NextResponse.json(
@@ -18,6 +18,7 @@ export async function GET() {
         unreadCount: items.length,
         unreadEnquiriesCount,
         unreadCommunicationsCount,
+        unreadWorkforceCount,
       },
       {
         headers: {

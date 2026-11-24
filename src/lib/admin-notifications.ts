@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getServiceSupabase } from "@/lib/supabase/admin";
 import {
   countUnrepliedMessagesForAdmin,
   getAllComplaints,
@@ -28,10 +29,12 @@ export async function getAdminNotifications(): Promise<{
   items: AdminNotificationItem[];
   unreadEnquiriesCount: number;
   unreadCommunicationsCount: number;
+  unreadWorkforceCount: number;
 }> {
   const supabase = await createClient();
+  const serviceSb = getServiceSupabase();
 
-  const [requests, plumbers, payments, complaints, messages, enquiriesRes] =
+  const [requests, plumbers, payments, complaints, messages, enquiriesRes, workforceNotifRes] =
     await Promise.all([
       getAllServiceRequests(),
       getAllPlumbers(),
@@ -42,6 +45,12 @@ export async function getAdminNotifications(): Promise<{
         .from("enquiries")
         .select("id", { count: "exact", head: true })
         .eq("status", "unread"),
+      serviceSb
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("recipient_role", "admin")
+        .eq("is_read", false)
+        .in("type", ["ai_approval_pending", "engineering_incident"]),
     ]);
 
   const items: AdminNotificationItem[] = [];
@@ -105,5 +114,6 @@ export async function getAdminNotifications(): Promise<{
     items,
     unreadEnquiriesCount: enquiriesRes.count || 0,
     unreadCommunicationsCount,
+    unreadWorkforceCount: workforceNotifRes.count || 0,
   };
 }

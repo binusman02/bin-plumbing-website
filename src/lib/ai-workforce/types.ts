@@ -19,6 +19,7 @@ export interface AgentDefinition {
   id: AgentId;
   displayName: string;
   roleTitle: string;
+  avatarUrl: string;
   description: string;
   memoryNamespace: string;
   promptVersion: number;

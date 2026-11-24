@@ -210,7 +210,7 @@ export function AdminAiCopilot() {
         className="fixed bottom-20 right-4 z-40 inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-[#0B1F3A] pl-1.5 pr-4 text-xs font-bold text-white shadow-lg ring-2 ring-[#F5B301]/80 transition hover:bg-[#132f57] md:bottom-6 md:right-6"
       >
         <Image
-          src="/images/ai/ziat-avatar.jpg"
+          src="/images/ai/sadiq.jpg"
           alt="Sadiq"
           width={32}
           height={32}
@@ -226,7 +226,7 @@ export function AdminAiCopilot() {
       <div className="flex items-center justify-between bg-[#0B1F3A] px-4 py-3 text-white">
         <div className="flex items-center gap-2.5">
           <Image
-            src="/images/ai/ziat-avatar.jpg"
+            src="/images/ai/sadiq.jpg"
             alt="Sadiq"
             width={36}
             height={36}
@@ -318,7 +318,7 @@ export function AdminAiCopilot() {
                 }}
               />
               <Image
-                src="/images/ai/ziat-avatar.jpg"
+                src="/images/ai/sadiq.jpg"
                 alt="Ziat Live"
                 width={32}
                 height={32}
@@ -380,8 +380,8 @@ export function AdminAiCopilot() {
           >
             {t.role === "assistant" && (
               <Image
-                src="/images/ai/ziat-avatar.jpg"
-                alt="Ziat"
+                src="/images/ai/sadiq.jpg"
+                alt="Sadiq"
                 width={26}
                 height={26}
                 className="mb-0.5 h-6.5 w-6.5 shrink-0 rounded-full border border-[#F5B301]/70 object-cover shadow-xs"
@@ -439,8 +439,8 @@ export function AdminAiCopilot() {
         {loading && (
           <div className="flex items-end gap-2">
             <Image
-              src="/images/ai/ziat-avatar.jpg"
-              alt="Ziat"
+              src="/images/ai/sadiq.jpg"
+              alt="Sadiq"
               width={26}
               height={26}
               className="h-6.5 w-6.5 shrink-0 rounded-full border border-[#F5B301]/70 object-cover"

@@ -18,6 +18,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     id: "operations_manager",
     displayName: "Sadiq — AI Operations Manager",
     roleTitle: "Central Workforce Coordinator",
+    avatarUrl: "/images/ai/sadiq.jpg",
     description:
       "Calm, organised, dependable Operations Manager who coordinates Amina, Zainab, Faruk, and Bashir and keeps the Founder updated.",
     memoryNamespace: "ns_operations_manager",
@@ -58,6 +59,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     id: "sales_ai",
     displayName: "Amina — Sales AI",
     roleTitle: "Lead Qualification & Follow-up Specialist",
+    avatarUrl: "/images/ai/amina.jpg",
     description:
       "Friendly, observant, proactive sales specialist who qualifies leads, spots duplicates, and prepares personalised follow-up drafts.",
     memoryNamespace: "ns_sales_ai",
@@ -85,6 +87,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     id: "customer_support_ai",
     displayName: "Zainab — Customer Support AI",
     roleTitle: "Support Triage & Case Management Specialist",
+    avatarUrl: "/images/ai/zainab.jpg",
     description:
       "Patient, empathetic, attentive support specialist who triages intake, verifies ownership, drafts replies, and escalates urgent cases.",
     memoryNamespace: "ns_customer_support_ai",
@@ -114,6 +117,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     id: "research_ai",
     displayName: "Faruk — Research AI",
     roleTitle: "Market, Competitor & SEO Research Specialist",
+    avatarUrl: "/images/ai/faruk.jpg",
     description:
       "Curious, analytical, evidence-driven researcher who delivers cited market, competitor, service-area, and SEO insights.",
     memoryNamespace: "ns_research_ai",
@@ -140,6 +144,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     id: "engineering_ai",
     displayName: "Bashir — Engineering AI",
     roleTitle: "Software Engineering & Maintenance Specialist",
+    avatarUrl: "/images/ai/bashir.jpg",
     description:
       "Thoughtful, methodical engineer overseeing Next.js, Flutter apps, Supabase, security, maps, testing, and PR preparation.",
     memoryNamespace: "ns_engineering_ai",

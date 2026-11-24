@@ -45,6 +45,7 @@ export default async function AdminPortalLayout({
     items: notifications,
     unreadEnquiriesCount,
     unreadCommunicationsCount,
+    unreadWorkforceCount,
   } = await getAdminNotifications();
 
   return (
@@ -53,6 +54,7 @@ export default async function AdminPortalLayout({
       unreadCount={notifications.length}
       unreadEnquiriesCount={unreadEnquiriesCount}
       unreadCommunicationsCount={unreadCommunicationsCount}
+      unreadWorkforceCount={unreadWorkforceCount}
       notifications={notifications}
     >
       {children}

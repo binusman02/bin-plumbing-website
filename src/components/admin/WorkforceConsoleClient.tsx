@@ -16,6 +16,7 @@ interface AgentItem {
   id: string;
   displayName: string;
   roleTitle: string;
+  avatarUrl: string;
   description: string;
   memoryNamespace: string;
   modelRoute: string;
@@ -194,6 +195,7 @@ export function WorkforceConsoleClient() {
   }
 
   const pendingApprovals = (data?.approvals || []).filter((a) => a.status === "pending");
+  const agentMap = Object.fromEntries((data?.agents || []).map((a) => [a.id, a]));
 
   return (
     <div className="space-y-5">
@@ -310,13 +312,21 @@ export function WorkforceConsoleClient() {
             >
               <div>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className="text-sm font-extrabold text-[#0B1F3A]">
-                      {agent.displayName}
-                    </h2>
-                    <p className="text-[11px] font-semibold text-slate-500">
-                      {agent.roleTitle}
-                    </p>
+                  <div className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={agent.avatarUrl || "/images/ai/sadiq.jpg"}
+                      alt={agent.displayName}
+                      className="h-11 w-11 shrink-0 rounded-full border-2 border-[#F5B301] object-cover"
+                    />
+                    <div>
+                      <h2 className="text-sm font-extrabold text-[#0B1F3A]">
+                        {agent.displayName}
+                      </h2>
+                      <p className="text-[11px] font-semibold text-slate-500">
+                        {agent.roleTitle}
+                      </p>
+                    </div>
                   </div>
                   <span
                     className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
@@ -364,11 +374,19 @@ export function WorkforceConsoleClient() {
                 className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-[#0B1F3A]">{task.title}</h3>
-                    <p className="text-[11px] text-slate-500">
-                      Agent: <span className="font-mono font-semibold">{task.assignedAgentId}</span> • Priority: {task.priority}
-                    </p>
+                  <div className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={agentMap[task.assignedAgentId]?.avatarUrl || "/images/ai/sadiq.jpg"}
+                      alt={agentMap[task.assignedAgentId]?.displayName || task.assignedAgentId}
+                      className="h-10 w-10 shrink-0 rounded-full border-2 border-[#F5B301]/80 object-cover"
+                    />
+                    <div>
+                      <h3 className="text-sm font-bold text-[#0B1F3A]">{task.title}</h3>
+                      <p className="text-[11px] text-slate-500">
+                        {agentMap[task.assignedAgentId]?.displayName || task.assignedAgentId} • Priority: {task.priority}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-[#0B1F3A]">
@@ -414,18 +432,25 @@ export function WorkforceConsoleClient() {
                 className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <ShieldAlert className="h-4 w-4 text-amber-600" />
-                      <h3 className="text-sm font-extrabold text-[#0B1F3A]">
-                        {item.actionSummary}
-                      </h3>
+                  <div className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={agentMap[item.requestedByAgent]?.avatarUrl || "/images/ai/sadiq.jpg"}
+                      alt={agentMap[item.requestedByAgent]?.displayName || item.requestedByAgent}
+                      className="h-11 w-11 shrink-0 rounded-full border-2 border-[#F5B301] object-cover"
+                    />
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <ShieldAlert className="h-4 w-4 text-amber-600" />
+                        <h3 className="text-sm font-extrabold text-[#0B1F3A]">
+                          {item.actionSummary}
+                        </h3>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        {agentMap[item.requestedByAgent]?.displayName || item.requestedByAgent} • Target:{" "}
+                        <span className="font-semibold">{item.targetResource}</span>
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      Agent: <span className="font-mono">{item.requestedByAgent}</span> • Tool:{" "}
-                      <span className="font-mono">{item.toolName}</span> • Target:{" "}
-                      <span className="font-semibold">{item.targetResource}</span>
-                    </p>
                   </div>
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-900">
                     <Clock className="h-3 w-3" />

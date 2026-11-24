@@ -33,6 +33,7 @@ interface AdminLayoutShellProps {
   unreadCount?: number;
   unreadEnquiriesCount?: number;
   unreadCommunicationsCount?: number;
+  unreadWorkforceCount?: number;
   notifications?: AdminNotificationItem[];
   children: React.ReactNode;
 }
@@ -58,6 +59,7 @@ export function AdminLayoutShell({
   userEmail,
   unreadEnquiriesCount = 0,
   unreadCommunicationsCount = 0,
+  unreadWorkforceCount = 0,
   children,
 }: AdminLayoutShellProps) {
   const pathname = usePathname() || "/admin";
@@ -66,11 +68,24 @@ export function AdminLayoutShell({
   const [liveUnreadCommunications, setLiveUnreadCommunications] = useState(
     unreadCommunicationsCount
   );
+  const [liveUnreadWorkforce, setLiveUnreadWorkforce] =
+    useState(unreadWorkforceCount);
 
   useEffect(() => {
     setLiveUnreadEnquiries(unreadEnquiriesCount);
     setLiveUnreadCommunications(unreadCommunicationsCount);
-  }, [unreadEnquiriesCount, unreadCommunicationsCount]);
+    setLiveUnreadWorkforce(pathname.startsWith("/admin/workforce") ? 0 : unreadWorkforceCount);
+  }, [unreadEnquiriesCount, unreadCommunicationsCount, unreadWorkforceCount, pathname]);
+
+  useEffect(() => {
+    if (!pathname.startsWith("/admin/workforce")) return;
+    setLiveUnreadWorkforce(0);
+    fetch("/api/admin/workforce/ack", { method: "POST" })
+      .then(() => {
+        window.dispatchEvent(new Event("notifications-refresh"));
+      })
+      .catch(() => {});
+  }, [pathname]);
 
   useRealtimeHub({
     role: "admin",
@@ -103,6 +118,13 @@ export function AdminLayoutShell({
         }
         if (typeof data.unreadCommunicationsCount === "number") {
           setLiveUnreadCommunications(data.unreadCommunicationsCount);
+        }
+        if (typeof data.unreadWorkforceCount === "number") {
+          setLiveUnreadWorkforce(
+            window.location.pathname.startsWith("/admin/workforce")
+              ? 0
+              : data.unreadWorkforceCount
+          );
         }
       } catch {
         // Ignore transient network errors during background polling
@@ -217,6 +239,7 @@ export function AdminLayoutShell({
           shortLabel: "Workforce",
           href: "/admin/workforce",
           icon: Bot,
+          badge: liveUnreadWorkforce > 0 ? liveUnreadWorkforce : undefined,
         },
       ],
     },
