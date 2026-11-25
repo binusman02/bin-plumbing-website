@@ -31,6 +31,18 @@ interface RaisedHand {
   topic: string;
 }
 
+const MEETING_STORAGE_KEY = "flowguard_team_meeting_v1";
+
+const DEFAULT_INTRO_TURN: MeetingTurn = {
+  id: "intro-1",
+  speakerType: "agent",
+  speakerId: "operations_manager",
+  speakerName: "Sadiq — AI Operations Manager",
+  avatarUrl: "/images/ai/sadiq.jpg",
+  text: "Morning Boss. Tell me who you want in the room (Amina, Zainab, Faruk, Bashir, or everyone), or tap their photos above.",
+  createdAt: new Date().toISOString(),
+};
+
 export function TeamMeetingPanel({
   agents,
   onMeetingWrappedUp,
@@ -39,18 +51,9 @@ export function TeamMeetingPanel({
   onMeetingWrappedUp?: () => void;
 }) {
   const [participants, setParticipants] = useState<string[]>(["operations_manager"]);
-  const [turns, setTurns] = useState<MeetingTurn[]>([
-    {
-      id: "intro-1",
-      speakerType: "agent",
-      speakerId: "operations_manager",
-      speakerName: "Sadiq — AI Operations Manager",
-      avatarUrl: "/images/ai/sadiq.jpg",
-      text: "Good day, Boss. I'm ready for our sync — tell me who you want me to bring into the room (Amina, Zainab, Faruk, Bashir, or everyone), or tap their photos above.",
-      createdAt: new Date().toISOString(),
-    },
-  ]);
+  const [turns, setTurns] = useState<MeetingTurn[]>([DEFAULT_INTRO_TURN]);
   const [raisedHands, setRaisedHands] = useState<RaisedHand[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [speakOutLoud, setSpeakOutLoud] = useState(false);
@@ -72,6 +75,78 @@ export function TeamMeetingPanel({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const ttsSeqRef = useRef(0);
   const discardRecordingRef = useRef(false);
+  const busyRef = useRef(false);
+
+  // Restore saved meeting state when returning from another tab/page
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(MEETING_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as {
+          participants?: string[];
+          turns?: MeetingTurn[];
+          raisedHands?: RaisedHand[];
+        };
+        if (Array.isArray(saved.participants) && saved.participants.length > 0) {
+          setParticipants(saved.participants);
+          participantsRef.current = saved.participants;
+        }
+        if (Array.isArray(saved.turns) && saved.turns.length > 0) {
+          setTurns(saved.turns);
+          turnsRef.current = saved.turns;
+        }
+        if (Array.isArray(saved.raisedHands)) {
+          setRaisedHands(saved.raisedHands);
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem(
+        MEETING_STORAGE_KEY,
+        JSON.stringify({
+          participants,
+          turns: turns.slice(-40),
+          raisedHands,
+        })
+      );
+    } catch {
+      // Ignore storage errors
+    }
+  }, [hydrated, participants, turns, raisedHands]);
+
+  // Clean up audio & mic if user leaves the Team Meeting tab
+  useEffect(() => {
+    return () => {
+      liveCallRef.current = false;
+      ttsSeqRef.current += 1;
+      if (vadTimerRef.current !== null) {
+        window.clearInterval(vadTimerRef.current);
+        vadTimerRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        discardRecordingRef.current = true;
+        mediaRecorderRef.current.stop();
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     turnsRef.current = turns;
@@ -380,16 +455,50 @@ export function TeamMeetingPanel({
 
   function startWeeklySync() {
     const allIds = agents.map((a) => a.id);
-    setParticipants(allIds.length > 0 ? allIds : ["operations_manager"]);
+    const next = allIds.length > 0 ? allIds : ["operations_manager"];
+    participantsRef.current = next;
+    setParticipants(next);
     void sendMeetingTurn("Let's start our weekly team meeting. Sadiq, give us a quick kickoff and let anyone raise a hand if they have something important.");
+  }
+
+  function resetMeeting() {
+    liveCallRef.current = false;
+    setLiveCall(false);
+    ttsSeqRef.current += 1;
+    abortRecordingWithoutSend();
+    if (audioRef.current) audioRef.current.pause();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    const freshTurns = [{ ...DEFAULT_INTRO_TURN, createdAt: new Date().toISOString() }];
+    participantsRef.current = ["operations_manager"];
+    turnsRef.current = freshTurns;
+    setParticipants(["operations_manager"]);
+    setTurns(freshTurns);
+    setRaisedHands([]);
+    try {
+      window.localStorage.removeItem(MEETING_STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
   }
 
   async function sendMeetingTurn(
     customText?: string,
     opts?: { callOnAgent?: string; wrapUp?: boolean }
   ) {
+    if (busyRef.current) return;
     const text = (customText ?? input).trim();
     if (!text && !opts?.callOnAgent && !opts?.wrapUp) return;
+
+    busyRef.current = true;
+    // Pause mic & any current audio before requesting the next turn
+    abortRecordingWithoutSend();
+    ttsSeqRef.current += 1;
+    if (audioRef.current) audioRef.current.pause();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
 
     const nextHistory = [...turnsRef.current];
     if (text && !opts?.callOnAgent) {
@@ -449,6 +558,7 @@ export function TeamMeetingPanel({
         },
       ]);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -524,6 +634,15 @@ export function TeamMeetingPanel({
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#0B1F3A]/20 bg-amber-50 px-3 text-[11px] font-bold text-[#0B1F3A] disabled:opacity-50"
             >
               Wrap Up &amp; Save
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={resetMeeting}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              title="Clear this meeting and start fresh"
+            >
+              New Meeting
             </button>
           </div>
         </div>
