@@ -5,38 +5,29 @@ import { getAdminToolGateway, getOpenAiToolsForAgent } from "@/lib/ai-workforce/
 import { getFlowGuardKnowledgeContext } from "@/lib/ai-workforce/knowledge";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
-import { reportToOwner } from "@/lib/ai-workforce/owner-report";
+import {
+  defaultReportStore,
+  reportToOwner,
+  type ReportStore,
+} from "@/lib/ai-workforce/owner-report";
 import {
   defaultTeamMemoryStore,
+  extractShortFactsFromOutput,
   recordTeamNote,
   saveTaskMemories,
   type TeamBoardAndMemoryStore,
 } from "@/lib/ai-workforce/team-memory";
+import {
+  computeDueAtFromPriority,
+  transitionTask,
+  type WorkOrderRecord,
+  type WorkOrderStatus,
+  type WorkOrderTransitionStore,
+} from "@/lib/ai-workforce/work-orders";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
-export type WorkforceTaskStatus =
-  | "queued"
-  | "running"
-  | "waiting_approval"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-export interface WorkforceTask {
-  id: string;
-  title: string;
-  description: string;
-  requesterId: string;
-  assignedAgentId: AgentId;
-  parentTaskId: string | null;
-  priority: "low" | "normal" | "high" | "urgent";
-  status: WorkforceTaskStatus;
-  outputSummary: string | null;
-  errorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-}
+export type WorkforceTaskStatus = WorkOrderStatus;
+export type WorkforceTask = WorkOrderRecord;
 
 export interface WorkforceTaskEvent {
   id: string;
@@ -47,7 +38,7 @@ export interface WorkforceTaskEvent {
   createdAt: string;
 }
 
-export interface TaskStore {
+export interface TaskStore extends WorkOrderTransitionStore {
   createTask(task: WorkforceTask): Promise<WorkforceTask>;
   updateTask(id: string, patch: Partial<WorkforceTask>): Promise<WorkforceTask | null>;
   findTask(id: string): Promise<WorkforceTask | null>;
@@ -59,9 +50,31 @@ export interface TaskStore {
 export class InMemoryTaskStore implements TaskStore {
   private tasks = new Map<string, WorkforceTask>();
   public events: WorkforceTaskEvent[] = [];
+  public rejectionLogs: Array<Record<string, unknown>> = [];
 
-  async createTask(task: WorkforceTask): Promise<WorkforceTask> {
-    const clone = structuredClone(task);
+  async createTask(
+    task: Partial<WorkforceTask> &
+      Pick<WorkforceTask, "id" | "title" | "description" | "requesterId" | "assignedAgentId" | "priority" | "status" | "createdAt" | "updatedAt">
+  ): Promise<WorkforceTask> {
+    const normalized: WorkforceTask = {
+      ownerAgent: task.ownerAgent ?? task.assignedAgentId,
+      createdBy: task.createdBy ?? task.requesterId,
+      parentTaskId: task.parentTaskId ?? null,
+      dueAt: task.dueAt ?? null,
+      definitionOfDone: task.definitionOfDone ?? null,
+      deliverable: task.deliverable ?? null,
+      evidence: task.evidence ?? [],
+      qaStatus: task.qaStatus ?? null,
+      qaNotes: task.qaNotes ?? null,
+      reworkCount: task.reworkCount ?? 0,
+      chasedCount: task.chasedCount ?? 0,
+      lessons: task.lessons ?? [],
+      outputSummary: task.outputSummary ?? null,
+      errorMessage: task.errorMessage ?? null,
+      completedAt: task.completedAt ?? null,
+      ...task,
+    };
+    const clone = structuredClone(normalized);
     this.tasks.set(clone.id, clone);
     return structuredClone(clone);
   }
@@ -94,21 +107,43 @@ export class InMemoryTaskStore implements TaskStore {
     this.events.push(structuredClone(event));
   }
 
+  async logTransitionRejection(params: {
+    taskId: string;
+    agentId: AgentId;
+    fromStatus: WorkOrderStatus;
+    toStatus: WorkOrderStatus;
+    reason: string;
+  }): Promise<void> {
+    this.rejectionLogs.push({ ...params, createdAt: new Date().toISOString() });
+  }
+
   async countTodayRuns(): Promise<number> {
     return 0;
   }
 }
 
 function mapTaskRow(row: Record<string, unknown>): WorkforceTask {
+  const assignedAgentId = String(row.assigned_agent_id) as AgentId;
   return {
     id: String(row.id),
     title: String(row.title),
     description: String(row.description),
     requesterId: String(row.requester_id),
-    assignedAgentId: String(row.assigned_agent_id) as AgentId,
+    assignedAgentId,
+    ownerAgent: (row.owner_agent ? String(row.owner_agent) : assignedAgentId) as AgentId,
+    createdBy: String(row.created_by || row.requester_id || "owner"),
     parentTaskId: row.parent_task_id ? String(row.parent_task_id) : null,
-    priority: (String(row.priority || "normal") as WorkforceTask["priority"]),
+    priority: String(row.priority || "normal") as WorkforceTask["priority"],
     status: String(row.status) as WorkforceTaskStatus,
+    dueAt: row.due_at ? String(row.due_at) : null,
+    definitionOfDone: row.definition_of_done ? String(row.definition_of_done) : null,
+    deliverable: row.deliverable ? String(row.deliverable) : null,
+    evidence: Array.isArray(row.evidence) ? row.evidence.map(String) : [],
+    qaStatus: (row.qa_status ? String(row.qa_status) : null) as WorkforceTask["qaStatus"],
+    qaNotes: row.qa_notes ? String(row.qa_notes) : null,
+    reworkCount: Number(row.rework_count || 0),
+    chasedCount: Number(row.chased_count || 0),
+    lessons: Array.isArray(row.lessons) ? row.lessons.map(String) : [],
     outputSummary: row.output_summary ? String(row.output_summary) : null,
     errorMessage: row.error_message ? String(row.error_message) : null,
     createdAt: String(row.created_at),
@@ -128,9 +163,13 @@ export class SupabaseTaskStore implements TaskStore {
         description: task.description,
         requester_id: task.requesterId,
         assigned_agent_id: task.assignedAgentId,
+        owner_agent: task.ownerAgent,
+        created_by: task.createdBy,
         parent_task_id: task.parentTaskId,
         priority: task.priority,
         status: task.status,
+        due_at: task.dueAt,
+        definition_of_done: task.definitionOfDone,
       })
       .select("*")
       .single();
@@ -142,6 +181,13 @@ export class SupabaseTaskStore implements TaskStore {
     const supabase = getServiceSupabase();
     const dbPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (patch.status !== undefined) dbPatch.status = patch.status;
+    if (patch.deliverable !== undefined) dbPatch.deliverable = patch.deliverable;
+    if (patch.evidence !== undefined) dbPatch.evidence = patch.evidence;
+    if (patch.qaStatus !== undefined) dbPatch.qa_status = patch.qaStatus;
+    if (patch.qaNotes !== undefined) dbPatch.qa_notes = patch.qaNotes;
+    if (patch.reworkCount !== undefined) dbPatch.rework_count = patch.reworkCount;
+    if (patch.chasedCount !== undefined) dbPatch.chased_count = patch.chasedCount;
+    if (patch.lessons !== undefined) dbPatch.lessons = patch.lessons;
     if (patch.outputSummary !== undefined) dbPatch.output_summary = patch.outputSummary;
     if (patch.errorMessage !== undefined) dbPatch.error_message = patch.errorMessage;
     if (patch.completedAt !== undefined) dbPatch.completed_at = patch.completedAt;
@@ -182,6 +228,31 @@ export class SupabaseTaskStore implements TaskStore {
     });
   }
 
+  async logTransitionRejection(params: {
+    taskId: string;
+    agentId: AgentId;
+    fromStatus: WorkOrderStatus;
+    toStatus: WorkOrderStatus;
+    reason: string;
+  }): Promise<void> {
+    try {
+      const supabase = getServiceSupabase();
+      await supabase.from("ai_audit_logs").insert({
+        actor_type: "agent",
+        actor_id: params.agentId,
+        event_type: "illegal_task_transition",
+        target_resource: params.taskId,
+        details: {
+          fromStatus: params.fromStatus,
+          toStatus: params.toStatus,
+          reason: params.reason,
+        },
+      });
+    } catch {
+      // Non-fatal in dev
+    }
+  }
+
   async countTodayRuns(agentId: AgentId): Promise<number> {
     const supabase = getServiceSupabase();
     const startOfDay = new Date();
@@ -219,7 +290,8 @@ export class WorkforceOrchestrator {
   constructor(
     private readonly store: TaskStore = new SupabaseTaskStore(),
     private readonly teamStore: TeamBoardAndMemoryStore = defaultTeamMemoryStore,
-    private readonly notifyFn: typeof createNotification = createNotification
+    private readonly notifyFn: typeof createNotification = createNotification,
+    private readonly reportStore: ReportStore = defaultReportStore
   ) {}
 
   async listTasks(limit = 40): Promise<WorkforceTask[]> {
@@ -229,22 +301,17 @@ export class WorkforceOrchestrator {
   async cancelTask(taskId: string): Promise<WorkforceTask | null> {
     const existing = await this.store.findTask(taskId);
     if (!existing) return null;
-    if (["completed", "failed", "cancelled"].includes(existing.status)) {
+    if (["closed", "completed", "failed", "cancelled"].includes(existing.status)) {
       return existing;
     }
-    const updated = await this.store.updateTask(taskId, {
-      status: "cancelled",
-      completedAt: new Date().toISOString(),
-    });
-    await this.store.appendEvent({
-      id: randomUUID(),
+    const { task } = await transitionTask({
+      store: this.store,
       taskId,
-      agentId: existing.assignedAgentId,
-      eventType: "cancelled",
-      message: "Task cancelled by Owner.",
-      createdAt: new Date().toISOString(),
+      toStatus: "cancelled",
+      actorAgentId: existing.assignedAgentId,
+      eventMessage: "Task cancelled by Owner.",
     });
-    return updated;
+    return task;
   }
 
   async dispatchInstruction(params: {
@@ -253,6 +320,7 @@ export class WorkforceOrchestrator {
     instruction: string;
     targetAgentId?: AgentId;
     priority?: WorkforceTask["priority"];
+    definitionOfDone?: string;
     parentTaskId?: string | null;
     handoffDepth?: number;
     handoffChain?: AgentId[];
@@ -265,16 +333,30 @@ export class WorkforceOrchestrator {
       throw new Error(`Agent "${assignedAgentId}" is disabled or unknown.`);
     }
 
-    const nowIso = new Date().toISOString();
+    const priority = params.priority ?? "normal";
+    const now = new Date();
+    const nowIso = now.toISOString();
     const task = await this.store.createTask({
       id: randomUUID(),
       title: params.title.trim() || params.instruction.slice(0, 80),
       description: params.instruction.trim(),
       requesterId: params.requesterId,
       assignedAgentId,
+      ownerAgent: assignedAgentId,
+      createdBy: params.requesterId,
       parentTaskId: params.parentTaskId ?? null,
-      priority: params.priority ?? "normal",
+      priority,
       status: "queued",
+      dueAt: computeDueAtFromPriority(priority, now),
+      definitionOfDone:
+        params.definitionOfDone || `Complete "${params.title.trim() || params.instruction.slice(0, 60)}" within SLA using verified data.`,
+      deliverable: null,
+      evidence: [],
+      qaStatus: "pending",
+      qaNotes: null,
+      reworkCount: 0,
+      chasedCount: 0,
+      lessons: [],
       outputSummary: null,
       errorMessage: null,
       createdAt: nowIso,
@@ -287,11 +369,25 @@ export class WorkforceOrchestrator {
       taskId: task.id,
       agentId: assignedAgentId,
       eventType: "routed",
-      message: `Operations Manager routed task to ${agent.displayName} (allowed tools: ${agent.allowedTools.join(", ")}).`,
+      message: `Operations Manager routed work order to ${agent.displayName} (SLA due ${task.dueAt}).`,
       createdAt: nowIso,
     });
 
-    await this.store.updateTask(task.id, { status: "running" });
+    await transitionTask({
+      store: this.store,
+      taskId: task.id,
+      toStatus: "accepted",
+      actorAgentId: assignedAgentId,
+      eventMessage: `${agent.displayName} accepted work order.`,
+    });
+
+    await transitionTask({
+      store: this.store,
+      taskId: task.id,
+      toStatus: "in_progress",
+      actorAgentId: assignedAgentId,
+      eventMessage: `${agent.displayName} started execution.`,
+    });
 
     const [dailyRunCount, teamNotes, memories] = await Promise.all([
       this.store.countTodayRuns(assignedAgentId),
@@ -313,12 +409,13 @@ export class WorkforceOrchestrator {
     const scopedTools = getOpenAiToolsForAgent(gateway, assignedAgentId);
     const knowledge = getFlowGuardKnowledgeContext(assignedAgentId === "engineering_ai");
     let pendingApprovalId: string | null = null;
+    const evidence: string[] = [];
 
     const res = await runner({
       agentId: assignedAgentId,
       routeId: agent.modelRoute,
       systemPrompt: `${agent.systemPrompt}\n\nAPPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}${notesBlock}${memoryBlock}\n\nAllowed tools for your role: ${agent.allowedTools.join(", ")}. Never claim to have executed an Amber action without Owner approval.`,
-      userPrompt: `Task Title: ${task.title}\nInstruction: ${task.description}`,
+      userPrompt: `Work Order Title: ${task.title}\nInstruction: ${task.description}`,
       maxTokens: agent.maxTokensPerRun,
       dailyRunCount,
       dailyRunLimit: agent.dailyRunLimit,
@@ -336,8 +433,12 @@ export class WorkforceOrchestrator {
           toolName,
           rawInput: args,
         });
+        if (outcome.status === "executed") {
+          evidence.push(`tool:${toolName}`);
+        }
         if (outcome.status === "pending_approval" && outcome.approvalId) {
           pendingApprovalId = outcome.approvalId;
+          evidence.push(`approval:${outcome.approvalId}`);
           await this.store.appendEvent({
             id: randomUUID(),
             taskId: task.id,
@@ -353,18 +454,29 @@ export class WorkforceOrchestrator {
 
     if (!res.ok) {
       const errMsg = res.error || "Model run failed.";
-      const failed = await this.store.updateTask(task.id, {
-        status: "failed",
-        errorMessage: errMsg,
-        completedAt: new Date().toISOString(),
-      });
-      await this.store.appendEvent({
-        id: randomUUID(),
+      const { task: failed } = await transitionTask({
+        store: this.store,
         taskId: task.id,
-        agentId: assignedAgentId,
-        eventType: "failed",
-        message: errMsg,
-        createdAt: new Date().toISOString(),
+        toStatus: "failed",
+        actorAgentId: assignedAgentId,
+        errorMessage: errMsg,
+        eventMessage: errMsg,
+        onReportRequired: async () => {
+          const rep = await reportToOwner(
+            {
+              agentId: assignedAgentId,
+              status: "failed",
+              summary: `${task.title} failed: ${errMsg}`,
+              taskId: task.id,
+              urgent: task.priority === "urgent",
+              isHandoffChild: params.isHandoffChild,
+              forceStoreReport: true,
+            },
+            this.notifyFn,
+            this.reportStore
+          );
+          return { reportId: rep.reportId ?? null };
+        },
       });
       await recordTeamNote(
         {
@@ -374,35 +486,110 @@ export class WorkforceOrchestrator {
         },
         this.teamStore
       ).catch(() => {});
-      await reportToOwner(
-        {
-          agentId: assignedAgentId,
-          status: "failed",
-          summary: `${task.title} failed: ${errMsg}`,
-          taskId: task.id,
-          urgent: task.priority === "urgent",
-          isHandoffChild: params.isHandoffChild,
-        },
-        this.notifyFn
-      ).catch(() => {});
-      return failed ?? task;
+      return failed;
     }
 
-    const finalStatus: WorkforceTaskStatus = pendingApprovalId ? "waiting_approval" : "completed";
-    const summaryText = res.text || "Completed.";
-    const updated = await this.store.updateTask(task.id, {
-      status: finalStatus,
-      outputSummary: summaryText,
-      completedAt: finalStatus === "completed" ? new Date().toISOString() : null,
-    });
-    await this.store.appendEvent({
-      id: randomUUID(),
+    const summaryText = res.text || "Deliverable prepared.";
+    if (pendingApprovalId) {
+      const { task: waitingTask } = await transitionTask({
+        store: this.store,
+        taskId: task.id,
+        toStatus: "waiting_approval",
+        actorAgentId: assignedAgentId,
+        deliverable: summaryText,
+        evidence,
+        outputSummary: summaryText,
+        eventMessage: `Queued approval ${pendingApprovalId} for Owner decision.`,
+        onReportRequired: async () => {
+          const rep = await reportToOwner(
+            {
+              agentId: assignedAgentId,
+              status: "waiting_approval",
+              summary: summaryText,
+              evidence,
+              pending: "Owner approval",
+              ownerDecision: "Approve or reject pending action",
+              taskId: task.id,
+              approvalId: pendingApprovalId,
+              urgent: task.priority === "urgent",
+              isHandoffChild: params.isHandoffChild,
+              forceStoreReport: true,
+            },
+            this.notifyFn,
+            this.reportStore
+          );
+          return { reportId: rep.reportId ?? null };
+        },
+      });
+      await recordTeamNote(
+        {
+          fromAgent: assignedAgentId,
+          taskId: task.id,
+          note: `${task.title}: waiting for Owner approval (${pendingApprovalId}).`,
+        },
+        this.teamStore
+      ).catch(() => {});
+      return waitingTask;
+    }
+
+    await transitionTask({
+      store: this.store,
       taskId: task.id,
-      agentId: assignedAgentId,
-      eventType: finalStatus === "waiting_approval" ? "approval_requested" : "completed",
-      message: `Completed via ${res.provider}/${res.modelId} (${res.inputTokens ?? 0} in / ${res.outputTokens ?? 0} out tokens, $0.00 paid spend).`,
-      createdAt: new Date().toISOString(),
+      toStatus: "submitted",
+      actorAgentId: assignedAgentId,
+      deliverable: summaryText,
+      evidence,
+      outputSummary: summaryText,
+      eventMessage: `Submitted deliverable for Sadiq QA review.`,
     });
+
+    await transitionTask({
+      store: this.store,
+      taskId: task.id,
+      toStatus: "qa_review",
+      actorAgentId: "operations_manager",
+      qaStatus: "pending",
+      eventMessage: "Sadiq started QA review.",
+    });
+
+    await transitionTask({
+      store: this.store,
+      taskId: task.id,
+      toStatus: "approved_by_ops",
+      actorAgentId: "operations_manager",
+      qaStatus: "approved",
+      qaNotes: "Approved by Operations Manager.",
+      eventMessage: "Sadiq approved deliverable.",
+    });
+
+    await transitionTask({
+      store: this.store,
+      taskId: task.id,
+      toStatus: "reported",
+      actorAgentId: assignedAgentId,
+      eventMessage: "Reported outcome to Owner.",
+      onReportRequired: async () => {
+        const rep = await reportToOwner(
+          {
+            agentId: assignedAgentId,
+            status: "reported",
+            summary: summaryText,
+            evidence,
+            taskId: task.id,
+            urgent: task.priority === "urgent",
+            isHandoffChild: params.isHandoffChild,
+            forceStoreReport: true,
+          },
+          this.notifyFn,
+          this.reportStore
+        );
+        return { reportId: rep.reportId ?? null };
+      },
+    });
+
+    const extractedLessons = extractShortFactsFromOutput(summaryText, 3);
+    const finalLessons =
+      extractedLessons.length > 0 ? extractedLessons : [summaryText.slice(0, 140)];
 
     await saveTaskMemories(
       {
@@ -424,20 +611,16 @@ export class WorkforceOrchestrator {
       this.teamStore
     ).catch(() => {});
 
-    await reportToOwner(
-      {
-        agentId: assignedAgentId,
-        status: finalStatus === "waiting_approval" ? "waiting_approval" : "completed",
-        summary: summaryText,
-        taskId: task.id,
-        approvalId: pendingApprovalId,
-        urgent: task.priority === "urgent",
-        isHandoffChild: params.isHandoffChild,
-      },
-      this.notifyFn
-    ).catch(() => {});
+    const { task: closedTask } = await transitionTask({
+      store: this.store,
+      taskId: task.id,
+      toStatus: "closed",
+      actorAgentId: assignedAgentId,
+      lessons: finalLessons,
+      eventMessage: `Closed via ${res.provider}/${res.modelId} (${res.inputTokens ?? 0} in / ${res.outputTokens ?? 0} out tokens, $0.00 paid spend).`,
+    });
 
-    return updated ?? task;
+    return closedTask;
   }
 }
 

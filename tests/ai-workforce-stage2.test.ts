@@ -108,11 +108,10 @@ test("AI Workforce Stage 2 — Free-First Model Policy & Orchestration", async (
     });
 
     assert.equal(task.assignedAgentId, "research_ai");
-    assert.equal(task.status, "completed");
+    assert.equal(task.status, "closed");
     assert.equal(task.outputSummary, "Sourced report ready for review.");
-    assert.equal(store.events.length, 2);
-    assert.equal(store.events[0].eventType, "routed");
-    assert.equal(store.events[1].eventType, "completed");
+    assert.ok(store.events.some((e) => e.eventType === "routed"));
+    assert.ok(store.events.some((e) => e.eventType === "closed"));
   });
 
   await t.test("6. Orchestrator fails safely on provider outage and supports cancellation", async () => {

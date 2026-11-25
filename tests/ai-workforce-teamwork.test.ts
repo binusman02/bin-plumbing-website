@@ -204,7 +204,8 @@ test("AI Workforce Teamwork, Memory, Handoffs, Owner Reports & Meetings", async 
     // Orchestrator integrates notes, memory, and reportToOwner
     const taskStore = new InMemoryTaskStore();
     const teamStore = new InMemoryTeamBoardAndMemoryStore();
-    const orch = new WorkforceOrchestrator(taskStore, teamStore, mockNotify as never);
+    const reportStore = new (await import("../src/lib/ai-workforce/owner-report")).InMemoryReportStore();
+    const orch = new WorkforceOrchestrator(taskStore, teamStore, mockNotify as never, reportStore);
     let capturedPrompt = "";
     await recordTeamNote({ fromAgent: "research_ai", toAgent: null, note: "SEO traffic rose in Bompai." }, teamStore);
 
@@ -225,7 +226,7 @@ test("AI Workforce Teamwork, Memory, Handoffs, Owner Reports & Meetings", async 
         };
       },
     });
-    assert.equal(task.status, "completed");
+    assert.equal(task.status, "closed");
     assert.match(capturedPrompt, /SEO traffic rose in Bompai/);
     assert.equal(sent.length, 2);
     assert.equal(sent[1].type, "ai_workforce_report");
