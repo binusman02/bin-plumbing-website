@@ -97,7 +97,7 @@ test("AI Workforce Stage 2 — Free-First Model Policy & Orchestration", async (
         assert.ok(req.systemPrompt.includes("research_web_search"));
         return {
           ok: true,
-          text: "Sourced report ready for review.",
+          text: "Sourced report ready for review (https://flowguard.com.ng, 2026-11-25).",
           provider: "google",
           modelId: "gemini-3-flash-preview",
           inputTokens: 120,
@@ -109,7 +109,10 @@ test("AI Workforce Stage 2 — Free-First Model Policy & Orchestration", async (
 
     assert.equal(task.assignedAgentId, "research_ai");
     assert.equal(task.status, "closed");
-    assert.equal(task.outputSummary, "Sourced report ready for review.");
+    assert.equal(
+      task.outputSummary,
+      "Sourced report ready for review (https://flowguard.com.ng, 2026-11-25)."
+    );
     assert.ok(store.events.some((e) => e.eventType === "routed"));
     assert.ok(store.events.some((e) => e.eventType === "closed"));
   });

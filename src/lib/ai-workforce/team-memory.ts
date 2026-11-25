@@ -4,6 +4,10 @@ import type { AgentId } from "@/lib/ai-workforce/types";
 
 export const TEAM_MEMORY_NAMESPACE = "ns_team";
 
+export function playbookNamespace(agentId: AgentId): string {
+  return `playbook:${agentId}`;
+}
+
 export interface TeamNoteRecord {
   id: string;
   fromAgent: AgentId;
@@ -29,6 +33,9 @@ export interface TeamBoardAndMemoryStore {
   listNotesForAgent(agentId: AgentId, limit?: number): Promise<TeamNoteRecord[]>;
   saveMemories(entries: AgentMemoryRecord[]): Promise<void>;
   loadMemories(agentId: AgentId, namespace: string, limit?: number): Promise<AgentMemoryRecord[]>;
+  listPlaybookRules(agentId?: AgentId): Promise<AgentMemoryRecord[]>;
+  updateMemoryContent(id: string, content: string): Promise<void>;
+  deleteMemory(id: string): Promise<void>;
 }
 
 const SECRET_OR_PII_RX =
@@ -88,14 +95,38 @@ export class InMemoryTeamBoardAndMemoryStore implements TeamBoardAndMemoryStore 
     namespace: string,
     limit = 10
   ): Promise<AgentMemoryRecord[]> {
+    const pbNs = playbookNamespace(agentId);
+    const matching = this.memories.filter(
+      (m) =>
+        (m.namespace === namespace && m.agentId === agentId) ||
+        m.namespace === pbNs ||
+        m.namespace === TEAM_MEMORY_NAMESPACE
+    );
+    // Prioritize playbook rules first, then recent memories, up to limit
+    const playbookFirst = [
+      ...matching.filter((m) => m.namespace === pbNs),
+      ...matching.filter((m) => m.namespace !== pbNs),
+    ];
+    return playbookFirst.slice(0, limit).map((m) => structuredClone(m));
+  }
+
+  async listPlaybookRules(agentId?: AgentId): Promise<AgentMemoryRecord[]> {
     return this.memories
-      .filter(
-        (m) =>
-          (m.namespace === namespace && m.agentId === agentId) ||
-          m.namespace === TEAM_MEMORY_NAMESPACE
+      .filter((m) =>
+        agentId ? m.namespace === playbookNamespace(agentId) : m.namespace.startsWith("playbook:")
       )
-      .slice(0, limit)
       .map((m) => structuredClone(m));
+  }
+
+  async updateMemoryContent(id: string, content: string): Promise<void> {
+    const clean = sanitizeMemoryFact(content);
+    if (!clean) return;
+    const item = this.memories.find((m) => m.id === id);
+    if (item) item.content = clean;
+  }
+
+  async deleteMemory(id: string): Promise<void> {
+    this.memories = this.memories.filter((m) => m.id !== id);
   }
 }
 
@@ -167,16 +198,22 @@ export class SupabaseTeamBoardAndMemoryStore implements TeamBoardAndMemoryStore 
     limit = 10
   ): Promise<AgentMemoryRecord[]> {
     try {
+      const pbNs = playbookNamespace(agentId);
       const supabase = getServiceSupabase();
       const { data } = await supabase
         .from("ai_agent_memory")
         .select("id, agent_id, namespace, memory_key, content, source, created_at")
-        .in("namespace", [namespace, TEAM_MEMORY_NAMESPACE])
+        .in("namespace", [namespace, pbNs, TEAM_MEMORY_NAMESPACE])
         .order("updated_at", { ascending: false })
         .limit(limit);
 
-      return (data || [])
-        .filter((r) => r.namespace === TEAM_MEMORY_NAMESPACE || r.agent_id === agentId)
+      const mapped = (data || [])
+        .filter(
+          (r) =>
+            r.namespace === TEAM_MEMORY_NAMESPACE ||
+            r.namespace === pbNs ||
+            r.agent_id === agentId
+        )
         .map((r) => ({
           id: String(r.id),
           agentId: String(r.agent_id) as AgentId,
@@ -186,8 +223,63 @@ export class SupabaseTeamBoardAndMemoryStore implements TeamBoardAndMemoryStore 
           source: String(r.source),
           createdAt: String(r.created_at),
         }));
+
+      return [
+        ...mapped.filter((m) => m.namespace === pbNs),
+        ...mapped.filter((m) => m.namespace !== pbNs),
+      ].slice(0, limit);
     } catch {
       return [];
+    }
+  }
+
+  async listPlaybookRules(agentId?: AgentId): Promise<AgentMemoryRecord[]> {
+    try {
+      const supabase = getServiceSupabase();
+      const query = supabase
+        .from("ai_agent_memory")
+        .select("id, agent_id, namespace, memory_key, content, source, created_at")
+        .order("updated_at", { ascending: false })
+        .limit(50);
+
+      const { data } = agentId
+        ? await query.eq("namespace", playbookNamespace(agentId))
+        : await query.like("namespace", "playbook:%");
+
+      return (data || []).map((r) => ({
+        id: String(r.id),
+        agentId: String(r.agent_id) as AgentId,
+        namespace: String(r.namespace),
+        memoryKey: String(r.memory_key),
+        content: String(r.content),
+        source: String(r.source),
+        createdAt: String(r.created_at),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async updateMemoryContent(id: string, content: string): Promise<void> {
+    const clean = sanitizeMemoryFact(content);
+    if (!clean) return;
+    try {
+      const supabase = getServiceSupabase();
+      await supabase
+        .from("ai_agent_memory")
+        .update({ content: clean, updated_at: new Date().toISOString() })
+        .eq("id", id);
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  async deleteMemory(id: string): Promise<void> {
+    try {
+      const supabase = getServiceSupabase();
+      await supabase.from("ai_agent_memory").delete().eq("id", id);
+    } catch {
+      // Non-fatal
     }
   }
 }
@@ -254,4 +346,28 @@ export async function saveTaskMemories(
   }
 
   await store.saveMemories(entries);
+}
+
+export async function savePlaybookRule(
+  params: {
+    agentId: AgentId;
+    rule: string;
+    source?: string;
+    memoryKey?: string;
+  },
+  store: TeamBoardAndMemoryStore = defaultTeamMemoryStore
+): Promise<AgentMemoryRecord | null> {
+  const clean = sanitizeMemoryFact(params.rule);
+  if (!clean) return null;
+  const entry: AgentMemoryRecord = {
+    id: randomUUID(),
+    agentId: params.agentId,
+    namespace: playbookNamespace(params.agentId),
+    memoryKey: params.memoryKey || `rule:${randomUUID()}`,
+    content: clean,
+    source: params.source || "owner_feedback",
+    createdAt: new Date().toISOString(),
+  };
+  await store.saveMemories([entry]);
+  return entry;
 }

@@ -11,6 +11,7 @@ import {
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { ToolGateway } from "@/lib/ai-workforce/tool-gateway";
 import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
+import { createStructuredHandoff, respondToHandoff } from "@/lib/ai-workforce/handoffs";
 import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
 import { registerEngineeringTools } from "@/lib/ai-workforce/specialists/engineering";
 import { registerResearchTools } from "@/lib/ai-workforce/specialists/research";
@@ -694,6 +695,24 @@ export function registerAdminWorkforceTools(
       ticketNumber: input.ticketNumber ?? null,
       note: `${ctx.agentId} handed off "${input.title}" to ${input.targetAgentId}.`,
     }).catch(() => {});
+
+    const handoffRecord = ctx.taskId
+      ? await createStructuredHandoff({
+          from: ctx.agentId,
+          to: input.targetAgentId,
+          taskId: ctx.taskId,
+          context: input.ticketNumber ? `Ticket ${input.ticketNumber}: ${input.title}` : input.title,
+          ask: input.instruction,
+        }).catch(() => null)
+      : null;
+
+    if (handoffRecord) {
+      await respondToHandoff({
+        handoffId: handoffRecord.id,
+        receiverAgent: input.targetAgentId,
+        decision: "accept",
+      }).catch(() => {});
+    }
 
     const runner: HandoffRunner =
       options.handoffRunner ??

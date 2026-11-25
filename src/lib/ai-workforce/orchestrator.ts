@@ -11,6 +11,12 @@ import {
   type ReportStore,
 } from "@/lib/ai-workforce/owner-report";
 import {
+  detectEscalationTriggers,
+  runRoleSopChecklist,
+  validateScopeForAgent,
+  verifyToolClaimsInText,
+} from "@/lib/ai-workforce/sops";
+import {
   defaultTeamMemoryStore,
   extractShortFactsFromOutput,
   recordTeamNote,
@@ -327,7 +333,36 @@ export class WorkforceOrchestrator {
     isHandoffChild?: boolean;
     modelRunner?: typeof runWithFreeFirstModel;
   }): Promise<WorkforceTask> {
-    const assignedAgentId = routeInstructionToAgent(params.instruction, params.targetAgentId);
+    let assignedAgentId = routeInstructionToAgent(params.instruction, params.targetAgentId);
+    let outOfScopeNote: string | null = null;
+    if (params.targetAgentId) {
+      const scopeCheck = validateScopeForAgent({
+        targetAgentId: params.targetAgentId,
+        title: params.title,
+        instruction: params.instruction,
+      });
+      if (!scopeCheck.inScope) {
+        outOfScopeNote = scopeCheck.reason || `Out-of-scope target ${params.targetAgentId} re-routed.`;
+        assignedAgentId = scopeCheck.recommendedAgent;
+        try {
+          const supabase = getServiceSupabase();
+          await supabase.from("ai_audit_logs").insert({
+            actor_type: "system",
+            actor_id: "operations_manager",
+            event_type: "out_of_scope_rerouted",
+            target_resource: params.targetAgentId,
+            details: {
+              requestedAgent: params.targetAgentId,
+              reroutedTo: assignedAgentId,
+              reason: outOfScopeNote,
+            },
+          });
+        } catch {
+          // Non-fatal in dev
+        }
+      }
+    }
+
     const agent = getAgentDefinition(assignedAgentId);
     if (!agent || !agent.enabled) {
       throw new Error(`Agent "${assignedAgentId}" is disabled or unknown.`);
@@ -369,7 +404,9 @@ export class WorkforceOrchestrator {
       taskId: task.id,
       agentId: assignedAgentId,
       eventType: "routed",
-      message: `Operations Manager routed work order to ${agent.displayName} (SLA due ${task.dueAt}).`,
+      message: outOfScopeNote
+        ? `${outOfScopeNote} Routed to ${agent.displayName} (SLA due ${task.dueAt}).`
+        : `Operations Manager routed work order to ${agent.displayName} (SLA due ${task.dueAt}).`,
       createdAt: nowIso,
     });
 
@@ -489,7 +526,228 @@ export class WorkforceOrchestrator {
       return failed;
     }
 
-    const summaryText = res.text || "Deliverable prepared.";
+    let summaryText = res.text || "Deliverable prepared.";
+    let reworkCount = 0;
+
+    // Step 4: Claim check + SOP checklist + QA Gate with max 2 reworks
+    for (let qaLoop = 0; qaLoop < 3; qaLoop += 1) {
+      let executedToolNames = evidence
+        .filter((e) => e.startsWith("tool:"))
+        .map((e) => e.slice(5));
+
+      if (!params.modelRunner) {
+        try {
+          const supabase = getServiceSupabase();
+          const { data: execRows } = await supabase
+            .from("ai_tool_executions")
+            .select("tool_name")
+            .eq("task_id", task.id)
+            .eq("status", "executed");
+          for (const er of execRows || []) {
+            const tn = String(er.tool_name || "");
+            if (tn && !executedToolNames.includes(tn)) executedToolNames.push(tn);
+          }
+        } catch {
+          // Non-fatal in test/unmigrated DB
+        }
+      }
+
+      const claimCheck = verifyToolClaimsInText({
+        text: summaryText,
+        executedTools: executedToolNames,
+      });
+      if (claimCheck.rewritten) {
+        summaryText = claimCheck.text;
+        await this.store.appendEvent({
+          id: randomUUID(),
+          taskId: task.id,
+          agentId: "operations_manager",
+          eventType: "qa_review",
+          message: `Claim check rewrote unverified action claim(s): ${claimCheck.flaggedClaims.join(", ")}.`,
+          createdAt: new Date().toISOString(),
+        });
+        try {
+          const supabase = getServiceSupabase();
+          await supabase.from("ai_audit_logs").insert({
+            actor_type: "system",
+            actor_id: "operations_manager",
+            event_type: "unverified_claim_rewritten",
+            target_resource: task.id,
+            details: { agentId: assignedAgentId, flaggedClaims: claimCheck.flaggedClaims },
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      const escalations = detectEscalationTriggers(`${task.description}\n${summaryText}`);
+      if (escalations.length > 0) {
+        await reportToOwner(
+          {
+            agentId: assignedAgentId,
+            status: "urgent",
+            urgent: true,
+            taskId: task.id,
+            summary: `Escalation trigger (${escalations.join(", ")}) on "${task.title}".`,
+            ownerDecision: "Immediate Owner review requested.",
+          },
+          this.notifyFn,
+          this.reportStore
+        ).catch(() => {});
+      }
+
+      await transitionTask({
+        store: this.store,
+        taskId: task.id,
+        toStatus: "submitted",
+        actorAgentId: assignedAgentId,
+        deliverable: summaryText,
+        evidence,
+        outputSummary: summaryText,
+        eventMessage: `Submitted deliverable for Sadiq QA review.`,
+      });
+
+      await transitionTask({
+        store: this.store,
+        taskId: task.id,
+        toStatus: "qa_review",
+        actorAgentId: "operations_manager",
+        qaStatus: "pending",
+        eventMessage: "Sadiq started QA review.",
+      });
+
+      const sopResult = runRoleSopChecklist({
+        agentId: assignedAgentId,
+        deliverable: summaryText,
+        evidence,
+        instruction: task.description,
+      });
+
+      let qaRejectReason: string | null = sopResult.passed
+        ? null
+        : sopResult.failures.join(" ");
+
+      // Optional Sadiq model QA only for urgent/high priority when code checks pass
+      if (!qaRejectReason && (priority === "urgent" || priority === "high") && !params.modelRunner) {
+        const sadiq = getAgentDefinition("operations_manager");
+        if (sadiq) {
+          const qaModelRes = await runner({
+            agentId: "operations_manager",
+            routeId: sadiq.modelRoute,
+            systemPrompt:
+              "You are Sadiq doing a quick QA check on a colleague's deliverable. Reply PASS if ready for the Owner, or REWORK: <short reason> if inaccurate or unsafe.",
+            userPrompt: `Task: ${task.title}\nDeliverable:\n${summaryText}`,
+            maxTokens: 180,
+          });
+          if (qaModelRes.ok && qaModelRes.text && /^\s*REWORK\s*:/i.test(qaModelRes.text)) {
+            qaRejectReason = qaModelRes.text.replace(/^\s*REWORK\s*:\s*/i, "").trim();
+          }
+        }
+      }
+
+      if (!qaRejectReason) {
+        break;
+      }
+
+      reworkCount += 1;
+      await transitionTask({
+        store: this.store,
+        taskId: task.id,
+        toStatus: "rework",
+        actorAgentId: "operations_manager",
+        qaStatus: "rework",
+        qaNotes: qaRejectReason,
+        reworkCount,
+        eventMessage: `QA rejected deliverable (rework ${reworkCount}/2): ${qaRejectReason}`,
+      });
+
+      await saveTaskMemories(
+        {
+          agentId: assignedAgentId,
+          namespace: agent.memoryNamespace,
+          taskId: `${task.id}:qa:${reworkCount}`,
+          outputText: `QA feedback on ${task.title}: ${qaRejectReason}`,
+          shareWithTeam: false,
+        },
+        this.teamStore
+      ).catch(() => {});
+
+      if (reworkCount >= 2) {
+        const { task: blockedTask } = await transitionTask({
+          store: this.store,
+          taskId: task.id,
+          toStatus: "blocked",
+          actorAgentId: "operations_manager",
+          qaNotes: qaRejectReason,
+          reworkCount,
+          eventMessage: `Max 2 QA reworks failed; escalated to Owner.`,
+          onReportRequired: async () => {
+            const rep = await reportToOwner(
+              {
+                agentId: assignedAgentId,
+                status: "blocked",
+                urgent: true,
+                summary: `"${task.title}" failed QA twice: ${qaRejectReason}`,
+                pending: "Owner guidance required",
+                ownerDecision: "Review rework notes or reassign",
+                taskId: task.id,
+                forceStoreReport: true,
+              },
+              this.notifyFn,
+              this.reportStore
+            );
+            return { reportId: rep.reportId ?? null };
+          },
+        });
+        return blockedTask;
+      }
+
+      await transitionTask({
+        store: this.store,
+        taskId: task.id,
+        toStatus: "in_progress",
+        actorAgentId: assignedAgentId,
+        eventMessage: `Retrying task after QA feedback: ${qaRejectReason}`,
+      });
+
+      const retryRes = await runner({
+        agentId: assignedAgentId,
+        routeId: agent.modelRoute,
+        systemPrompt: `${agent.systemPrompt}\n\nAPPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}${notesBlock}${memoryBlock}`,
+        userPrompt: `Fix your previous deliverable based on Sadiq's QA feedback.\nFeedback: ${qaRejectReason}\nPrevious Deliverable:\n${summaryText}`,
+        maxTokens: agent.maxTokensPerRun,
+        dailyRunCount: dailyRunCount + reworkCount,
+        dailyRunLimit: agent.dailyRunLimit,
+      });
+
+      if (!retryRes.ok || !retryRes.text) {
+        const { task: blockedTask } = await transitionTask({
+          store: this.store,
+          taskId: task.id,
+          toStatus: "blocked",
+          actorAgentId: assignedAgentId,
+          errorMessage: retryRes.error || qaRejectReason,
+          eventMessage: "Blocked during rework retry.",
+          onReportRequired: async () => {
+            const rep = await reportToOwner(
+              {
+                agentId: assignedAgentId,
+                status: "blocked",
+                summary: `"${task.title}" blocked during rework: ${qaRejectReason}`,
+                taskId: task.id,
+                forceStoreReport: true,
+              },
+              this.notifyFn,
+              this.reportStore
+            );
+            return { reportId: rep.reportId ?? null };
+          },
+        });
+        return blockedTask;
+      }
+      summaryText = retryRes.text;
+    }
+
     if (pendingApprovalId) {
       const { task: waitingTask } = await transitionTask({
         store: this.store,
@@ -531,26 +789,6 @@ export class WorkforceOrchestrator {
       ).catch(() => {});
       return waitingTask;
     }
-
-    await transitionTask({
-      store: this.store,
-      taskId: task.id,
-      toStatus: "submitted",
-      actorAgentId: assignedAgentId,
-      deliverable: summaryText,
-      evidence,
-      outputSummary: summaryText,
-      eventMessage: `Submitted deliverable for Sadiq QA review.`,
-    });
-
-    await transitionTask({
-      store: this.store,
-      taskId: task.id,
-      toStatus: "qa_review",
-      actorAgentId: "operations_manager",
-      qaStatus: "pending",
-      eventMessage: "Sadiq started QA review.",
-    });
 
     await transitionTask({
       store: this.store,
