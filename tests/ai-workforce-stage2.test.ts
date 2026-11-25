@@ -161,7 +161,12 @@ test("AI Workforce Stage 2 — Free-First Model Policy & Orchestration", async (
     assert.equal(byId.sales_ai.modelRoute, "mimo-v2-6-flash-free");
     assert.equal(byId.customer_support_ai.modelRoute, "mimo-v2-6-flash-free");
     assert.equal(byId.research_ai.modelRoute, "mimo-v2-6-flash-free");
-    assert.equal(byId.engineering_ai.modelRoute, "flint-recursive-eval");
+    assert.equal(byId.engineering_ai.modelRoute, "free-first-default");
+
+    const geminiOk = checkModelEligibility(DEFAULT_MODEL_ROUTES["free-first-default"], {
+      env: { GOOGLE_GENERATIVE_AI_API_KEY: "AIza_test" },
+    });
+    assert.equal(geminiOk.ok, true);
 
     const mimoOk = checkModelEligibility(DEFAULT_MODEL_ROUTES["mimo-v2-6-flash-free"], {
       env: { AI_GATEWAY_API_KEY: "vck_test_mimo" },
@@ -172,5 +177,80 @@ test("AI Workforce Stage 2 — Free-First Model Policy & Orchestration", async (
       env: { AI_GATEWAY_API_KEY_FLINT: "vck_test_flint" },
     });
     assert.equal(flintOk.ok, true);
+  });
+
+  await t.test("8. Free fallback chain retries transient errors, falls back to next free route, and skips paid", async () => {
+    const {
+      DEFAULT_MODEL_ROUTES,
+      getFreeFallbackChain,
+      runWithFreeFirstModel,
+    } = await import("../src/lib/ai-workforce/model-adapter");
+
+    const routesWithPaid = {
+      ...DEFAULT_MODEL_ROUTES,
+      "paid-route": {
+        routeId: "paid-route",
+        provider: "openai_compatible" as const,
+        modelId: "paid-model",
+        billingTier: "paid" as const,
+        envKeyName: "PAID_KEY",
+        dataTermsVerified: true,
+        notes: "Paid test route",
+      },
+    };
+
+    const chain = getFreeFallbackChain("free-first-default", routesWithPaid, {
+      GOOGLE_GENERATIVE_AI_API_KEY: "g-key",
+      AI_GATEWAY_API_KEY: "m-key",
+      PAID_KEY: "p-key",
+    });
+    assert.deepEqual(
+      chain.map((c) => c.route.routeId),
+      ["free-first-default", "mimo-v2-6-flash-free"]
+    );
+
+    const attempts: string[] = [];
+    const res = await runWithFreeFirstModel(
+      {
+        agentId: "engineering_ai",
+        routeId: "free-first-default",
+        systemPrompt: "Test",
+        userPrompt: "Hello",
+        maxTokens: 400,
+        timeoutMs: 5000,
+      },
+      routesWithPaid,
+      {
+        env: {
+          GOOGLE_GENERATIVE_AI_API_KEY: "g-key",
+          AI_GATEWAY_API_KEY: "m-key",
+        },
+        routeExecutor: async (_req, route) => {
+          attempts.push(route.routeId);
+          if (route.routeId === "free-first-default") {
+            return {
+              ok: false,
+              code: "PROVIDER_ERROR",
+              error: "The operation was aborted due to timeout",
+            };
+          }
+          return {
+            ok: true,
+            text: "Fallback MiMo answered.",
+            provider: route.provider,
+            modelId: route.modelId,
+          };
+        },
+      }
+    );
+
+    assert.equal(res.ok, true);
+    assert.equal(res.text, "Fallback MiMo answered.");
+    // Retried free-first-default once on timeout, then fell back to mimo-v2-6-flash-free
+    assert.deepEqual(attempts, [
+      "free-first-default",
+      "free-first-default",
+      "mimo-v2-6-flash-free",
+    ]);
   });
 });

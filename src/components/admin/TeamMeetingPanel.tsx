@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Hand, Mic, Phone, PhoneOff, Send, Sparkles, Square, Users, Volume2, VolumeX } from "lucide-react";
+import { Hand, Mic, Phone, PhoneOff, RefreshCw, Send, Sparkles, Square, Users, Volume2, VolumeX } from "lucide-react";
 import { assignAgentVoices, cleanTextForSpeech, stripAudioTags } from "@/lib/ai-workforce/voice-profiles";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
@@ -20,6 +20,8 @@ interface MeetingTurn {
   avatarUrl?: string;
   text: string;
   spokenText?: string;
+  failed?: boolean;
+  retryPrompt?: string;
   createdAt: string;
 }
 
@@ -62,6 +64,7 @@ export function TeamMeetingPanel({
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [modelHealth, setModelHealth] = useState<Record<string, "ok" | "slow" | "unconfigured">>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -170,6 +173,31 @@ export function TeamMeetingPanel({
     updateVoices();
     synth.addEventListener("voiceschanged", updateVoices);
     return () => synth.removeEventListener("voiceschanged", updateVoices);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/workforce/overview", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: {
+        agents?: Array<{ id: string; modelRoute: string }>;
+        usage?: { routes?: Array<{ routeId: string; configured: boolean }> };
+      } | null) => {
+        if (!active || !json?.agents) return;
+        const routeConfigured = new Map(
+          (json.usage?.routes || []).map((r) => [r.routeId, r.configured])
+        );
+        const anyFreeConfigured = Array.from(routeConfigured.values()).some(Boolean);
+        const next: Record<string, "ok" | "slow" | "unconfigured"> = {};
+        for (const a of json.agents) {
+          next[a.id] = routeConfigured.get(a.modelRoute) || anyFreeConfigured ? "ok" : "unconfigured";
+        }
+        setModelHealth(next);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -541,6 +569,10 @@ export function TeamMeetingPanel({
         : [];
       if (json.speakerTurn) {
         const turn = json.speakerTurn as MeetingTurn;
+        setModelHealth((prev) => ({
+          ...prev,
+          [turn.speakerId]: turn.failed ? "slow" : "ok",
+        }));
         setTurns((prev) => [...prev, turn, ...followUps]);
         void speakText(turn.spokenText || turn.text, turn.speakerId);
       } else if (followUps.length > 0) {
@@ -658,6 +690,30 @@ export function TeamMeetingPanel({
           <span className="font-semibold">&quot;Sadiq, bring Amina in&quot;</span>.
         </p>
 
+        {Object.keys(modelHealth).length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-600">
+            <span className="font-bold text-[#0B1F3A]">Model health:</span>
+            {agents.map((a) => {
+              const shortName = a.displayName.split("—")[0].trim();
+              const status = modelHealth[a.id] ?? "ok";
+              return (
+                <span
+                  key={`mh-${a.id}`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                    status === "ok"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : status === "slow"
+                        ? "bg-amber-50 text-amber-800"
+                        : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {shortName} {status === "ok" ? "✓" : status === "slow" ? "slow" : "missing key"}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-2">
           {agents.map((agent) => {
             const inRoom = participants.includes(agent.id);
@@ -748,6 +804,21 @@ export function TeamMeetingPanel({
                   )}
                 </div>
                 <p className="whitespace-pre-wrap">{turn.text}</p>
+                {turn.failed && turn.retryPrompt && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void sendMeetingTurn(turn.retryPrompt, {
+                        callOnAgent: turn.speakerId,
+                      })
+                    }
+                    className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-bold text-[#0B1F3A] hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry
+                  </button>
+                )}
               </div>
             </div>
           );

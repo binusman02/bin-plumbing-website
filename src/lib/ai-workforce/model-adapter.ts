@@ -71,6 +71,7 @@ export interface ModelExecutionRequest {
   systemPrompt: string;
   userPrompt: string;
   maxTokens: number;
+  timeoutMs?: number;
   allowPaid?: boolean;
   dailyRunCount?: number;
   dailyRunLimit?: number;
@@ -137,42 +138,62 @@ export function checkModelEligibility(
   return { ok: true, apiKey };
 }
 
-export async function runWithFreeFirstModel(
+export function getFreeFallbackChain(
+  primaryRouteId: string,
+  routes: Record<string, ModelRouteConfig> = DEFAULT_MODEL_ROUTES,
+  env: Record<string, string | undefined> = process.env
+): Array<{ route: ModelRouteConfig; apiKey: string }> {
+  const candidateIds = [
+    primaryRouteId,
+    "free-first-default",
+    "mimo-v2-6-flash-free",
+    ...(env.AI_GATEWAY_API_KEY_FLINT?.trim() ? ["flint-recursive-eval"] : []),
+  ];
+  const seen = new Set<string>();
+  const eligible: Array<{ route: ModelRouteConfig; apiKey: string }> = [];
+
+  for (const id of candidateIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const route = routes[id];
+    if (!route || route.billingTier !== "free") continue;
+    const check = checkModelEligibility(route, { allowPaid: false, env });
+    if (check.ok) {
+      eligible.push({ route, apiKey: check.apiKey });
+    }
+  }
+  return eligible;
+}
+
+export function isTransientModelError(res: ModelExecutionResult): boolean {
+  if (res.ok) return false;
+  const msg = String(res.error || "").toLowerCase();
+  return (
+    msg.includes("timeout") ||
+    msg.includes("aborted") ||
+    msg.includes("http 5") ||
+    msg.includes("econnreset") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network")
+  );
+}
+
+async function executeSingleRoute(
   req: ModelExecutionRequest,
-  routes: Record<string, ModelRouteConfig> = DEFAULT_MODEL_ROUTES
+  route: ModelRouteConfig,
+  apiKey: string,
+  timeoutMs: number
 ): Promise<ModelExecutionResult> {
-  if (
-    typeof req.dailyRunCount === "number" &&
-    typeof req.dailyRunLimit === "number" &&
-    req.dailyRunCount >= req.dailyRunLimit
-  ) {
-    return {
-      ok: false,
-      code: "DAILY_LIMIT_REACHED",
-      error: `Agent "${req.agentId}" reached its daily run limit (${req.dailyRunLimit}).`,
-    };
-  }
-
-  const route = routes[req.routeId];
-  const eligibility = checkModelEligibility(route, { allowPaid: req.allowPaid });
-  if (!eligibility.ok) {
-    return {
-      ok: false,
-      code: eligibility.code,
-      error: eligibility.error,
-    };
-  }
-
   const startedAt = Date.now();
   try {
     if (route.provider === "google") {
-      const google = createGoogleGenerativeAI({ apiKey: eligibility.apiKey });
+      const google = createGoogleGenerativeAI({ apiKey });
       const res = await generateText({
         model: google(route.modelId),
         system: req.systemPrompt,
         prompt: req.userPrompt,
         maxOutputTokens: Math.min(req.maxTokens, 2048),
-        abortSignal: AbortSignal.timeout(50000),
+        abortSignal: AbortSignal.timeout(timeoutMs),
       });
       const latencyMs = Date.now() - startedAt;
       const inputTokens = res.usage?.inputTokens ?? 0;
@@ -211,7 +232,7 @@ export async function runWithFreeFirstModel(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${eligibility.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: route.modelId,
@@ -219,7 +240,7 @@ export async function runWithFreeFirstModel(
           ...(hasTools ? { tools: req.tools, tool_choice: "auto" } : {}),
           max_tokens: Math.min(Math.max(req.maxTokens, 512), 4096),
         }),
-        signal: AbortSignal.timeout(50000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -318,6 +339,80 @@ export async function runWithFreeFirstModel(
       error: err instanceof Error ? err.message : "Model execution failed.",
     };
   }
+}
+
+export async function runWithFreeFirstModel(
+  req: ModelExecutionRequest,
+  routes: Record<string, ModelRouteConfig> = DEFAULT_MODEL_ROUTES,
+  options: {
+    env?: Record<string, string | undefined>;
+    routeExecutor?: (
+      req: ModelExecutionRequest,
+      route: ModelRouteConfig,
+      apiKey: string,
+      timeoutMs: number
+    ) => Promise<ModelExecutionResult>;
+  } = {}
+): Promise<ModelExecutionResult> {
+  if (
+    typeof req.dailyRunCount === "number" &&
+    typeof req.dailyRunLimit === "number" &&
+    req.dailyRunCount >= req.dailyRunLimit
+  ) {
+    return {
+      ok: false,
+      code: "DAILY_LIMIT_REACHED",
+      error: `Agent "${req.agentId}" reached its daily run limit (${req.dailyRunLimit}).`,
+    };
+  }
+
+  const primaryRoute = routes[req.routeId];
+  if (primaryRoute && primaryRoute.billingTier === "paid") {
+    const paidCheck = checkModelEligibility(primaryRoute, {
+      allowPaid: req.allowPaid,
+      env: options.env,
+    });
+    if (!paidCheck.ok) {
+      return { ok: false, code: paidCheck.code, error: paidCheck.error };
+    }
+  }
+
+  const chain = getFreeFallbackChain(req.routeId, routes, options.env);
+  if (chain.length === 0) {
+    const primaryCheck = checkModelEligibility(primaryRoute, {
+      allowPaid: req.allowPaid,
+      env: options.env,
+    });
+    return {
+      ok: false,
+      code: primaryCheck.ok ? "NO_ELIGIBLE_FREE_MODEL" : primaryCheck.code,
+      error: primaryCheck.ok
+        ? "No eligible free model route available."
+        : primaryCheck.error,
+    };
+  }
+
+  const timeoutMs = req.timeoutMs ?? 22000;
+  const exec = options.routeExecutor ?? executeSingleRoute;
+  let lastError: ModelExecutionResult = {
+    ok: false,
+    code: "PROVIDER_ERROR",
+    error: "All free model routes failed.",
+  };
+
+  for (const entry of chain) {
+    let res = await exec(req, entry.route, entry.apiKey, timeoutMs);
+    if (!res.ok && isTransientModelError(res)) {
+      // Retry once on transient timeout or 5xx error
+      res = await exec(req, entry.route, entry.apiKey, timeoutMs);
+    }
+    if (res.ok) {
+      return res;
+    }
+    lastError = res;
+  }
+
+  return lastError;
 }
 
 async function recordModelUsageSafe(params: {

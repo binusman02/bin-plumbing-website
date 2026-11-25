@@ -136,4 +136,36 @@ test("AI Workforce Live Team Meeting", async (t) => {
       "aura-2-asteria-en"
     );
   });
+
+  await t.test("9. Meeting hides raw timeout errors and marks turn retryable, and STT maps audio types", async () => {
+    const { runTeamMeetingTurn } = await import("../src/lib/ai-workforce/meeting");
+    const { resolveAudioContentType } = await import("../src/app/api/admin/workforce/stt/route");
+    const { InMemoryTeamBoardAndMemoryStore } = await import(
+      "../src/lib/ai-workforce/team-memory"
+    );
+
+    const res = await runTeamMeetingTurn({
+      founderMessage: "@Bashir check the build",
+      participants: ["operations_manager", "engineering_ai"],
+      history: [],
+      teamStore: new InMemoryTeamBoardAndMemoryStore(),
+      modelRunner: async (req) => {
+        assert.equal(req.maxTokens, 400);
+        return {
+          ok: false,
+          code: "PROVIDER_ERROR",
+          error: "The operation was aborted due to timeout",
+        };
+      },
+    });
+
+    assert.equal(res.speakerTurn.failed, true);
+    assert.equal(res.speakerTurn.retryPrompt, "@Bashir check the build");
+    assert.ok(!/aborted due to timeout/i.test(res.speakerTurn.text));
+    assert.match(res.speakerTurn.text, /Network is slow/i);
+
+    assert.equal(resolveAudioContentType("audio/webm;codecs=opus"), "audio/webm");
+    assert.equal(resolveAudioContentType("audio/ogg;codecs=opus"), "audio/ogg");
+    assert.equal(resolveAudioContentType("audio/mp4"), "audio/mp4");
+  });
 });

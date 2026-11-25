@@ -29,6 +29,8 @@ export interface MeetingTurn {
   avatarUrl?: string;
   text: string;
   spokenText?: string;
+  failed?: boolean;
+  retryPrompt?: string;
   createdAt: string;
 }
 
@@ -147,10 +149,12 @@ export function parseStructuredMeetingOutput(
   }
 }
 
+let lastGoodSnapshot: string | null = null;
+
 async function fetchMeetingSnapshot(): Promise<string> {
   try {
     const supabase = getServiceSupabase();
-    const [reqsRes, plumbersRes, paysRes, tasksRes, apprsRes] = await Promise.all([
+    const queryPromise = Promise.all([
       supabase
         .from("service_requests")
         .select("ticket_number, status, problem_category, city_lga, assigned_technician")
@@ -180,7 +184,16 @@ async function fetchMeetingSnapshot(): Promise<string> {
         .limit(8),
     ]);
 
-    return [
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Snapshot timeout")), 2500)
+    );
+
+    const [reqsRes, plumbersRes, paysRes, tasksRes, apprsRes] = await Promise.race([
+      queryPromise,
+      timeoutPromise,
+    ]);
+
+    const snap = [
       `LIVE FLOWGUARD SNAPSHOT (${new Date().toISOString()}):`,
       `- Recent tickets: ${(reqsRes.data || []).map((r) => `${r.ticket_number}[${r.status}, ${r.problem_category}, ${r.assigned_technician || "Unassigned"}]`).join("; ") || "None"}`,
       `- Approved plumbers: ${(plumbersRes.data || []).map((p) => `${p.full_name}(${p.is_available ? "On Duty" : "Off Duty"})`).join(", ") || "None"}`,
@@ -188,8 +201,10 @@ async function fetchMeetingSnapshot(): Promise<string> {
       `- Recent AI tasks: ${(tasksRes.data || []).map((t) => `[${t.assigned_agent_id}] ${t.title}(${t.status})`).join("; ") || "None"}`,
       `- Pending approvals: ${(apprsRes.data || []).map((a) => `[${a.requested_by_agent}] ${a.action_summary}`).join("; ") || "None"}`,
     ].join("\n");
+    lastGoodSnapshot = snap;
+    return snap;
   } catch {
-    return "Snapshot unavailable.";
+    return lastGoodSnapshot || "Snapshot unavailable.";
   }
 }
 
@@ -321,13 +336,15 @@ export async function runTeamMeetingTurn(params: {
     routeId: speaker.modelRoute,
     systemPrompt,
     userPrompt,
-    maxTokens: speaker.id === "engineering_ai" ? 3000 : 1200,
+    maxTokens: params.wrapUp ? 1200 : 400,
+    timeoutMs: 22000,
   });
 
   let replyText = "";
   let spokenText = "";
   let raisedHands: RaisedHand[] = [];
   let actionItems: MeetingActionItem[] = [];
+  let failed = false;
 
   if (modelRes.ok && modelRes.text) {
     if (params.wrapUp) {
@@ -342,8 +359,25 @@ export async function runTeamMeetingTurn(params: {
       raisedHands = parsed.raisedHands;
     }
   } else {
-    replyText = `I couldn't reach my model right now (${modelRes.error || "unavailable"}), Boss. Let's check Models & Audit or try again in a moment.`;
+    failed = true;
+    replyText = "Network is slow on my side, Boss. Say that again?";
     spokenText = replyText;
+    // Keep raw error in ai_audit_logs, never in the meeting chat bubble
+    try {
+      const supabase = getServiceSupabase();
+      await supabase.from("ai_audit_logs").insert({
+        actor_type: "agent",
+        actor_id: speaker.id,
+        event_type: "meeting_model_error",
+        target_resource: speaker.modelRoute,
+        details: {
+          code: modelRes.code || "PROVIDER_ERROR",
+          error: String(modelRes.error || "unavailable").slice(0, 300),
+        },
+      });
+    } catch {
+      // Non-fatal
+    }
   }
 
   const speakerTurn: MeetingTurn = {
@@ -354,6 +388,7 @@ export async function runTeamMeetingTurn(params: {
     avatarUrl: speaker.avatarUrl,
     text: replyText,
     spokenText,
+    ...(failed ? { failed: true, retryPrompt: params.founderMessage } : {}),
     createdAt: new Date().toISOString(),
   };
 
@@ -376,7 +411,8 @@ export async function runTeamMeetingTurn(params: {
           "Reply in 1 to 2 short, natural spoken sentences directly to the Founder or your teammate (e.g. 'Sadiq, I can take that lead' or 'Boss, quick question on that'). No JSON, no lists, no stage directions.",
         ].join("\n\n"),
         userPrompt: `Recent meeting:\n${runningTranscript}\n\nSpeak up briefly now:`,
-        maxTokens: colleague.id === "engineering_ai" ? 1000 : 350,
+        maxTokens: 350,
+        timeoutMs: 18000,
       });
 
       if (followRes.ok && followRes.text) {

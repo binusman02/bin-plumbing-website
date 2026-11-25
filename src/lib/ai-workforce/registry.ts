@@ -149,7 +149,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
       "Thoughtful, methodical engineer overseeing Next.js, Flutter apps, Supabase, security, maps, testing, and PR preparation.",
     memoryNamespace: "ns_engineering_ai",
     promptVersion: 2,
-    modelRoute: "flint-recursive-eval",
+    modelRoute: "free-first-default",
     dailyRunLimit: 40,
     maxTokensPerRun: 3000,
     enabled: true,
