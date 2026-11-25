@@ -231,3 +231,28 @@ export function getElevenLabsVoiceId(
   };
   return overrideMap[agentId]?.trim() || ELEVENLABS_VOICE_IDS[agentId] || ELEVENLABS_VOICE_IDS.operations_manager;
 }
+
+/**
+ * 5 distinct Deepgram Aura-2 conversational voices (3 male, 2 female).
+ */
+export const DEEPGRAM_AURA2_VOICES: Record<AgentId, string> = {
+  operations_manager: "aura-2-apollo-en", // Sadiq (confident, calm male)
+  sales_ai: "aura-2-thalia-en", // Amina (warm, engaging female)
+  customer_support_ai: "aura-2-helena-en", // Zainab (gentle, empathetic female)
+  research_ai: "aura-2-orion-en", // Faruk (crisp, analytical male)
+  engineering_ai: "aura-2-arcas-en", // Bashir (steady, thoughtful male)
+};
+
+export function getDeepgramVoiceModel(
+  agentId: AgentId,
+  env: Record<string, string | undefined> = process.env
+): string {
+  const overrideMap: Record<AgentId, string | undefined> = {
+    operations_manager: env.DEEPGRAM_VOICE_SADIQ,
+    sales_ai: env.DEEPGRAM_VOICE_AMINA,
+    customer_support_ai: env.DEEPGRAM_VOICE_ZAINAB,
+    research_ai: env.DEEPGRAM_VOICE_FARUK,
+    engineering_ai: env.DEEPGRAM_VOICE_BASHIR,
+  };
+  return overrideMap[agentId]?.trim() || DEEPGRAM_AURA2_VOICES[agentId] || DEEPGRAM_AURA2_VOICES.operations_manager;
+}

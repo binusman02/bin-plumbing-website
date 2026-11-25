@@ -205,7 +205,7 @@ export function TeamMeetingPanel({
           }
         };
         await audio.play();
-        setVoiceNote("ElevenLabs HD");
+        setVoiceNote(res.headers.get("x-voice-provider") || "Deepgram Aura-2");
         return;
       }
       const errJson = (await res.json().catch(() => ({}))) as { error?: string };

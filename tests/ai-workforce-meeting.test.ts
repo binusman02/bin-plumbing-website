@@ -8,6 +8,7 @@ import {
 import {
   assignAgentVoices,
   cleanTextForSpeech,
+  getDeepgramVoiceModel,
   getElevenLabsVoiceId,
   stripAudioTags,
 } from "../src/lib/ai-workforce/voice-profiles";
@@ -117,6 +118,22 @@ test("AI Workforce Live Team Meeting", async (t) => {
     assert.equal(
       detectPrimarySpeaker("Sadiq, what do you think?", [...room], undefined, "sales_ai"),
       "operations_manager"
+    );
+  });
+
+  await t.test("8. Assigns 5 distinct Deepgram Aura-2 voices with optional env overrides", () => {
+    const models = [
+      getDeepgramVoiceModel("operations_manager", {}),
+      getDeepgramVoiceModel("sales_ai", {}),
+      getDeepgramVoiceModel("customer_support_ai", {}),
+      getDeepgramVoiceModel("research_ai", {}),
+      getDeepgramVoiceModel("engineering_ai", {}),
+    ];
+    assert.equal(new Set(models).size, 5);
+    assert.ok(models.every((m) => m.startsWith("aura-2-") && m.endsWith("-en")));
+    assert.equal(
+      getDeepgramVoiceModel("sales_ai", { DEEPGRAM_VOICE_AMINA: "aura-2-asteria-en" }),
+      "aura-2-asteria-en"
     );
   });
 });
