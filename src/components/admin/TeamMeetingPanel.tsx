@@ -536,10 +536,15 @@ export function TeamMeetingPanel({
       if (Array.isArray(json.participants)) {
         setParticipants(json.participants);
       }
+      const followUps = Array.isArray(json.followUpTurns)
+        ? (json.followUpTurns as MeetingTurn[])
+        : [];
       if (json.speakerTurn) {
         const turn = json.speakerTurn as MeetingTurn;
-        setTurns((prev) => [...prev, turn]);
+        setTurns((prev) => [...prev, turn, ...followUps]);
         void speakText(turn.spokenText || turn.text, turn.speakerId);
+      } else if (followUps.length > 0) {
+        setTurns((prev) => [...prev, ...followUps]);
       }
       setRaisedHands(Array.isArray(json.raisedHands) ? json.raisedHands : []);
       if (opts?.wrapUp) {

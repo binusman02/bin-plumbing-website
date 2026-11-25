@@ -3,8 +3,23 @@ import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
 import { getFlowGuardKnowledgeContext } from "@/lib/ai-workforce/knowledge";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
+import { reportToOwner } from "@/lib/ai-workforce/owner-report";
+import {
+  defaultTeamMemoryStore,
+  recordTeamNote,
+  type TeamBoardAndMemoryStore,
+} from "@/lib/ai-workforce/team-memory";
 import { stripAudioTags } from "@/lib/ai-workforce/voice-profiles";
 import type { AgentId } from "@/lib/ai-workforce/types";
+import type { createNotification } from "@/lib/notifications";
+
+export const MAX_MEETING_FOLLOW_UPS = 2;
+
+export interface MeetingActionItem {
+  ownerAgentId: AgentId;
+  title: string;
+  instruction: string;
+}
 
 export interface MeetingTurn {
   id: string;
@@ -178,18 +193,67 @@ async function fetchMeetingSnapshot(): Promise<string> {
   }
 }
 
+export function parseWrapUpOutput(rawText: string): {
+  summary: string;
+  actionItems: MeetingActionItem[];
+} {
+  const cleaned = rawText
+    .replace(/^```json\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as {
+      summary?: string;
+      actionItems?: Array<{
+        ownerAgentId?: string;
+        title?: string;
+        instruction?: string;
+      }>;
+    };
+    const summary = stripAudioTags(String(parsed.summary || "").trim()) || stripAudioTags(rawText.trim());
+    const actionItems: MeetingActionItem[] = [];
+    for (const item of parsed.actionItems || []) {
+      const ownerId = String(item?.ownerAgentId || "").trim() as AgentId;
+      const title = String(item?.title || "").trim();
+      const instruction = String(item?.instruction || "").trim();
+      if (!getAgentDefinition(ownerId) || !title || !instruction) continue;
+      actionItems.push({
+        ownerAgentId: ownerId,
+        title: title.slice(0, 140),
+        instruction: instruction.slice(0, 600),
+      });
+    }
+    return { summary, actionItems: actionItems.slice(0, 8) };
+  } catch {
+    return { summary: stripAudioTags(rawText.trim()), actionItems: [] };
+  }
+}
+
 export async function runTeamMeetingTurn(params: {
   founderMessage: string;
   participants: AgentId[];
   history: MeetingTurn[];
   callOnAgent?: AgentId;
   wrapUp?: boolean;
+  modelRunner?: typeof runWithFreeFirstModel;
+  teamStore?: TeamBoardAndMemoryStore;
+  notifyFn?: typeof createNotification;
+  persistWrapUpTasks?: (input: {
+    summaryTaskId: string;
+    summary: string;
+    transcript: string;
+    actionItems: MeetingActionItem[];
+  }) => Promise<number>;
 }): Promise<{
   participants: AgentId[];
   speakerTurn: MeetingTurn;
+  followUpTurns: MeetingTurn[];
   raisedHands: RaisedHand[];
   wrappedUpTasksCreated?: number;
 }> {
+  const runner = params.modelRunner ?? runWithFreeFirstModel;
+  const teamStore = params.teamStore ?? defaultTeamMemoryStore;
   const nextParticipants = detectInvitedAgents(params.founderMessage, params.participants);
   const lastAgentTurn = [...params.history].reverse().find((t) => t.speakerType === "agent");
   const speakerId: AgentId = params.wrapUp
@@ -202,7 +266,11 @@ export async function runTeamMeetingTurn(params: {
       );
 
   const speaker = getAgentDefinition(speakerId) ?? getAgentDefinition("operations_manager")!;
-  const snapshot = await fetchMeetingSnapshot();
+  const [snapshot, teamNotes, memories] = await Promise.all([
+    params.modelRunner ? Promise.resolve("Snapshot skipped in test.") : fetchMeetingSnapshot(),
+    teamStore.listNotesForAgent(speaker.id, 10).catch(() => []),
+    teamStore.loadMemories(speaker.id, speaker.memoryNamespace, 10).catch(() => []),
+  ]);
   const otherInRoom = nextParticipants
     .filter((id) => id !== speaker.id)
     .map((id) => getAgentDefinition(id)?.displayName || id)
@@ -213,10 +281,21 @@ export async function runTeamMeetingTurn(params: {
     .map((t) => `${t.speakerName}: ${t.text}`)
     .join("\n");
 
+  const notesBlock =
+    teamNotes.length > 0
+      ? `RECENT TEAM BOARD NOTES:\n${teamNotes.map((n) => `- [${n.fromAgent}${n.toAgent ? ` -> ${n.toAgent}` : ""}] ${n.note}`).join("\n")}`
+      : "";
+  const memoryBlock =
+    memories.length > 0
+      ? `RECENT MEMORY:\n${memories.map((m) => `- (${m.namespace}) ${m.content}`).join("\n")}`
+      : "";
+
   const knowledge = getFlowGuardKnowledgeContext(speaker.id === "engineering_ai");
   const systemPrompt = [
     speaker.systemPrompt,
     `APPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}`,
+    notesBlock,
+    memoryBlock,
     `MEETING CONTEXT: You are in a live FlowGuard team meeting with the Founder (Boss) and colleagues in the room: ${otherInRoom || "just you and the Founder"}.`,
     "HOW TO SPEAK IN THE MEETING (SPOKEN VOICE):",
     "- You are speaking out loud on a live voice call with the Founder and your teammates. Write for the ear, not for an email or report.",
@@ -224,18 +303,20 @@ export async function runTeamMeetingTurn(params: {
     "- Vary your openings naturally (e.g. 'Morning Boss,', 'Yeah, on that,', 'Honestly,', 'Quick update,', 'So far,'). Never start every turn with 'Good day, Boss' or 'Certainly'.",
     "- Never use bracketed stage directions like [chuckles] or [sighs], bullet lists, em-dashes, or robotic closing lines.",
     "- You may ask the Founder a direct question if a business decision or clarification is needed.",
-    "- Only mention facts from the LIVE FLOWGUARD SNAPSHOT or meeting history; never invent tickets, revenue, or completed work.",
+    "- Only mention facts from the LIVE FLOWGUARD SNAPSHOT, team notes, or meeting history; never invent tickets, revenue, or completed work.",
     params.wrapUp
-      ? "- The Founder asked to wrap up: briefly summarize the agreed decisions and next steps clearly."
+      ? "- The Founder asked to wrap up: return STRICT JSON only (no markdown fences) with shape: {\"summary\":\"short spoken wrap-up\",\"actionItems\":[{\"ownerAgentId\":\"operations_manager|sales_ai|customer_support_ai|research_ai|engineering_ai\",\"title\":\"short task title\",\"instruction\":\"clear action instruction\"}]}. Include only agreed next steps."
       : "- Return STRICT JSON only (no markdown fences) with shape: {\"reply\":\"your spoken reply\",\"raisedHands\":[{\"agentId\":\"sales_ai|customer_support_ai|research_ai|engineering_ai|operations_manager\",\"kind\":\"question|suggestion\",\"topic\":\"short 5-10 word reason\"}]}. Only include raisedHands (0 to 2) for colleagues currently in the room if they genuinely have an important question for the Founder or a helpful suggestion.",
     snapshot,
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const userPrompt = params.callOnAgent
     ? `Meeting transcript so far:\n${recentTranscript || "(start of meeting)"}\n\nThe Founder just called on you (${speaker.displayName}) because you raised your hand. Share your question or suggestion naturally.`
     : `Meeting transcript so far:\n${recentTranscript || "(start of meeting)"}\n\nFounder just said: "${params.founderMessage}"`;
 
-  const modelRes = await runWithFreeFirstModel({
+  const modelRes = await runner({
     agentId: speaker.id,
     routeId: speaker.modelRoute,
     systemPrompt,
@@ -246,11 +327,14 @@ export async function runTeamMeetingTurn(params: {
   let replyText = "";
   let spokenText = "";
   let raisedHands: RaisedHand[] = [];
+  let actionItems: MeetingActionItem[] = [];
 
   if (modelRes.ok && modelRes.text) {
     if (params.wrapUp) {
-      spokenText = modelRes.text;
-      replyText = stripAudioTags(modelRes.text);
+      const wrapParsed = parseWrapUpOutput(modelRes.text);
+      replyText = wrapParsed.summary;
+      spokenText = wrapParsed.summary;
+      actionItems = wrapParsed.actionItems;
     } else {
       const parsed = parseStructuredMeetingOutput(modelRes.text, nextParticipants, speaker.id);
       spokenText = parsed.reply;
@@ -262,39 +346,138 @@ export async function runTeamMeetingTurn(params: {
     spokenText = replyText;
   }
 
+  const speakerTurn: MeetingTurn = {
+    id: randomUUID(),
+    speakerType: "agent",
+    speakerId: speaker.id,
+    speakerName: speaker.displayName,
+    avatarUrl: speaker.avatarUrl,
+    text: replyText,
+    spokenText,
+    createdAt: new Date().toISOString(),
+  };
+
+  // Step 5: Allow up to 2 short follow-up replies from raised-hand teammates reacting naturally
+  const followUpTurns: MeetingTurn[] = [];
+  if (!params.wrapUp && !params.callOnAgent && raisedHands.length > 0 && modelRes.ok) {
+    const candidates = raisedHands.slice(0, MAX_MEETING_FOLLOW_UPS);
+    let runningTranscript = `${recentTranscript}\nFounder (You): ${params.founderMessage}\n${speaker.displayName}: ${replyText}`;
+
+    for (const hand of candidates) {
+      const colleague = getAgentDefinition(hand.agentId);
+      if (!colleague || !colleague.enabled) continue;
+
+      const followRes = await runner({
+        agentId: colleague.id,
+        routeId: colleague.modelRoute,
+        systemPrompt: [
+          colleague.systemPrompt,
+          `MEETING CONTEXT: You raised your hand in the live FlowGuard team meeting (${hand.kind}: ${hand.topic}).`,
+          "Reply in 1 to 2 short, natural spoken sentences directly to the Founder or your teammate (e.g. 'Sadiq, I can take that lead' or 'Boss, quick question on that'). No JSON, no lists, no stage directions.",
+        ].join("\n\n"),
+        userPrompt: `Recent meeting:\n${runningTranscript}\n\nSpeak up briefly now:`,
+        maxTokens: colleague.id === "engineering_ai" ? 1000 : 350,
+      });
+
+      if (followRes.ok && followRes.text) {
+        const cleanFollow = stripAudioTags(followRes.text);
+        if (cleanFollow) {
+          const turn: MeetingTurn = {
+            id: randomUUID(),
+            speakerType: "agent",
+            speakerId: colleague.id,
+            speakerName: colleague.displayName,
+            avatarUrl: colleague.avatarUrl,
+            text: cleanFollow,
+            spokenText: cleanFollow,
+            createdAt: new Date().toISOString(),
+          };
+          followUpTurns.push(turn);
+          runningTranscript += `\n${colleague.displayName}: ${cleanFollow}`;
+        }
+      }
+    }
+    raisedHands = raisedHands.slice(followUpTurns.length);
+  }
+
   let wrappedUpTasksCreated = 0;
   if (params.wrapUp && replyText) {
-    try {
-      const supabase = getServiceSupabase();
-      await supabase.from("ai_tasks").insert({
-        id: randomUUID(),
-        title: `Weekly Meeting Summary (${new Date().toLocaleDateString("en-NG")})`,
-        description: recentTranscript.slice(-1500) || params.founderMessage,
-        requester_id: "founder_meeting",
-        assigned_agent_id: "operations_manager",
-        priority: "normal",
-        status: "completed",
-        output_summary: replyText,
-        completed_at: new Date().toISOString(),
+    const summaryTaskId = randomUUID();
+    if (params.persistWrapUpTasks) {
+      wrappedUpTasksCreated = await params.persistWrapUpTasks({
+        summaryTaskId,
+        summary: replyText,
+        transcript: recentTranscript.slice(-1500) || params.founderMessage,
+        actionItems,
       });
-      wrappedUpTasksCreated = 1;
-    } catch {
-      // Non-fatal
+    } else {
+      try {
+        const supabase = getServiceSupabase();
+        await supabase.from("ai_tasks").insert({
+          id: summaryTaskId,
+          title: `Weekly Meeting Summary (${new Date().toLocaleDateString("en-NG")})`,
+          description: recentTranscript.slice(-1500) || params.founderMessage,
+          requester_id: "founder_meeting",
+          assigned_agent_id: "operations_manager",
+          priority: "normal",
+          status: "completed",
+          output_summary: replyText,
+          completed_at: new Date().toISOString(),
+        });
+        wrappedUpTasksCreated = 1;
+
+        for (const item of actionItems) {
+          await supabase.from("ai_tasks").insert({
+            id: randomUUID(),
+            title: item.title,
+            description: item.instruction,
+            requester_id: "founder_meeting",
+            assigned_agent_id: item.ownerAgentId,
+            parent_task_id: summaryTaskId,
+            priority: "normal",
+            status: "queued",
+          });
+          wrappedUpTasksCreated += 1;
+        }
+      } catch {
+        // Non-fatal
+      }
     }
+
+    const assignmentSummary =
+      actionItems.length > 0
+        ? actionItems
+            .map((a) => `${getAgentDefinition(a.ownerAgentId)?.displayName.split("—")[0].trim() || a.ownerAgentId}: ${a.title}`)
+            .join("; ")
+        : replyText;
+
+    await recordTeamNote(
+      {
+        fromAgent: "operations_manager",
+        taskId: summaryTaskId,
+        note: `Meeting wrap-up: ${assignmentSummary.slice(0, 260)}`,
+      },
+      teamStore
+    ).catch(() => {});
+
+    await reportToOwner(
+      {
+        agentId: "operations_manager",
+        status: "completed",
+        summary:
+          actionItems.length > 0
+            ? `Meeting wrapped up with ${actionItems.length} action item(s): ${assignmentSummary}`
+            : `Meeting wrapped up: ${replyText}`,
+        taskId: summaryTaskId,
+      },
+      params.notifyFn
+    ).catch(() => {});
   }
 
   return {
     participants: nextParticipants,
-    speakerTurn: {
-      id: randomUUID(),
-      speakerType: "agent",
-      speakerId: speaker.id,
-      speakerName: speaker.displayName,
-      avatarUrl: speaker.avatarUrl,
-      text: replyText,
-      spokenText,
-      createdAt: new Date().toISOString(),
-    },
+    speakerTurn,
+    followUpTurns,
     raisedHands,
     ...(params.wrapUp ? { wrappedUpTasksCreated } : {}),
   };

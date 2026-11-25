@@ -110,6 +110,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
       "support_draft_reply",
       "support_send_reply",
       "support_escalate_case",
+      "workforce_create_task",
     ],
   },
   research_ai: {
@@ -165,6 +166,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
       "eng_run_checks",
       "eng_prepare_pr",
       "eng_merge_pr",
+      "workforce_create_task",
     ],
   },
 };

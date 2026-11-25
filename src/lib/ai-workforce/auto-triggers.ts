@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { getServiceSupabase } from "@/lib/supabase/admin";
-import { createNotification } from "@/lib/notifications";
 import {
   getAdminToolGateway,
   getOwnerApprovalDeepLink,
 } from "@/lib/ai-workforce/admin-tools";
+import { reportToOwner } from "@/lib/ai-workforce/owner-report";
+import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
 import { triageSupportMessage } from "@/lib/ai-workforce/specialists/support";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
@@ -64,7 +65,7 @@ export async function triggerWorkforceOnServiceRequest(params: {
     );
 
     if (triage.escalateToOwner) {
-      await recordAutoTask({
+      const triageTaskId = await recordAutoTask({
         agentId: "customer_support_ai",
         title: `Urgent Triage: ${params.ticketNumber}`,
         description: params.issueDescription,
@@ -72,6 +73,22 @@ export async function triggerWorkforceOnServiceRequest(params: {
         priority: triage.urgency === "critical" ? "urgent" : "high",
         outputSummary: `Zainab flagged ${triage.urgency.toUpperCase()} (${triage.escalationReasons.join(", ")}).`,
       });
+      await recordTeamNote({
+        fromAgent: "customer_support_ai",
+        toAgent: "operations_manager",
+        taskId: triageTaskId,
+        ticketNumber: params.ticketNumber,
+        note: `Zainab to Sadiq: urgent ${params.problemCategory} in ${params.cityLga}, ticket ${params.ticketNumber} (${triage.escalationReasons.join(", ")}).`,
+      }).catch(() => {});
+      await reportToOwner({
+        agentId: "customer_support_ai",
+        status: "urgent",
+        urgent: true,
+        ticketNumber: params.ticketNumber,
+        taskId: triageTaskId,
+        summary: `Urgent ${params.problemCategory} in ${params.cityLga} (${params.ticketNumber}): ${triage.escalationReasons.join(", ")}.`,
+        destination: `/admin/requests?ticket=${encodeURIComponent(params.ticketNumber)}`,
+      }).catch(() => {});
     }
 
     const supabase = getServiceSupabase();
@@ -131,7 +148,7 @@ export async function triggerWorkforceOnServiceRequest(params: {
     });
 
     if (res.approvalId) {
-      await recordAutoTask({
+      const assignTaskId = await recordAutoTask({
         agentId: "operations_manager",
         title: `Approval Ready: Assign ${best.full_name} to ${params.ticketNumber}`,
         description: `${params.customerName} • ${params.problemCategory} (${params.cityLga})`,
@@ -140,17 +157,24 @@ export async function triggerWorkforceOnServiceRequest(params: {
         outputSummary: `Sadiq prepared plumber assignment for ${best.full_name} (Approval ID: ${res.approvalId}).`,
       });
 
-      await createNotification({
-        recipientId: "admin",
-        recipientRole: "admin",
-        actorRole: "admin",
-        type: "ai_approval_pending",
-        title: `Sadiq: Approve plumber for ${params.ticketNumber}`,
-        body: `Assign ${best.full_name} to ${params.customerName}'s ${params.problemCategory} request (${params.cityLga}).`,
-        entityType: "ai_approval",
-        entityId: res.approvalId,
+      await recordTeamNote({
+        fromAgent: "operations_manager",
+        toAgent: null,
+        taskId: assignTaskId,
+        ticketNumber: params.ticketNumber,
+        note: `Sadiq queued approval to assign ${best.full_name} to ${params.ticketNumber} (${params.cityLga}).`,
+      }).catch(() => {});
+
+      await reportToOwner({
+        agentId: "operations_manager",
+        status: "waiting_approval",
+        urgent: triage.escalateToOwner,
+        taskId: assignTaskId,
+        approvalId: res.approvalId,
+        ticketNumber: params.ticketNumber,
+        summary: `Assign ${best.full_name} to ${params.customerName}'s ${params.problemCategory} in ${params.cityLga} (${params.ticketNumber}). Waiting for your okay.`,
         destination: getOwnerApprovalDeepLink(res.approvalId),
-      });
+      }).catch(() => {});
     }
   } catch (err) {
     console.error("[auto-trigger:service_request]", err instanceof Error ? err.message : err);
@@ -192,24 +216,27 @@ export async function triggerWorkforceOnEnquiry(params: {
       });
 
       if (res.approvalId) {
-        await recordAutoTask({
+        const salesTaskId = await recordAutoTask({
           agentId: "sales_ai",
           title: `Lead Follow-up Approval: ${params.fullName}`,
           description: params.message,
           status: "waiting_approval",
           outputSummary: `Amina drafted follow-up email for ${params.fullName} (Approval ID: ${res.approvalId}).`,
         });
-        await createNotification({
-          recipientId: "admin",
-          recipientRole: "admin",
-          actorRole: "admin",
-          type: "ai_approval_pending",
-          title: `Amina: Approve lead reply to ${params.fullName}`,
-          body: `Draft follow-up prepared for ${params.serviceType} in ${params.location}.`,
-          entityType: "ai_approval",
-          entityId: res.approvalId,
+        await recordTeamNote({
+          fromAgent: "sales_ai",
+          toAgent: "operations_manager",
+          taskId: salesTaskId,
+          note: `Amina drafted follow-up for ${params.fullName} (${params.serviceType} in ${params.location}), waiting for Owner approval.`,
+        }).catch(() => {});
+        await reportToOwner({
+          agentId: "sales_ai",
+          status: "waiting_approval",
+          taskId: salesTaskId,
+          approvalId: res.approvalId,
+          summary: `Qualified ${params.serviceType} enquiry from ${params.fullName} in ${params.location} and drafted follow-up email. Waiting for your okay.`,
           destination: getOwnerApprovalDeepLink(res.approvalId),
-        });
+        }).catch(() => {});
         return;
       }
     }
@@ -254,24 +281,29 @@ export async function triggerWorkforceOnPaymentSubmitted(params: {
     });
 
     if (res.approvalId) {
-      await recordAutoTask({
+      const payTaskId = await recordAutoTask({
         agentId: "operations_manager",
         title: `Payment Verification Ready: ${params.ticketNumber}`,
         description: `₦${params.amount.toLocaleString()} from ${params.customerName}`,
         status: "waiting_approval",
         outputSummary: `Sadiq queued payment verification (Approval ID: ${res.approvalId}).`,
       });
-      await createNotification({
-        recipientId: "admin",
-        recipientRole: "admin",
-        actorRole: "admin",
-        type: "ai_approval_pending",
-        title: `Sadiq: Verify payment on ${params.ticketNumber}`,
-        body: `₦${params.amount.toLocaleString()} submitted by ${params.customerName}. Tap to approve or reject.`,
-        entityType: "ai_approval",
-        entityId: res.approvalId,
+      await recordTeamNote({
+        fromAgent: "operations_manager",
+        toAgent: null,
+        taskId: payTaskId,
+        ticketNumber: params.ticketNumber,
+        note: `Sadiq queued payment verification of ₦${params.amount.toLocaleString()} for ${params.ticketNumber}.`,
+      }).catch(() => {});
+      await reportToOwner({
+        agentId: "operations_manager",
+        status: "waiting_approval",
+        taskId: payTaskId,
+        approvalId: res.approvalId,
+        ticketNumber: params.ticketNumber,
+        summary: `Verify ₦${params.amount.toLocaleString()} payment from ${params.customerName} on ${params.ticketNumber}. Waiting for your okay.`,
         destination: getOwnerApprovalDeepLink(res.approvalId),
-      });
+      }).catch(() => {});
     }
   } catch {
     // Non-blocking
@@ -290,7 +322,7 @@ export async function triggerWorkforceOnComplaint(params: {
 }): Promise<void> {
   try {
     const triage = triageSupportMessage(params.message);
-    await recordAutoTask({
+    const complaintTaskId = await recordAutoTask({
       agentId: "customer_support_ai",
       title: `Complaint Triaged: ${params.ticketNumber || params.customerName}`,
       description: params.message,
@@ -298,6 +330,24 @@ export async function triggerWorkforceOnComplaint(params: {
       priority: triage.escalateToOwner ? "urgent" : "normal",
       outputSummary: `Zainab triaged as ${triage.urgency.toUpperCase()} (${triage.category}).`,
     });
+    await recordTeamNote({
+      fromAgent: "customer_support_ai",
+      toAgent: "operations_manager",
+      taskId: complaintTaskId,
+      ticketNumber: params.ticketNumber || null,
+      note: `Zainab to Sadiq: complaint on ${params.ticketNumber || params.customerName} (${triage.urgency.toUpperCase()}: ${triage.category}).`,
+    }).catch(() => {});
+    if (triage.escalateToOwner) {
+      await reportToOwner({
+        agentId: "customer_support_ai",
+        status: "urgent",
+        urgent: true,
+        taskId: complaintTaskId,
+        ticketNumber: params.ticketNumber,
+        summary: `Urgent complaint on ${params.ticketNumber || params.customerName}: ${triage.category}.`,
+        destination: "/admin/complaints",
+      }).catch(() => {});
+    }
   } catch {
     // Non-blocking
   }
@@ -321,17 +371,20 @@ export async function triggerEngineeringIncidentWatch(params: {
       outputSummary: `Bashir logged technical incident from ${params.source} for root-cause review: ${params.errorMessage.slice(0, 240)}`,
     });
     if (taskId) {
-      await createNotification({
-        recipientId: "admin",
-        recipientRole: "admin",
-        actorRole: "admin",
-        type: "engineering_incident",
-        title: `Bashir: Technical issue in ${params.source}`,
-        body: params.errorMessage.slice(0, 140),
-        entityType: "ai_task",
-        entityId: taskId,
+      await recordTeamNote({
+        fromAgent: "engineering_ai",
+        toAgent: "operations_manager",
+        taskId,
+        note: `Bashir logged technical incident in ${params.source}: ${params.errorMessage.slice(0, 140)}`,
+      }).catch(() => {});
+      await reportToOwner({
+        agentId: "engineering_ai",
+        status: "urgent",
+        urgent: true,
+        taskId,
+        summary: `Technical issue in ${params.source}: ${params.errorMessage.slice(0, 140)}`,
         destination: "/admin/workforce?tab=tasks",
-      });
+      }).catch(() => {});
     }
   } catch {
     // Non-blocking
@@ -469,7 +522,7 @@ export async function triggerWorkforceOnCustomerTicketMessage(params: {
       });
 
       if (res.approvalId) {
-        await recordAutoTask({
+        const supportTaskId = await recordAutoTask({
           agentId: "customer_support_ai",
           title: `Needs Approval: ${params.ticketNumber}`,
           description: clean,
@@ -477,17 +530,23 @@ export async function triggerWorkforceOnCustomerTicketMessage(params: {
           priority: "urgent",
           outputSummary: `Zainab flagged "${assessment.reasons.join(", ")}" and queued reply draft (${res.approvalId}).`,
         });
-        await createNotification({
-          recipientId: "admin",
-          recipientRole: "admin",
-          actorRole: "admin",
-          type: "ai_approval_pending",
-          title: `Zainab needs your approval on ${params.ticketNumber}`,
-          body: `${assessment.reasons[0] || "Attention needed"}: "${clean.slice(0, 80)}"`,
-          entityType: "ai_approval",
-          entityId: res.approvalId,
+        await recordTeamNote({
+          fromAgent: "customer_support_ai",
+          toAgent: "operations_manager",
+          taskId: supportTaskId,
+          ticketNumber: params.ticketNumber,
+          note: `Zainab to Sadiq: urgent support attention on ${params.ticketNumber} (${assessment.reasons.join(", ")}).`,
+        }).catch(() => {});
+        await reportToOwner({
+          agentId: "customer_support_ai",
+          status: "waiting_approval",
+          urgent: true,
+          taskId: supportTaskId,
+          approvalId: res.approvalId,
+          ticketNumber: params.ticketNumber,
+          summary: `${assessment.reasons[0] || "Attention needed"} on ${params.ticketNumber}. Draft reply queued for your okay.`,
           destination: getOwnerApprovalDeepLink(res.approvalId),
-        });
+        }).catch(() => {});
         return { action: "approval_queued", approvalId: res.approvalId };
       }
       return { action: "skipped" };
@@ -495,7 +554,7 @@ export async function triggerWorkforceOnCustomerTicketMessage(params: {
 
     // Safe, routine customer support message -> Zainab replies directly
     if (modelRes.ok && modelRes.text) {
-      await recordAutoTask({
+      const replyTaskId = await recordAutoTask({
         agentId: "customer_support_ai",
         title: `Zainab Replied: ${params.ticketNumber}`,
         description: clean,
@@ -503,6 +562,13 @@ export async function triggerWorkforceOnCustomerTicketMessage(params: {
         priority: "normal",
         outputSummary: `Zainab replied to ${params.customerName}: "${modelRes.text.slice(0, 180)}"`,
       });
+      await recordTeamNote({
+        fromAgent: "customer_support_ai",
+        toAgent: null,
+        taskId: replyTaskId,
+        ticketNumber: params.ticketNumber,
+        note: `Zainab replied to ${params.customerName} on ${params.ticketNumber}.`,
+      }).catch(() => {});
       return { action: "replied", replyText: modelRes.text };
     }
 

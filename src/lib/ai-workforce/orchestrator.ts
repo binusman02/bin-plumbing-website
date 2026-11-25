@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+import { createNotification } from "@/lib/notifications";
 import { getAdminToolGateway, getOpenAiToolsForAgent } from "@/lib/ai-workforce/admin-tools";
 import { getFlowGuardKnowledgeContext } from "@/lib/ai-workforce/knowledge";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
+import { reportToOwner } from "@/lib/ai-workforce/owner-report";
+import {
+  defaultTeamMemoryStore,
+  recordTeamNote,
+  saveTaskMemories,
+  type TeamBoardAndMemoryStore,
+} from "@/lib/ai-workforce/team-memory";
 import type { AgentId } from "@/lib/ai-workforce/types";
 
 export type WorkforceTaskStatus =
@@ -208,7 +216,11 @@ export function routeInstructionToAgent(instruction: string, explicitTarget?: Ag
 }
 
 export class WorkforceOrchestrator {
-  constructor(private readonly store: TaskStore = new SupabaseTaskStore()) {}
+  constructor(
+    private readonly store: TaskStore = new SupabaseTaskStore(),
+    private readonly teamStore: TeamBoardAndMemoryStore = defaultTeamMemoryStore,
+    private readonly notifyFn: typeof createNotification = createNotification
+  ) {}
 
   async listTasks(limit = 40): Promise<WorkforceTask[]> {
     return this.store.listTasks(limit);
@@ -241,6 +253,10 @@ export class WorkforceOrchestrator {
     instruction: string;
     targetAgentId?: AgentId;
     priority?: WorkforceTask["priority"];
+    parentTaskId?: string | null;
+    handoffDepth?: number;
+    handoffChain?: AgentId[];
+    isHandoffChild?: boolean;
     modelRunner?: typeof runWithFreeFirstModel;
   }): Promise<WorkforceTask> {
     const assignedAgentId = routeInstructionToAgent(params.instruction, params.targetAgentId);
@@ -256,7 +272,7 @@ export class WorkforceOrchestrator {
       description: params.instruction.trim(),
       requesterId: params.requesterId,
       assignedAgentId,
-      parentTaskId: null,
+      parentTaskId: params.parentTaskId ?? null,
       priority: params.priority ?? "normal",
       status: "queued",
       outputSummary: null,
@@ -277,15 +293,31 @@ export class WorkforceOrchestrator {
 
     await this.store.updateTask(task.id, { status: "running" });
 
-    const dailyRunCount = await this.store.countTodayRuns(assignedAgentId);
+    const [dailyRunCount, teamNotes, memories] = await Promise.all([
+      this.store.countTodayRuns(assignedAgentId),
+      this.teamStore.listNotesForAgent(assignedAgentId, 10).catch(() => []),
+      this.teamStore.loadMemories(assignedAgentId, agent.memoryNamespace, 10).catch(() => []),
+    ]);
+
+    const notesBlock =
+      teamNotes.length > 0
+        ? `\n\nRECENT TEAM BOARD NOTES:\n${teamNotes.map((n) => `- [${n.fromAgent}${n.toAgent ? ` -> ${n.toAgent}` : ""}] ${n.note}`).join("\n")}`
+        : "";
+    const memoryBlock =
+      memories.length > 0
+        ? `\n\nRECENT AGENT & TEAM MEMORY:\n${memories.map((m) => `- (${m.namespace}) ${m.content}`).join("\n")}`
+        : "";
+
     const runner = params.modelRunner ?? runWithFreeFirstModel;
     const gateway = getAdminToolGateway();
     const scopedTools = getOpenAiToolsForAgent(gateway, assignedAgentId);
     const knowledge = getFlowGuardKnowledgeContext(assignedAgentId === "engineering_ai");
+    let pendingApprovalId: string | null = null;
+
     const res = await runner({
       agentId: assignedAgentId,
       routeId: agent.modelRoute,
-      systemPrompt: `${agent.systemPrompt}\n\nAPPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}\n\nAllowed tools for your role: ${agent.allowedTools.join(", ")}. Never claim to have executed an Amber action without Owner approval.`,
+      systemPrompt: `${agent.systemPrompt}\n\nAPPROVED FLOWGUARD KNOWLEDGE:\n${knowledge}${notesBlock}${memoryBlock}\n\nAllowed tools for your role: ${agent.allowedTools.join(", ")}. Never claim to have executed an Amber action without Owner approval.`,
       userPrompt: `Task Title: ${task.title}\nInstruction: ${task.description}`,
       maxTokens: agent.maxTokensPerRun,
       dailyRunCount,
@@ -298,11 +330,14 @@ export class WorkforceOrchestrator {
             actorUserId: params.requesterId,
             actorEmail: "owner@flowguard.com.ng",
             taskId: task.id,
+            handoffDepth: params.handoffDepth ?? 0,
+            handoffChain: params.handoffChain ?? [],
           },
           toolName,
           rawInput: args,
         });
         if (outcome.status === "pending_approval" && outcome.approvalId) {
+          pendingApprovalId = outcome.approvalId;
           await this.store.appendEvent({
             id: randomUUID(),
             taskId: task.id,
@@ -317,9 +352,10 @@ export class WorkforceOrchestrator {
     });
 
     if (!res.ok) {
+      const errMsg = res.error || "Model run failed.";
       const failed = await this.store.updateTask(task.id, {
         status: "failed",
-        errorMessage: res.error || "Model run failed.",
+        errorMessage: errMsg,
         completedAt: new Date().toISOString(),
       });
       await this.store.appendEvent({
@@ -327,26 +363,81 @@ export class WorkforceOrchestrator {
         taskId: task.id,
         agentId: assignedAgentId,
         eventType: "failed",
-        message: res.error || "Model run failed.",
+        message: errMsg,
         createdAt: new Date().toISOString(),
       });
+      await recordTeamNote(
+        {
+          fromAgent: assignedAgentId,
+          taskId: task.id,
+          note: `Task failed (${task.title}): ${errMsg.slice(0, 180)}`,
+        },
+        this.teamStore
+      ).catch(() => {});
+      await reportToOwner(
+        {
+          agentId: assignedAgentId,
+          status: "failed",
+          summary: `${task.title} failed: ${errMsg}`,
+          taskId: task.id,
+          urgent: task.priority === "urgent",
+          isHandoffChild: params.isHandoffChild,
+        },
+        this.notifyFn
+      ).catch(() => {});
       return failed ?? task;
     }
 
-    const completed = await this.store.updateTask(task.id, {
-      status: "completed",
-      outputSummary: res.text || "Completed.",
-      completedAt: new Date().toISOString(),
+    const finalStatus: WorkforceTaskStatus = pendingApprovalId ? "waiting_approval" : "completed";
+    const summaryText = res.text || "Completed.";
+    const updated = await this.store.updateTask(task.id, {
+      status: finalStatus,
+      outputSummary: summaryText,
+      completedAt: finalStatus === "completed" ? new Date().toISOString() : null,
     });
     await this.store.appendEvent({
       id: randomUUID(),
       taskId: task.id,
       agentId: assignedAgentId,
-      eventType: "completed",
+      eventType: finalStatus === "waiting_approval" ? "approval_requested" : "completed",
       message: `Completed via ${res.provider}/${res.modelId} (${res.inputTokens ?? 0} in / ${res.outputTokens ?? 0} out tokens, $0.00 paid spend).`,
       createdAt: new Date().toISOString(),
     });
-    return completed ?? task;
+
+    await saveTaskMemories(
+      {
+        agentId: assignedAgentId,
+        namespace: agent.memoryNamespace,
+        taskId: task.id,
+        outputText: summaryText,
+        shareWithTeam: !params.isHandoffChild,
+      },
+      this.teamStore
+    ).catch(() => {});
+
+    await recordTeamNote(
+      {
+        fromAgent: assignedAgentId,
+        taskId: task.id,
+        note: `${task.title}: ${summaryText.slice(0, 200)}`,
+      },
+      this.teamStore
+    ).catch(() => {});
+
+    await reportToOwner(
+      {
+        agentId: assignedAgentId,
+        status: finalStatus === "waiting_approval" ? "waiting_approval" : "completed",
+        summary: summaryText,
+        taskId: task.id,
+        approvalId: pendingApprovalId,
+        urgent: task.priority === "urgent",
+        isHandoffChild: params.isHandoffChild,
+      },
+      this.notifyFn
+    ).catch(() => {});
+
+    return updated ?? task;
   }
 }
 

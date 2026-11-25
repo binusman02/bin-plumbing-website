@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   postJobMessage,
   type RequestStatus,
@@ -10,11 +11,33 @@ import {
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { ToolGateway } from "@/lib/ai-workforce/tool-gateway";
 import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
+import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
 import { registerEngineeringTools } from "@/lib/ai-workforce/specialists/engineering";
 import { registerResearchTools } from "@/lib/ai-workforce/specialists/research";
 import { registerSalesTools } from "@/lib/ai-workforce/specialists/sales";
 import { registerSupportTools } from "@/lib/ai-workforce/specialists/support";
 import type { AgentId, ToolExecutionContext } from "@/lib/ai-workforce/types";
+
+export const MAX_HANDOFF_DEPTH = 2;
+
+export type HandoffRunner = (params: {
+  requesterId: string;
+  title: string;
+  instruction: string;
+  targetAgentId: AgentId;
+  priority?: "low" | "normal" | "high" | "urgent";
+  parentTaskId: string | null;
+  handoffDepth: number;
+  handoffChain: AgentId[];
+  isHandoffChild: boolean;
+}) => Promise<{
+  id: string;
+  parentTaskId: string | null;
+  assignedAgentId: AgentId;
+  status: string;
+  outputSummary: string | null;
+  errorMessage: string | null;
+}>;
 
 function asNonEmptyString(val: unknown): string | null {
   return typeof val === "string" && val.trim().length > 0 ? val.trim() : null;
@@ -32,7 +55,10 @@ const VALID_REQUEST_STATUSES = new Set<RequestStatus>([
   "cancelled",
 ]);
 
-export function registerAdminWorkforceTools(gateway: ToolGateway): void {
+export function registerAdminWorkforceTools(
+  gateway: ToolGateway,
+  options: { handoffRunner?: HandoffRunner } = {}
+): void {
   gateway.registerTool({
     name: "assign_plumber_to_ticket",
     description: "Assign an approved plumber to a service request ticket",
@@ -603,6 +629,170 @@ export function registerAdminWorkforceTools(gateway: ToolGateway): void {
         .limit(15);
       return data || [];
     },
+  });
+
+  async function executeAgentHandoff(
+    input: {
+      targetAgentId: AgentId;
+      title: string;
+      instruction: string;
+      ticketNumber?: string;
+      priority?: "low" | "normal" | "high" | "urgent";
+    },
+    ctx: ToolExecutionContext
+  ) {
+    const depth = ctx.handoffDepth ?? 0;
+    const chain = ctx.handoffChain ?? [];
+
+    if (input.targetAgentId === ctx.agentId) {
+      throw new Error("Self-handoff is forbidden: an agent cannot hand off work to itself.");
+    }
+    if (chain.includes(input.targetAgentId)) {
+      throw new Error(
+        `Handoff loop blocked: "${input.targetAgentId}" is already in the handoff chain.`
+      );
+    }
+    if (depth >= MAX_HANDOFF_DEPTH) {
+      throw new Error(
+        `Maximum handoff depth (${MAX_HANDOFF_DEPTH}) reached for this task.`
+      );
+    }
+
+    // Log handoff in ai_task_events & ai_audit_logs (best-effort when running against Supabase)
+    try {
+      const supabase = getServiceSupabase();
+      if (ctx.taskId) {
+        await supabase.from("ai_task_events").insert({
+          id: randomUUID(),
+          task_id: ctx.taskId,
+          agent_id: ctx.agentId,
+          event_type: "routed",
+          message: `Handoff from ${ctx.agentId} to ${input.targetAgentId} (depth ${depth + 1}): ${input.title}`,
+        });
+      }
+      await supabase.from("ai_audit_logs").insert({
+        actor_type: "agent",
+        actor_id: ctx.agentId,
+        event_type: "workforce_handoff",
+        target_resource: input.ticketNumber || ctx.taskId || input.targetAgentId,
+        details: {
+          fromAgent: ctx.agentId,
+          toAgent: input.targetAgentId,
+          parentTaskId: ctx.taskId ?? null,
+          handoffDepth: depth + 1,
+          title: input.title,
+        },
+      });
+    } catch {
+      // Non-fatal in unit tests / unmigrated dev DB
+    }
+
+    await recordTeamNote({
+      fromAgent: ctx.agentId,
+      toAgent: input.targetAgentId,
+      taskId: ctx.taskId ?? null,
+      ticketNumber: input.ticketNumber ?? null,
+      note: `${ctx.agentId} handed off "${input.title}" to ${input.targetAgentId}.`,
+    }).catch(() => {});
+
+    const runner: HandoffRunner =
+      options.handoffRunner ??
+      (async (p) => {
+        const { defaultWorkforceOrchestrator } = await import(
+          "@/lib/ai-workforce/orchestrator"
+        );
+        return defaultWorkforceOrchestrator.dispatchInstruction(p);
+      });
+
+    const childTask = await runner({
+      requesterId: ctx.actorUserId || ctx.agentId,
+      title: input.title,
+      instruction: input.instruction,
+      targetAgentId: input.targetAgentId,
+      priority: input.priority ?? "normal",
+      parentTaskId: ctx.taskId ?? null,
+      handoffDepth: depth + 1,
+      handoffChain: [...chain, ctx.agentId],
+      isHandoffChild: true,
+    });
+
+    return {
+      taskId: childTask.id,
+      parentTaskId: childTask.parentTaskId,
+      assignedAgentId: childTask.assignedAgentId,
+      status: childTask.status,
+      summary: childTask.outputSummary || childTask.errorMessage || "Completed.",
+    };
+  }
+
+  function validateHandoffInput(raw: unknown) {
+    const obj = (raw || {}) as Record<string, unknown>;
+    const targetAgentId = asNonEmptyString(obj.targetAgentId) as AgentId | null;
+    const title = asNonEmptyString(obj.title);
+    const instruction = asNonEmptyString(obj.instruction);
+    const ticketNumber = asNonEmptyString(obj.ticketNumber) ?? undefined;
+    const priorityRaw = asNonEmptyString(obj.priority);
+    const priority: "low" | "normal" | "high" | "urgent" =
+      priorityRaw === "low" ||
+      priorityRaw === "normal" ||
+      priorityRaw === "high" ||
+      priorityRaw === "urgent"
+        ? priorityRaw
+        : "normal";
+
+    if (!targetAgentId || !getAgentDefinition(targetAgentId)) {
+      return { ok: false as const, error: "Valid targetAgentId is required." };
+    }
+    if (!title || !instruction) {
+      return { ok: false as const, error: "title and instruction are required." };
+    }
+    return {
+      ok: true as const,
+      data: { targetAgentId, title, instruction, ticketNumber, priority },
+    };
+  }
+
+  const handoffSchema = {
+    type: "object",
+    properties: {
+      targetAgentId: {
+        type: "string",
+        enum: [
+          "operations_manager",
+          "sales_ai",
+          "customer_support_ai",
+          "research_ai",
+          "engineering_ai",
+        ],
+      },
+      title: { type: "string" },
+      instruction: { type: "string" },
+      ticketNumber: { type: "string" },
+      priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+    },
+    required: ["targetAgentId", "title", "instruction"],
+  };
+
+  gateway.registerTool({
+    name: "workforce_request_specialist_run",
+    description:
+      "Hand off a bounded task to a specialist agent (Sadiq only, max 2 levels, no loops) and return the result",
+    tier: "green",
+    requiredScope: "workforce:handoff:specialist",
+    inputJsonSchema: handoffSchema,
+    validateInput: validateHandoffInput,
+    execute: executeAgentHandoff,
+  });
+
+  gateway.registerTool({
+    name: "workforce_create_task",
+    description:
+      "Create and run a child handoff task for a teammate (max 2 levels, no self-handoff or loops)",
+    tier: "green",
+    requiredScope: "workforce:tasks:create",
+    inputJsonSchema: handoffSchema,
+    validateInput: validateHandoffInput,
+    execute: executeAgentHandoff,
   });
 }
 

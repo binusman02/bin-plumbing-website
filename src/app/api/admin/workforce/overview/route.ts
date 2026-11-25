@@ -23,9 +23,11 @@ export async function GET() {
 
   let usageRows: Array<Record<string, unknown>> = [];
   let auditRows: Array<Record<string, unknown>> = [];
+  let ownerReports: Array<Record<string, unknown>> = [];
+  let teamNotes: Array<Record<string, unknown>> = [];
   try {
     const supabase = getServiceSupabase();
-    const [uRes, aRes] = await Promise.all([
+    const [uRes, aRes, nRes, notesRes] = await Promise.all([
       supabase
         .from("ai_model_usage")
         .select("agent_id, provider, model_id, billing_mode, input_tokens, output_tokens, estimated_cost_usd, created_at")
@@ -36,17 +38,43 @@ export async function GET() {
         .select("id, actor_type, actor_id, event_type, target_resource, details, created_at")
         .order("created_at", { ascending: false })
         .limit(30),
+      supabase
+        .from("notifications")
+        .select("id, type, title, body, destination, read_at, created_at")
+        .eq("recipient_role", "admin")
+        .is("deleted_at", null)
+        .in("type", [
+          "ai_approval_pending",
+          "engineering_incident",
+          "ai_workforce_report",
+          "ai_urgent_alert",
+          "ai_task_failed",
+        ])
+        .order("created_at", { ascending: false })
+        .limit(15),
+      supabase
+        .from("ai_team_notes")
+        .select("id, from_agent, to_agent, ticket_number, note, created_at")
+        .order("created_at", { ascending: false })
+        .limit(15),
     ]);
     usageRows = (uRes.data || []) as Array<Record<string, unknown>>;
     auditRows = (aRes.data || []) as Array<Record<string, unknown>>;
+    ownerReports = (nRes.data || []) as Array<Record<string, unknown>>;
+    teamNotes = (notesRes.data || []) as Array<Record<string, unknown>>;
   } catch {
     // Migration may not be applied in local dev yet
   }
+
+  const unreadReportCount = ownerReports.filter((r) => !r.read_at).length;
 
   return NextResponse.json({
     agents,
     tasks,
     approvals,
+    ownerReports,
+    unreadReportCount,
+    teamNotes,
     usage: {
       globalPaidSpendCapUsd: GLOBAL_PAID_SPEND_CAP_USD,
       routes: Object.values(DEFAULT_MODEL_ROUTES).map((r) => ({

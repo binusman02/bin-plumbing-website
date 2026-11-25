@@ -47,6 +47,8 @@ export interface ToolExecutionContext {
   actorEmail: string;
   taskId?: string | null;
   approvalId?: string | null;
+  handoffDepth?: number;
+  handoffChain?: AgentId[];
 }
 
 export interface ApprovalRequestInput {

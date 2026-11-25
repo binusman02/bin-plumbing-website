@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  Bell,
   Bot,
   CheckCircle2,
   Clock,
@@ -52,10 +53,32 @@ interface ApprovalItem {
   createdAt: string;
 }
 
+interface OwnerReportItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  destination: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+interface TeamNoteItem {
+  id: string;
+  from_agent: string;
+  to_agent: string | null;
+  ticket_number: string | null;
+  note: string;
+  created_at: string;
+}
+
 interface OverviewPayload {
   agents: AgentItem[];
   tasks: TaskItem[];
   approvals: ApprovalItem[];
+  ownerReports?: OwnerReportItem[];
+  unreadReportCount?: number;
+  teamNotes?: TeamNoteItem[];
   usage: {
     globalPaidSpendCapUsd: number;
     routes: Array<{
@@ -79,22 +102,25 @@ export function WorkforceConsoleClient() {
   const [instruction, setInstruction] = useState("");
   const [targetAgent, setTargetAgent] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [showFeed, setShowFeed] = useState(false);
   const [banner, setBanner] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
+  const loadOverview = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch("/api/admin/workforce/overview", { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to load AI Workforce console.");
       const json = (await res.json()) as OverviewPayload;
       setData(json);
     } catch (err) {
-      setBanner({
-        type: "err",
-        text: err instanceof Error ? err.message : "Could not load workforce data.",
-      });
+      if (!silent) {
+        setBanner({
+          type: "err",
+          text: err instanceof Error ? err.message : "Could not load workforce data.",
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -111,7 +137,24 @@ export function WorkforceConsoleClient() {
       setTab(initialTab);
     }
     void loadOverview();
+    const timer = window.setInterval(() => {
+      void loadOverview(true);
+    }, 20000);
+    return () => window.clearInterval(timer);
   }, [loadOverview]);
+
+  async function toggleReportsBell() {
+    const next = !showFeed;
+    setShowFeed(next);
+    if (next && (data?.unreadReportCount ?? 0) > 0) {
+      try {
+        await fetch("/api/admin/workforce/ack", { method: "POST" });
+        await loadOverview(true);
+      } catch {
+        // Non-fatal
+      }
+    }
+  }
 
   async function handleDispatch(e: React.FormEvent) {
     e.preventDefault();
@@ -241,6 +284,20 @@ export function WorkforceConsoleClient() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={() => void toggleReportsBell()}
+            className="relative inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
+            aria-label="Live AI Owner Reports"
+          >
+            <Bell className="h-3.5 w-3.5" />
+            <span>Reports</span>
+            {(data?.unreadReportCount ?? 0) > 0 && (
+              <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                {data?.unreadReportCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             disabled={submitting}
             onClick={() => void handleKickoffAll()}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#0B1F3A] px-3.5 text-xs font-bold text-white hover:bg-[#132f57] disabled:opacity-50"
@@ -258,6 +315,61 @@ export function WorkforceConsoleClient() {
           </button>
         </div>
       </div>
+
+      {showFeed && (
+        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-2">
+          <div>
+            <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+              Live Owner Reports
+            </h2>
+            <div className="max-h-60 space-y-2 overflow-y-auto">
+              {(data?.ownerReports || []).length === 0 ? (
+                <p className="text-xs text-slate-500">No reports yet.</p>
+              ) : (
+                (data?.ownerReports || []).map((r) => (
+                  <div
+                    key={r.id}
+                    className={`rounded-xl border p-2.5 text-xs ${
+                      r.type === "ai_urgent_alert"
+                        ? "border-red-200 bg-red-50/70"
+                        : !r.read_at
+                          ? "border-amber-200 bg-amber-50/60"
+                          : "border-slate-100 bg-slate-50"
+                    }`}
+                  >
+                    <p className="font-bold text-[#0B1F3A]">{r.title}</p>
+                    {r.body && <p className="mt-0.5 text-slate-600">{r.body}</p>}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div>
+            <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+              Shared Team Board Notes
+            </h2>
+            <div className="max-h-60 space-y-2 overflow-y-auto">
+              {(data?.teamNotes || []).length === 0 ? (
+                <p className="text-xs text-slate-500">No team notes yet.</p>
+              ) : (
+                (data?.teamNotes || []).map((n) => (
+                  <div
+                    key={n.id}
+                    className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs"
+                  >
+                    <p className="font-bold text-[#0B1F3A]">
+                      {n.from_agent}
+                      {n.to_agent ? ` → ${n.to_agent}` : " → Team"}
+                      {n.ticket_number ? ` (${n.ticket_number})` : ""}
+                    </p>
+                    <p className="mt-0.5 text-slate-600">{n.note}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {banner && (
         <div
