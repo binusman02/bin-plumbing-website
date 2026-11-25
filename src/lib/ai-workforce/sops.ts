@@ -122,6 +122,13 @@ export function validateScopeForAgent(params: {
 
 export function detectEscalationTriggers(text: string): string[] {
   const lower = text.toLowerCase();
+  const isPolicyStatementOnly =
+    /\b(readiness|triage rules?|ownership rules?|sop|will escalate|i escalate|always escalate|escalation triggers?)\b/.test(
+      lower
+    ) && !/\b(bp-\d{4,}|address|street|estate|kitchen|bathroom|toilet|ceiling|dispute\s+from)\b/.test(lower);
+  if (isPolicyStatementOnly) {
+    return [];
+  }
   const triggers: string[] = [];
   if (/\b(serious leak|flood|flooding|burst pipe|gushing|water everywhere)\b/.test(lower)) {
     triggers.push("serious leak / flooding");
@@ -171,9 +178,13 @@ export function runRoleSopChecklist(params: {
   }
 
   if (agentId === "customer_support_ai") {
+    const combined = `${instruction} ${deliverable}`;
     const mentionsPrivateTicketRead =
-      /\b(ticket|bp-\d+|customer_id)\b/i.test(`${instruction} ${deliverable}`) &&
-      /\b(read|checked|status|assigned technician|customer details)\b/i.test(lower);
+      /\b(bp-\d{4,}|ticket\s*#\s*\w+|checked\s+(?:the\s+)?ticket|read\s+(?:the\s+)?ticket|customer_id\s*[:=]|looked\s+up\s+(?:the\s+)?(?:ticket|customer))\b/i.test(
+        combined
+      ) ||
+      (/\bbp-\d+\b/i.test(combined) &&
+        /\b(read|checked|status|assigned technician|customer details)\b/i.test(lower));
     const verifiedOwnership = evidence.some(
       (e) =>
         e.includes("support_read_verified_ticket") ||

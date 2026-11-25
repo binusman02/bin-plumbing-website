@@ -196,9 +196,11 @@ export function WorkforceConsoleClient() {
   async function toggleReportsBell() {
     const next = !showFeed;
     setShowFeed(next);
-    if (next && (data?.unreadReportCount ?? 0) > 0) {
+    if ((data?.unreadReportCount ?? 0) > 0) {
       try {
         await fetch("/api/admin/workforce/ack", { method: "POST" });
+        window.dispatchEvent(new Event("notifications-refresh"));
+        window.dispatchEvent(new Event("admin-signals-refresh"));
         await loadOverview(true);
       } catch {
         // Non-fatal

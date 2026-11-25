@@ -49,8 +49,15 @@ export async function getAdminNotifications(): Promise<{
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("recipient_role", "admin")
-        .eq("is_read", false)
-        .in("type", ["ai_approval_pending", "engineering_incident"]),
+        .is("read_at", null)
+        .is("deleted_at", null)
+        .in("type", [
+          "ai_approval_pending",
+          "engineering_incident",
+          "ai_workforce_report",
+          "ai_urgent_alert",
+          "ai_task_failed",
+        ]),
     ]);
 
   const items: AdminNotificationItem[] = [];

@@ -496,6 +496,17 @@ test("FlowGuard AI Workforce Company Operating System rules", async (t) => {
         }).passed,
         false
       );
+      // Readiness summary mentioning triage & ownership rules must NOT false-trigger
+      assert.equal(
+        runRoleSopChecklist({
+          agentId: "customer_support_ai",
+          deliverable:
+            "Customer support readiness confirmed: I verify customer_id ownership before reading private ticket details and escalate flooding or safety risks.",
+          evidence: [],
+          instruction: "Zainab: Customer Support & Triage Status",
+        }).passed,
+        true
+      );
       assert.equal(
         runRoleSopChecklist({
           agentId: "engineering_ai",

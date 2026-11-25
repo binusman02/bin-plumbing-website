@@ -10,9 +10,9 @@ export async function POST() {
 
   try {
     const supabase = getServiceSupabase();
-    await supabase
+    const { error } = await supabase
       .from("notifications")
-      .update({ is_read: true, read_at: new Date().toISOString() })
+      .update({ read_at: new Date().toISOString() })
       .eq("recipient_role", "admin")
       .is("read_at", null)
       .in("type", [
@@ -22,8 +22,11 @@ export async function POST() {
         "ai_urgent_alert",
         "ai_task_failed",
       ]);
-  } catch {
-    // Non-fatal
+    if (error) {
+      console.error("[Workforce Ack Error]", error.message);
+    }
+  } catch (err) {
+    console.error("[Workforce Ack Exception]", err);
   }
 
   return NextResponse.json({ ok: true });
