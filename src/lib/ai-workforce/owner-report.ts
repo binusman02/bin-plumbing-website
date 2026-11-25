@@ -160,10 +160,21 @@ export async function reportToOwner(
             ? "Overdue after chase."
             : "";
 
-  const cleanSummary = input.summary.replace(/\s+/g, " ").trim().slice(0, 220);
+  const cleanSummary = input.summary
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*•]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 260);
   const parts = [`${shortName}: ${cleanSummary}`];
-  if (input.evidence && input.evidence.length > 0) {
-    parts.push(`Evidence: ${input.evidence.slice(0, 2).join(", ")}`);
+  const readableEvidence = (input.evidence || [])
+    .filter((e) => !e.startsWith("tool:"))
+    .slice(0, 2);
+  if (readableEvidence.length > 0) {
+    parts.push(`Evidence: ${readableEvidence.join(", ")}`);
   }
   if (input.pending) {
     parts.push(`Pending: ${input.pending}`);
@@ -174,7 +185,7 @@ export async function reportToOwner(
     parts.push(statusTag);
   }
 
-  const fullMessage = parts.join(" • ").slice(0, 500);
+  const fullMessage = parts.join(" — ").slice(0, 500);
   const titlePrefix = isUrgent ? "[URGENT] " : "";
   const title = `${titlePrefix}${shortName}: ${cleanSummary.slice(0, 72)}`;
 

@@ -19,6 +19,45 @@ import {
   XCircle,
 } from "lucide-react";
 import { TeamMeetingPanel } from "@/components/admin/TeamMeetingPanel";
+import { ClassicSelect } from "@/components/ui/ClassicSelect";
+
+const AGENT_SHORT_NAMES: Record<string, string> = {
+  operations_manager: "Sadiq",
+  sales_ai: "Amina",
+  customer_support_ai: "Zainab",
+  research_ai: "Faruk",
+  engineering_ai: "Bashir",
+};
+
+function getAgentFirstName(agentId: string | null | undefined): string {
+  if (!agentId) return "Team";
+  return AGENT_SHORT_NAMES[agentId] || agentId;
+}
+
+function cleanHumanProse(raw: string, agentName?: string): string {
+  let text = raw
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\s*[•—-]\s*Evidence:\s*tool:[^\s•—]+(?:\s*,\s*tool:[^\s•—]+)*/gi, "")
+    .replace(/\btool:([a-z0-9_]+)/gi, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (agentName) {
+    const prefixRx = new RegExp(`^(?:\\[[A-Z_]+\\]\\s*)?(?:${agentName}\\s*:\\s*)+`, "i");
+    text = text.replace(prefixRx, "");
+  }
+  return text.trim();
+}
+
+function formatShortTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 interface AgentItem {
   id: string;
@@ -564,73 +603,98 @@ export function WorkforceConsoleClient() {
               </h2>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 {(data?.aiReports || []).length > 0 ? (
-                  (data?.aiReports || []).map((r) => (
-                    <div
-                      key={r.id}
-                      className={`rounded-xl border p-2.5 text-xs ${
-                        r.urgency === "urgent"
-                          ? "border-red-200 bg-red-50/70"
-                          : r.urgency === "high"
-                            ? "border-amber-200 bg-amber-50/60"
-                            : "border-slate-100 bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="font-bold text-[#0B1F3A]">
-                          [{r.agentId.toUpperCase()}] {r.message}
-                        </p>
-                        <div className="flex shrink-0 items-center gap-1">
+                  (data?.aiReports || []).map((r) => {
+                    const senderName = getAgentFirstName(r.agentId);
+                    const avatar = agentMap[r.agentId]?.avatarUrl || "/images/ai/sadiq.jpg";
+                    return (
+                      <div
+                        key={r.id}
+                        className={`rounded-xl border p-3 text-xs ${
+                          r.urgency === "urgent"
+                            ? "border-red-200 bg-red-50/70"
+                            : r.urgency === "high"
+                              ? "border-amber-200 bg-amber-50/60"
+                              : "border-slate-200/80 bg-slate-50/70"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={avatar}
+                              alt={senderName}
+                              className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-[#F5B301] object-cover"
+                            />
+                            <div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-extrabold text-[#0B1F3A]">{senderName}</span>
+                                <span className="text-[11px] font-medium text-slate-400">
+                                  {formatShortTime(r.deliveredAt)}
+                                </span>
+                                {r.urgency === "urgent" && (
+                                  <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                                    Urgent
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 leading-relaxed text-slate-700">
+                                {cleanHumanProse(r.message, senderName)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => void handleReportFeedback(r.id, "up")}
+                              title="Thumbs up"
+                              className={`rounded-lg p-1 ${
+                                r.feedback === "up"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-white text-slate-500 hover:text-emerald-700"
+                              }`}
+                            >
+                              <ThumbsUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleReportFeedback(r.id, "down")}
+                              title="Thumbs down"
+                              className={`rounded-lg p-1 ${
+                                r.feedback === "down"
+                                  ? "bg-red-600 text-white"
+                                  : "bg-white text-slate-500 hover:text-red-700"
+                              }`}
+                            >
+                              <ThumbsDown className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        {r.feedbackNote && (
+                          <p className="mt-1.5 rounded bg-white px-2 py-1 text-[11px] text-emerald-800">
+                            Playbook note: {r.feedbackNote}
+                          </p>
+                        )}
+                        <div className="mt-2 flex gap-1.5">
+                          <input
+                            type="text"
+                            value={feedbackNotes[r.id] || ""}
+                            onChange={(e) =>
+                              setFeedbackNotes((prev) => ({ ...prev, [r.id]: e.target.value }))
+                            }
+                            placeholder="Add a rule for next time..."
+                            className="h-7 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-[#0B1F3A]"
+                          />
                           <button
                             type="button"
-                            onClick={() => void handleReportFeedback(r.id, "up")}
-                            title="Thumbs up"
-                            className={`rounded-lg p-1 ${
-                              r.feedback === "up"
-                                ? "bg-emerald-600 text-white"
-                                : "bg-white text-slate-500 hover:text-emerald-700"
-                            }`}
+                            onClick={() => void handleReportFeedback(r.id)}
+                            className="h-7 rounded-lg bg-[#0B1F3A] px-2.5 text-[10px] font-bold text-white"
                           >
-                            <ThumbsUp className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleReportFeedback(r.id, "down")}
-                            title="Thumbs down"
-                            className={`rounded-lg p-1 ${
-                              r.feedback === "down"
-                                ? "bg-red-600 text-white"
-                                : "bg-white text-slate-500 hover:text-red-700"
-                            }`}
-                          >
-                            <ThumbsDown className="h-3.5 w-3.5" />
+                            Teach
                           </button>
                         </div>
                       </div>
-                      {r.feedbackNote && (
-                        <p className="mt-1 rounded bg-white px-2 py-1 text-[11px] text-emerald-800">
-                          Playbook note: {r.feedbackNote}
-                        </p>
-                      )}
-                      <div className="mt-1.5 flex gap-1.5">
-                        <input
-                          type="text"
-                          value={feedbackNotes[r.id] || ""}
-                          onChange={(e) =>
-                            setFeedbackNotes((prev) => ({ ...prev, [r.id]: e.target.value }))
-                          }
-                          placeholder="Teach rule for next time..."
-                          className="h-7 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-[#0B1F3A]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void handleReportFeedback(r.id)}
-                          className="h-7 rounded-lg bg-[#0B1F3A] px-2.5 text-[10px] font-bold text-white"
-                        >
-                          Teach
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (data?.ownerReports || []).length === 0 ? (
                   <p className="text-xs text-slate-500">No reports yet.</p>
                 ) : (
@@ -645,8 +709,10 @@ export function WorkforceConsoleClient() {
                             : "border-slate-100 bg-slate-50"
                       }`}
                     >
-                      <p className="font-bold text-[#0B1F3A]">{r.title}</p>
-                      {r.body && <p className="mt-0.5 text-slate-600">{r.body}</p>}
+                      <p className="font-bold text-[#0B1F3A]">{cleanHumanProse(r.title)}</p>
+                      {r.body && (
+                        <p className="mt-0.5 text-slate-600">{cleanHumanProse(r.body)}</p>
+                      )}
                     </div>
                   ))
                 )}
@@ -660,19 +726,44 @@ export function WorkforceConsoleClient() {
                 {(data?.teamNotes || []).length === 0 ? (
                   <p className="text-xs text-slate-500">No team notes yet.</p>
                 ) : (
-                  (data?.teamNotes || []).map((n) => (
-                    <div
-                      key={n.id}
-                      className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs"
-                    >
-                      <p className="font-bold text-[#0B1F3A]">
-                        {n.from_agent}
-                        {n.to_agent ? ` → ${n.to_agent}` : " → Team"}
-                        {n.ticket_number ? ` (${n.ticket_number})` : ""}
-                      </p>
-                      <p className="mt-0.5 text-slate-600">{n.note}</p>
-                    </div>
-                  ))
+                  (data?.teamNotes || []).map((n) => {
+                    const fromName = getAgentFirstName(n.from_agent);
+                    const toName = n.to_agent ? getAgentFirstName(n.to_agent) : "Team";
+                    const avatar = agentMap[n.from_agent]?.avatarUrl || "/images/ai/sadiq.jpg";
+                    return (
+                      <div
+                        key={n.id}
+                        className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3 text-xs"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={avatar}
+                            alt={fromName}
+                            className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-[#F5B301] object-cover"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-extrabold text-[#0B1F3A]">
+                                {fromName} to {toName}
+                              </span>
+                              {n.ticket_number && (
+                                <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600">
+                                  {n.ticket_number}
+                                </span>
+                              )}
+                              <span className="text-[11px] text-slate-400">
+                                {formatShortTime(n.created_at)}
+                              </span>
+                            </div>
+                            <p className="mt-1 leading-relaxed text-slate-700">
+                              {cleanHumanProse(n.note, fromName)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -686,18 +777,19 @@ export function WorkforceConsoleClient() {
                 Company Playbook Rules (Enforced Before Next Run)
               </h3>
             </div>
-            <form onSubmit={handleAddPlaybookRule} className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <select
-                value={pbAgentId}
-                onChange={(e) => setPbAgentId(e.target.value)}
-                className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A]"
-              >
-                {(data?.agents || []).map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.displayName}
-                  </option>
-                ))}
-              </select>
+            <form onSubmit={handleAddPlaybookRule} className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="w-full sm:w-64">
+                <ClassicSelect
+                  size="sm"
+                  value={pbAgentId}
+                  onChange={setPbAgentId}
+                  ariaLabel="Select AI member for playbook rule"
+                  options={(data?.agents || []).map((a) => ({
+                    value: a.id,
+                    label: a.displayName,
+                  }))}
+                />
+              </div>
               <input
                 type="text"
                 value={pbRuleText}
@@ -749,8 +841,8 @@ export function WorkforceConsoleClient() {
                     ) : (
                       <>
                         <div>
-                          <span className="mr-2 rounded bg-[#0B1F3A]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#0B1F3A]">
-                            {rule.agentId}
+                          <span className="mr-2 rounded bg-[#0B1F3A]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#0B1F3A]">
+                            {getAgentFirstName(rule.agentId)}
                           </span>
                           <span className="text-slate-700">{rule.content}</span>
                         </div>
@@ -834,18 +926,21 @@ export function WorkforceConsoleClient() {
           <label className="text-xs font-extrabold uppercase tracking-wider text-[#0B1F3A]">
             Instruct AI Operations Manager
           </label>
-          <select
-            value={targetAgent}
-            onChange={(e) => setTargetAgent(e.target.value)}
-            className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A]"
-          >
-            <option value="">Auto-route via Operations Manager</option>
-            {(data?.agents || []).map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.displayName}
-              </option>
-            ))}
-          </select>
+          <div className="w-full sm:w-72">
+            <ClassicSelect
+              size="sm"
+              value={targetAgent}
+              onChange={setTargetAgent}
+              ariaLabel="Target AI agent"
+              options={[
+                { value: "", label: "Auto-route via Operations Manager" },
+                ...(data?.agents || []).map((a) => ({
+                  value: a.id,
+                  label: a.displayName,
+                })),
+              ]}
+            />
+          </div>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -975,8 +1070,8 @@ export function WorkforceConsoleClient() {
                   </div>
                 </div>
                 {task.outputSummary && (
-                  <p className="mt-2.5 rounded-xl bg-slate-50 p-3 text-xs text-slate-700">
-                    {task.outputSummary}
+                  <p className="mt-2.5 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
+                    {cleanHumanProse(task.outputSummary, getAgentFirstName(task.assignedAgentId))}
                   </p>
                 )}
                 {task.errorMessage && (

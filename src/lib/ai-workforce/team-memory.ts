@@ -42,7 +42,15 @@ const SECRET_OR_PII_RX =
   /(sk_[a-z0-9_]{10,}|tvly-[a-z0-9_-]{8,}|re_[a-z0-9_]{8,}|github_pat_[a-z0-9_]+|password\s*[:=]|secret\s*[:=]|bearer\s+[a-z0-9._-]+|eyJ[a-zA-Z0-9_-]{12,})/i;
 
 export function sanitizeMemoryFact(raw: string): string | null {
-  const cleaned = raw.replace(/\s+/g, " ").trim().slice(0, 200);
+  const cleaned = raw
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*•]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
   if (cleaned.length < 8) return null;
   if (SECRET_OR_PII_RX.test(cleaned)) return null;
   return cleaned;
