@@ -6,6 +6,7 @@ import {
 } from "@/lib/ai-workforce/admin-tools";
 import { reportToOwner } from "@/lib/ai-workforce/owner-report";
 import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
+import { computeDueAtFromPriority } from "@/lib/ai-workforce/work-orders";
 import { triageSupportMessage } from "@/lib/ai-workforce/specialists/support";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
@@ -21,6 +22,8 @@ async function recordAutoTask(params: {
   try {
     const id = randomUUID();
     const nowIso = new Date().toISOString();
+    const priority = params.priority ?? "normal";
+    const woStatus = params.status === "completed" ? "closed" : params.status;
     const supabase = getServiceSupabase();
     await supabase.from("ai_tasks").insert({
       id,
@@ -28,17 +31,23 @@ async function recordAutoTask(params: {
       description: params.description,
       requester_id: "system_auto_trigger",
       assigned_agent_id: params.agentId,
+      owner_agent: params.agentId,
+      created_by: "system_auto_trigger",
       parent_task_id: null,
-      priority: params.priority ?? "normal",
-      status: params.status,
+      priority,
+      status: woStatus,
+      due_at: computeDueAtFromPriority(priority),
+      deliverable: params.outputSummary,
+      qa_status: "approved",
+      lessons: woStatus === "closed" ? [params.outputSummary.slice(0, 140)] : [],
       output_summary: params.outputSummary,
-      completed_at: params.status === "completed" ? nowIso : null,
+      completed_at: woStatus === "closed" ? nowIso : null,
     });
     await supabase.from("ai_task_events").insert({
       id: randomUUID(),
       task_id: id,
       agent_id: params.agentId,
-      event_type: params.status === "waiting_approval" ? "approval_requested" : "completed",
+      event_type: params.status === "waiting_approval" ? "approval_requested" : "closed",
       message: params.outputSummary,
     });
     return id;

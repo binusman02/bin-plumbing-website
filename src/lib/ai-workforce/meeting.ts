@@ -10,6 +10,7 @@ import {
   type TeamBoardAndMemoryStore,
 } from "@/lib/ai-workforce/team-memory";
 import { stripAudioTags } from "@/lib/ai-workforce/voice-profiles";
+import { computeDueAtFromPriority } from "@/lib/ai-workforce/work-orders";
 import type { AgentId } from "@/lib/ai-workforce/types";
 import type { createNotification } from "@/lib/notifications";
 
@@ -19,6 +20,7 @@ export interface MeetingActionItem {
   ownerAgentId: AgentId;
   title: string;
   instruction: string;
+  dueAt?: string;
 }
 
 export interface MeetingTurn {
@@ -199,6 +201,7 @@ async function fetchMeetingSnapshot(): Promise<string> {
       `- Approved plumbers: ${(plumbersRes.data || []).map((p) => `${p.full_name}(${p.is_available ? "On Duty" : "Off Duty"})`).join(", ") || "None"}`,
       `- Pending payments: ${(paysRes.data || []).length}`,
       `- Recent AI tasks: ${(tasksRes.data || []).map((t) => `[${t.assigned_agent_id}] ${t.title}(${t.status})`).join("; ") || "None"}`,
+      `- Open meeting action items: ${(tasksRes.data || []).filter((t) => !["closed", "completed", "cancelled", "failed"].includes(String(t.status))).map((t) => `[${t.assigned_agent_id}] ${t.title}(${t.status})`).join("; ") || "None"}`,
       `- Pending approvals: ${(apprsRes.data || []).map((a) => `[${a.requested_by_agent}] ${a.action_summary}`).join("; ") || "None"}`,
     ].join("\n");
     lastGoodSnapshot = snap;
@@ -221,22 +224,28 @@ export function parseWrapUpOutput(rawText: string): {
     const parsed = JSON.parse(cleaned) as {
       summary?: string;
       actionItems?: Array<{
+        owner_agent?: string;
         ownerAgentId?: string;
         title?: string;
         instruction?: string;
+        due_at?: string;
+        dueAt?: string;
       }>;
     };
     const summary = stripAudioTags(String(parsed.summary || "").trim()) || stripAudioTags(rawText.trim());
     const actionItems: MeetingActionItem[] = [];
+    const defaultDue = computeDueAtFromPriority("normal");
     for (const item of parsed.actionItems || []) {
-      const ownerId = String(item?.ownerAgentId || "").trim() as AgentId;
+      const ownerId = String(item?.owner_agent || item?.ownerAgentId || "").trim() as AgentId;
       const title = String(item?.title || "").trim();
       const instruction = String(item?.instruction || "").trim();
+      const rawDue = String(item?.due_at || item?.dueAt || "").trim();
       if (!getAgentDefinition(ownerId) || !title || !instruction) continue;
       actionItems.push({
         ownerAgentId: ownerId,
         title: title.slice(0, 140),
         instruction: instruction.slice(0, 600),
+        dueAt: rawDue && !Number.isNaN(new Date(rawDue).getTime()) ? new Date(rawDue).toISOString() : defaultDue,
       });
     }
     return { summary, actionItems: actionItems.slice(0, 8) };
@@ -320,8 +329,8 @@ export async function runTeamMeetingTurn(params: {
     "- You may ask the Founder a direct question if a business decision or clarification is needed.",
     "- Only mention facts from the LIVE FLOWGUARD SNAPSHOT, team notes, or meeting history; never invent tickets, revenue, or completed work.",
     params.wrapUp
-      ? "- The Founder asked to wrap up: return STRICT JSON only (no markdown fences) with shape: {\"summary\":\"short spoken wrap-up\",\"actionItems\":[{\"ownerAgentId\":\"operations_manager|sales_ai|customer_support_ai|research_ai|engineering_ai\",\"title\":\"short task title\",\"instruction\":\"clear action instruction\"}]}. Include only agreed next steps."
-      : "- Return STRICT JSON only (no markdown fences) with shape: {\"reply\":\"your spoken reply\",\"raisedHands\":[{\"agentId\":\"sales_ai|customer_support_ai|research_ai|engineering_ai|operations_manager\",\"kind\":\"question|suggestion\",\"topic\":\"short 5-10 word reason\"}]}. Only include raisedHands (0 to 2) for colleagues currently in the room if they genuinely have an important question for the Founder or a helpful suggestion.",
+      ? "- The Founder asked to wrap up: return STRICT JSON only (no markdown fences) with shape: {\"summary\":\"short spoken wrap-up\",\"actionItems\":[{\"owner_agent\":\"operations_manager|sales_ai|customer_support_ai|research_ai|engineering_ai\",\"title\":\"short task title\",\"instruction\":\"clear action instruction\",\"due_at\":\"ISO timestamp\"}]}. Include only agreed next steps."
+      : `${params.history.length <= 1 && speaker.id === "operations_manager" ? "- Since this is the start of the meeting, briefly review any Open meeting action items from the snapshot first.\n" : ""}- Return STRICT JSON only (no markdown fences) with shape: {"reply":"your spoken reply","raisedHands":[{"agentId":"sales_ai|customer_support_ai|research_ai|engineering_ai|operations_manager","kind":"question|suggestion","topic":"short 5-10 word reason"}]}. Only include raisedHands (0 to 2) for colleagues currently in the room if they genuinely have an important question for the Founder or a helpful suggestion.`,
     snapshot,
   ]
     .filter(Boolean)
@@ -455,9 +464,13 @@ export async function runTeamMeetingTurn(params: {
           description: recentTranscript.slice(-1500) || params.founderMessage,
           requester_id: "founder_meeting",
           assigned_agent_id: "operations_manager",
+          owner_agent: "operations_manager",
+          created_by: "founder_meeting",
           priority: "normal",
-          status: "completed",
+          status: "reported",
+          deliverable: replyText,
           output_summary: replyText,
+          lessons: [replyText.slice(0, 140)],
           completed_at: new Date().toISOString(),
         });
         wrappedUpTasksCreated = 1;
@@ -469,7 +482,10 @@ export async function runTeamMeetingTurn(params: {
             description: item.instruction,
             requester_id: "founder_meeting",
             assigned_agent_id: item.ownerAgentId,
+            owner_agent: item.ownerAgentId,
+            created_by: "founder_meeting",
             parent_task_id: summaryTaskId,
+            due_at: item.dueAt || computeDueAtFromPriority("normal"),
             priority: "normal",
             status: "queued",
           });
@@ -483,7 +499,7 @@ export async function runTeamMeetingTurn(params: {
     const assignmentSummary =
       actionItems.length > 0
         ? actionItems
-            .map((a) => `${getAgentDefinition(a.ownerAgentId)?.displayName.split("—")[0].trim() || a.ownerAgentId}: ${a.title}`)
+            .map((a) => `${getAgentDefinition(a.ownerAgentId)?.displayName.split("—")[0].trim() || a.ownerAgentId}: ${a.title} (due ${(a.dueAt || "").slice(0, 10) || "24h"})`)
             .join("; ")
         : replyText;
 

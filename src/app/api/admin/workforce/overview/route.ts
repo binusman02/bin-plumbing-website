@@ -5,7 +5,10 @@ import {
   GLOBAL_PAID_SPEND_CAP_USD,
 } from "@/lib/ai-workforce/model-adapter";
 import { defaultWorkforceOrchestrator } from "@/lib/ai-workforce/orchestrator";
+import { defaultReportStore } from "@/lib/ai-workforce/owner-report";
 import { listAgentDefinitions } from "@/lib/ai-workforce/registry";
+import { computeAgentScorecards } from "@/lib/ai-workforce/scorecard";
+import { defaultTeamMemoryStore } from "@/lib/ai-workforce/team-memory";
 import { requireAdminUser } from "@/lib/security";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 
@@ -15,11 +18,15 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const [agents, tasks, approvals] = await Promise.all([
+  const [agents, tasks, approvals, aiReports, playbookRules] = await Promise.all([
     Promise.resolve(listAgentDefinitions()),
-    defaultWorkforceOrchestrator.listTasks(30).catch(() => []),
+    defaultWorkforceOrchestrator.listTasks(100).catch(() => []),
     defaultApprovalService.listApprovals(30).catch(() => []),
+    defaultReportStore.listReports(40).catch(() => []),
+    defaultTeamMemoryStore.listPlaybookRules().catch(() => []),
   ]);
+
+  const scorecards = computeAgentScorecards(tasks, aiReports);
 
   let usageRows: Array<Record<string, unknown>> = [];
   let auditRows: Array<Record<string, unknown>> = [];
@@ -73,6 +80,9 @@ export async function GET() {
     tasks,
     approvals,
     ownerReports,
+    aiReports,
+    playbookRules,
+    scorecards,
     unreadReportCount,
     teamNotes,
     usage: {

@@ -2,14 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  BarChart3,
   Bell,
+  BookOpen,
   Bot,
   CheckCircle2,
   Clock,
+  Pencil,
   RefreshCw,
   Send,
   ShieldAlert,
   ShieldCheck,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { TeamMeetingPanel } from "@/components/admin/TeamMeetingPanel";
@@ -72,11 +78,47 @@ interface TeamNoteItem {
   created_at: string;
 }
 
+interface StoredReportItem {
+  id: string;
+  taskId: string | null;
+  agentId: string;
+  message: string;
+  urgency: "low" | "normal" | "high" | "urgent";
+  feedback?: "up" | "down" | null;
+  feedbackNote?: string | null;
+  deliveredAt: string;
+}
+
+interface PlaybookRuleItem {
+  id: string;
+  agentId: string;
+  namespace: string;
+  memoryKey: string;
+  content: string;
+  source: string;
+  createdAt: string;
+}
+
+interface ScorecardItem {
+  agentId: string;
+  displayName: string;
+  tasksDone: number;
+  onTimePct: number;
+  qaReworkRatePct: number;
+  thumbsUp: number;
+  thumbsDown: number;
+  openCount: number;
+  overdueCount: number;
+}
+
 interface OverviewPayload {
   agents: AgentItem[];
   tasks: TaskItem[];
   approvals: ApprovalItem[];
   ownerReports?: OwnerReportItem[];
+  aiReports?: StoredReportItem[];
+  playbookRules?: PlaybookRuleItem[];
+  scorecards?: ScorecardItem[];
   unreadReportCount?: number;
   teamNotes?: TeamNoteItem[];
   usage: {
@@ -98,11 +140,18 @@ interface OverviewPayload {
 export function WorkforceConsoleClient() {
   const [data, setData] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"overview" | "meeting" | "tasks" | "approvals" | "usage">("overview");
+  const [tab, setTab] = useState<
+    "overview" | "meeting" | "tasks" | "approvals" | "performance" | "usage"
+  >("overview");
   const [instruction, setInstruction] = useState("");
   const [targetAgent, setTargetAgent] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showFeed, setShowFeed] = useState(false);
+  const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
+  const [pbAgentId, setPbAgentId] = useState("sadiq");
+  const [pbRuleText, setPbRuleText] = useState("");
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editingRuleContent, setEditingRuleContent] = useState("");
   const [banner, setBanner] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const loadOverview = useCallback(async (silent = false) => {
@@ -132,6 +181,7 @@ export function WorkforceConsoleClient() {
       initialTab === "meeting" ||
       initialTab === "tasks" ||
       initialTab === "approvals" ||
+      initialTab === "performance" ||
       initialTab === "usage"
     ) {
       setTab(initialTab);
@@ -262,6 +312,132 @@ export function WorkforceConsoleClient() {
     }
   }
 
+  async function handleReportFeedback(
+    reportId: string,
+    feedback?: "up" | "down"
+  ) {
+    const note = (feedbackNotes[reportId] || "").trim();
+    if (!feedback && !note) return;
+    setBanner(null);
+    try {
+      const res = await fetch(`/api/admin/workforce/reports/${reportId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(feedback ? { feedback } : {}), ...(note ? { note } : {}) }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Could not save feedback.");
+      if (note) {
+        setFeedbackNotes((prev) => ({ ...prev, [reportId]: "" }));
+      }
+      setBanner({
+        type: "ok",
+        text: note
+          ? "Saved feedback and added a Playbook rule for the agent."
+          : "Report rating saved.",
+      });
+      await loadOverview(true);
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Could not save feedback.",
+      });
+    }
+  }
+
+  async function handleAddPlaybookRule(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pbRuleText.trim()) return;
+    setBanner(null);
+    try {
+      const res = await fetch("/api/admin/workforce/playbook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId: pbAgentId, rule: pbRuleText.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Could not add rule.");
+      setPbRuleText("");
+      setBanner({ type: "ok", text: `Added Playbook rule for ${pbAgentId}.` });
+      await loadOverview(true);
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Could not add rule.",
+      });
+    }
+  }
+
+  async function handleSavePlaybookEdit(id: string) {
+    if (!editingRuleContent.trim()) return;
+    setBanner(null);
+    try {
+      const res = await fetch("/api/admin/workforce/playbook", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, content: editingRuleContent.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Could not update rule.");
+      setEditingRuleId(null);
+      setEditingRuleContent("");
+      await loadOverview(true);
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Could not update rule.",
+      });
+    }
+  }
+
+  async function handleDeletePlaybookRule(id: string) {
+    setBanner(null);
+    try {
+      const res = await fetch(
+        `/api/admin/workforce/playbook?id=${encodeURIComponent(id)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error("Could not delete rule.");
+      await loadOverview(true);
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Could not delete rule.",
+      });
+    }
+  }
+
+  async function handleRunRoutine(
+    kind: "chase_overdue" | "morning_standup" | "eod_report" | "weekly_review"
+  ) {
+    setSubmitting(true);
+    setBanner(null);
+    try {
+      const res = await fetch("/api/admin/workforce/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Routine failed.");
+      setBanner({
+        type: "ok",
+        text:
+          kind === "chase_overdue"
+            ? `Overdue check ran: ${json.result?.chasedTasks ?? 0} chased, ${json.result?.escalatedToOwner ?? 0} escalated.`
+            : `${kind.replace("_", " ")} report sent to Owner.`,
+      });
+      await loadOverview(true);
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Routine failed.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const pendingApprovals = (data?.approvals || []).filter((a) => a.status === "pending");
   const agentMap = Object.fromEntries((data?.agents || []).map((a) => [a.id, a]));
 
@@ -307,6 +483,15 @@ export function WorkforceConsoleClient() {
           </button>
           <button
             type="button"
+            disabled={submitting}
+            onClick={() => void handleRunRoutine("chase_overdue")}
+            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100 disabled:opacity-50"
+          >
+            <Clock className="h-3.5 w-3.5 text-amber-600" />
+            Check Overdue
+          </button>
+          <button
+            type="button"
             onClick={() => void loadOverview()}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-bold text-[#0B1F3A] hover:bg-slate-100"
           >
@@ -317,52 +502,227 @@ export function WorkforceConsoleClient() {
       </div>
 
       {showFeed && (
-        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-2">
-          <div>
-            <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
-              Live Owner Reports
-            </h2>
-            <div className="max-h-60 space-y-2 overflow-y-auto">
-              {(data?.ownerReports || []).length === 0 ? (
-                <p className="text-xs text-slate-500">No reports yet.</p>
-              ) : (
-                (data?.ownerReports || []).map((r) => (
-                  <div
-                    key={r.id}
-                    className={`rounded-xl border p-2.5 text-xs ${
-                      r.type === "ai_urgent_alert"
-                        ? "border-red-200 bg-red-50/70"
-                        : !r.read_at
-                          ? "border-amber-200 bg-amber-50/60"
-                          : "border-slate-100 bg-slate-50"
-                    }`}
-                  >
-                    <p className="font-bold text-[#0B1F3A]">{r.title}</p>
-                    {r.body && <p className="mt-0.5 text-slate-600">{r.body}</p>}
-                  </div>
-                ))
-              )}
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div>
+              <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                Live Owner Reports &amp; Feedback
+              </h2>
+              <div className="max-h-72 space-y-2 overflow-y-auto">
+                {(data?.aiReports || []).length > 0 ? (
+                  (data?.aiReports || []).map((r) => (
+                    <div
+                      key={r.id}
+                      className={`rounded-xl border p-2.5 text-xs ${
+                        r.urgency === "urgent"
+                          ? "border-red-200 bg-red-50/70"
+                          : r.urgency === "high"
+                            ? "border-amber-200 bg-amber-50/60"
+                            : "border-slate-100 bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-bold text-[#0B1F3A]">
+                          [{r.agentId.toUpperCase()}] {r.message}
+                        </p>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleReportFeedback(r.id, "up")}
+                            title="Thumbs up"
+                            className={`rounded-lg p-1 ${
+                              r.feedback === "up"
+                                ? "bg-emerald-600 text-white"
+                                : "bg-white text-slate-500 hover:text-emerald-700"
+                            }`}
+                          >
+                            <ThumbsUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleReportFeedback(r.id, "down")}
+                            title="Thumbs down"
+                            className={`rounded-lg p-1 ${
+                              r.feedback === "down"
+                                ? "bg-red-600 text-white"
+                                : "bg-white text-slate-500 hover:text-red-700"
+                            }`}
+                          >
+                            <ThumbsDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      {r.feedbackNote && (
+                        <p className="mt-1 rounded bg-white px-2 py-1 text-[11px] text-emerald-800">
+                          Playbook note: {r.feedbackNote}
+                        </p>
+                      )}
+                      <div className="mt-1.5 flex gap-1.5">
+                        <input
+                          type="text"
+                          value={feedbackNotes[r.id] || ""}
+                          onChange={(e) =>
+                            setFeedbackNotes((prev) => ({ ...prev, [r.id]: e.target.value }))
+                          }
+                          placeholder="Teach rule for next time..."
+                          className="h-7 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-[#0B1F3A]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleReportFeedback(r.id)}
+                          className="h-7 rounded-lg bg-[#0B1F3A] px-2.5 text-[10px] font-bold text-white"
+                        >
+                          Teach
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (data?.ownerReports || []).length === 0 ? (
+                  <p className="text-xs text-slate-500">No reports yet.</p>
+                ) : (
+                  (data?.ownerReports || []).map((r) => (
+                    <div
+                      key={r.id}
+                      className={`rounded-xl border p-2.5 text-xs ${
+                        r.type === "ai_urgent_alert"
+                          ? "border-red-200 bg-red-50/70"
+                          : !r.read_at
+                            ? "border-amber-200 bg-amber-50/60"
+                            : "border-slate-100 bg-slate-50"
+                      }`}
+                    >
+                      <p className="font-bold text-[#0B1F3A]">{r.title}</p>
+                      {r.body && <p className="mt-0.5 text-slate-600">{r.body}</p>}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div>
+              <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                Shared Team Board Notes
+              </h2>
+              <div className="max-h-72 space-y-2 overflow-y-auto">
+                {(data?.teamNotes || []).length === 0 ? (
+                  <p className="text-xs text-slate-500">No team notes yet.</p>
+                ) : (
+                  (data?.teamNotes || []).map((n) => (
+                    <div
+                      key={n.id}
+                      className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs"
+                    >
+                      <p className="font-bold text-[#0B1F3A]">
+                        {n.from_agent}
+                        {n.to_agent ? ` → ${n.to_agent}` : " → Team"}
+                        {n.ticket_number ? ` (${n.ticket_number})` : ""}
+                      </p>
+                      <p className="mt-0.5 text-slate-600">{n.note}</p>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
-          <div>
-            <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
-              Shared Team Board Notes
-            </h2>
-            <div className="max-h-60 space-y-2 overflow-y-auto">
-              {(data?.teamNotes || []).length === 0 ? (
-                <p className="text-xs text-slate-500">No team notes yet.</p>
+
+          {/* Owner Playbook Rules Editor */}
+          <div className="border-t border-slate-100 pt-3">
+            <div className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4 text-[#0B1F3A]" />
+              <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                Company Playbook Rules (Enforced Before Next Run)
+              </h3>
+            </div>
+            <form onSubmit={handleAddPlaybookRule} className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <select
+                value={pbAgentId}
+                onChange={(e) => setPbAgentId(e.target.value)}
+                className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-[#0B1F3A]"
+              >
+                {(data?.agents || []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.displayName}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={pbRuleText}
+                onChange={(e) => setPbRuleText(e.target.value)}
+                placeholder="Add a permanent rule (e.g. Never quote emergency callout fees without checking admin rates)"
+                className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-xs text-[#0B1F3A]"
+              />
+              <button
+                type="submit"
+                className="h-9 rounded-lg bg-[#0B1F3A] px-3.5 text-xs font-bold text-white"
+              >
+                Add Rule
+              </button>
+            </form>
+            <div className="mt-2 max-h-44 space-y-1.5 overflow-y-auto">
+              {(data?.playbookRules || []).length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  No custom playbook rules saved yet. Rate a report or add one above.
+                </p>
               ) : (
-                (data?.teamNotes || []).map((n) => (
+                (data?.playbookRules || []).map((rule) => (
                   <div
-                    key={n.id}
-                    className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs"
+                    key={rule.id}
+                    className="flex flex-col justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs sm:flex-row sm:items-center"
                   >
-                    <p className="font-bold text-[#0B1F3A]">
-                      {n.from_agent}
-                      {n.to_agent ? ` → ${n.to_agent}` : " → Team"}
-                      {n.ticket_number ? ` (${n.ticket_number})` : ""}
-                    </p>
-                    <p className="mt-0.5 text-slate-600">{n.note}</p>
+                    {editingRuleId === rule.id ? (
+                      <div className="flex flex-1 gap-2">
+                        <input
+                          type="text"
+                          value={editingRuleContent}
+                          onChange={(e) => setEditingRuleContent(e.target.value)}
+                          className="h-7 flex-1 rounded border border-slate-300 bg-white px-2 text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleSavePlaybookEdit(rule.id)}
+                          className="rounded bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingRuleId(null)}
+                          className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <span className="mr-2 rounded bg-[#0B1F3A]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#0B1F3A]">
+                            {rule.agentId}
+                          </span>
+                          <span className="text-slate-700">{rule.content}</span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingRuleId(rule.id);
+                              setEditingRuleContent(rule.content);
+                            }}
+                            className="rounded p-1 text-slate-500 hover:bg-white hover:text-[#0B1F3A]"
+                            title="Edit rule"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeletePlaybookRule(rule.id)}
+                            className="rounded p-1 text-slate-500 hover:bg-white hover:text-red-600"
+                            title="Delete rule"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))
               )}
@@ -393,6 +753,7 @@ export function WorkforceConsoleClient() {
             id: "approvals" as const,
             label: `Approvals (${pendingApprovals.length} pending)`,
           },
+          { id: "performance" as const, label: "Team Performance" },
           { id: "usage" as const, label: "Models & Audit" },
         ].map((item) => (
           <button
@@ -642,6 +1003,89 @@ export function WorkforceConsoleClient() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {tab === "performance" && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-[#0B1F3A]" />
+                <h2 className="text-sm font-extrabold text-[#0B1F3A]">
+                  Team Performance Scorecard
+                </h2>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void handleRunRoutine("morning_standup")}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-[#0B1F3A] hover:bg-slate-100"
+                >
+                  Run Standup
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void handleRunRoutine("eod_report")}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-[#0B1F3A] hover:bg-slate-100"
+                >
+                  Run EOD
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void handleRunRoutine("weekly_review")}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-[#0B1F3A] hover:bg-slate-100"
+                >
+                  Run Weekly Review
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-[11px] font-extrabold uppercase text-slate-500">
+                    <th className="py-2 pr-3">AI Member</th>
+                    <th className="px-2 py-2">Tasks Done</th>
+                    <th className="px-2 py-2">On Time %</th>
+                    <th className="px-2 py-2">QA Rework %</th>
+                    <th className="px-2 py-2">Owner 👍 / 👎</th>
+                    <th className="px-2 py-2">Open</th>
+                    <th className="pl-2 py-2">Overdue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(data?.scorecards || []).map((row) => (
+                    <tr key={row.agentId} className="text-slate-700">
+                      <td className="py-2.5 pr-3 font-bold text-[#0B1F3A]">{row.displayName}</td>
+                      <td className="px-2 py-2.5 font-semibold">{row.tasksDone}</td>
+                      <td className="px-2 py-2.5">{row.onTimePct}%</td>
+                      <td className="px-2 py-2.5">{row.qaReworkRatePct}%</td>
+                      <td className="px-2 py-2.5">
+                        <span className="font-semibold text-emerald-700">{row.thumbsUp}</span>
+                        {" / "}
+                        <span className="font-semibold text-red-600">{row.thumbsDown}</span>
+                      </td>
+                      <td className="px-2 py-2.5">{row.openCount}</td>
+                      <td className="pl-2 py-2.5">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            row.overdueCount > 0
+                              ? "bg-red-100 text-red-700"
+                              : "bg-emerald-100 text-emerald-800"
+                          }`}
+                        >
+                          {row.overdueCount}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
