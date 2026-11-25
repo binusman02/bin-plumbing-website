@@ -4,6 +4,8 @@ import { defaultWorkforceOrchestrator } from "@/lib/ai-workforce/orchestrator";
 import type { AgentId } from "@/lib/ai-workforce/types";
 import { requireAdminUser } from "@/lib/security";
 
+export const maxDuration = 60;
+
 const KICKOFF_BRIEFS: Array<{
   agentId: AgentId;
   title: string;
@@ -31,7 +33,7 @@ const KICKOFF_BRIEFS: Array<{
     agentId: "research_ai",
     title: "Faruk: Kano Plumbing Market & SEO Baseline",
     instruction:
-      "Prepare an initial Kano plumbing market & SEO opportunity brief separating verified FlowGuard coverage facts from assumptions we should test next.",
+      "Use research_web_search (if configured) or reference https://flowguard-ng.vercel.app with today's date (2026-11-25) to prepare an initial Kano plumbing market & SEO opportunity brief separating verified facts from assumptions we should test next.",
   },
   {
     agentId: "engineering_ai",
@@ -56,7 +58,7 @@ export async function POST() {
         title: brief.title,
         instruction: brief.instruction,
         targetAgentId: brief.agentId,
-        priority: "high",
+        priority: "normal",
       })
     )
   );
@@ -64,7 +66,9 @@ export async function POST() {
   return NextResponse.json({
     ok: true,
     seededDocs,
-    tasksCompleted: tasks.filter((t) => t.status === "completed").length,
+    tasksCompleted: tasks.filter(
+      (t) => t.status === "closed" || t.status === "completed" || t.status === "reported"
+    ).length,
     tasks,
   });
 }

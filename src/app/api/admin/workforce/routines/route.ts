@@ -7,6 +7,8 @@ import {
 } from "@/lib/ai-workforce/routines";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 
+export const maxDuration = 60;
+
 function isAuthorizedCron(request: Request): boolean {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;

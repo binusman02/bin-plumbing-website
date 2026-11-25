@@ -3,6 +3,8 @@ import { defaultWorkforceOrchestrator } from "@/lib/ai-workforce/orchestrator";
 import type { AgentId } from "@/lib/ai-workforce/types";
 import { requireAdminUser } from "@/lib/security";
 
+export const maxDuration = 60;
+
 export async function GET() {
   const admin = await requireAdminUser();
   if (!admin) {
