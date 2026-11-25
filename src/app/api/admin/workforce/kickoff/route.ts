@@ -43,16 +43,30 @@ const KICKOFF_BRIEFS: Array<{
   },
 ];
 
-export async function POST() {
+export async function POST(request: Request) {
   const admin = await requireAdminUser();
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const seededDocs = await seedFlowGuardKnowledgeToDb().catch(() => 0);
+  const body = (await request.json().catch(() => ({}))) as {
+    agentId?: string;
+    skipSeed?: boolean;
+  };
+  const requestedAgentId = typeof body?.agentId === "string" ? body.agentId.trim() : "";
+
+  const targetBriefs = requestedAgentId
+    ? KICKOFF_BRIEFS.filter((b) => b.agentId === requestedAgentId)
+    : KICKOFF_BRIEFS;
+
+  if (requestedAgentId && targetBriefs.length === 0) {
+    return NextResponse.json({ error: "Unknown kickoff agentId." }, { status: 400 });
+  }
+
+  const seededDocs = body?.skipSeed ? 0 : await seedFlowGuardKnowledgeToDb().catch(() => 0);
 
   const tasks = await Promise.all(
-    KICKOFF_BRIEFS.map((brief) =>
+    targetBriefs.map((brief) =>
       defaultWorkforceOrchestrator.dispatchInstruction({
         requesterId: admin.userId,
         title: brief.title,

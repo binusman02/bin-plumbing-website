@@ -206,6 +206,18 @@ export function WorkforceConsoleClient() {
     }
   }
 
+  async function readJsonSafe(res: Response): Promise<Record<string, unknown>> {
+    const raw = await res.text();
+    if (!raw.trim()) return {};
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {
+        error: `Server returned non-JSON response (HTTP ${res.status}). Check Tasks tab & Reports bell — background work may have already saved.`,
+      };
+    }
+  }
+
   async function handleDispatch(e: React.FormEvent) {
     e.preventDefault();
     if (!instruction.trim()) return;
@@ -220,7 +232,10 @@ export function WorkforceConsoleClient() {
           ...(targetAgent ? { targetAgentId: targetAgent } : {}),
         }),
       });
-      const json = await res.json();
+      const json = (await readJsonSafe(res)) as {
+        error?: string;
+        task?: { status?: string; assignedAgentId?: string; errorMessage?: string };
+      };
       if (!res.ok) throw new Error(json?.error || "Dispatch failed.");
       setInstruction("");
       const taskFailed = json.task?.status === "failed";
@@ -290,18 +305,55 @@ export function WorkforceConsoleClient() {
   }
 
   async function handleKickoffAll() {
+    const order = [
+      { id: "operations_manager", name: "Sadiq" },
+      { id: "sales_ai", name: "Amina" },
+      { id: "customer_support_ai", name: "Zainab" },
+      { id: "research_ai", name: "Faruk" },
+      { id: "engineering_ai", name: "Bashir" },
+    ];
     setSubmitting(true);
-    setBanner(null);
+    setBanner({
+      type: "ok",
+      text: "Starting all 5 agents one by one so none time out...",
+    });
+    let completed = 0;
+    const failures: string[] = [];
     try {
-      const res = await fetch("/api/admin/workforce/kickoff", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Kickoff failed.");
-      setBanner({
-        type: "ok",
-        text: `All 5 agents started work (${json.tasksCompleted}/5 completed). Check the Tasks tab for their baseline reports.`,
-      });
+      for (let i = 0; i < order.length; i += 1) {
+        const agent = order[i];
+        setBanner({
+          type: "ok",
+          text: `Running ${i + 1}/5: ${agent.name}... (${completed} completed so far)`,
+        });
+        const res = await fetch("/api/admin/workforce/kickoff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentId: agent.id, skipSeed: i > 0 }),
+        });
+        const json = (await readJsonSafe(res)) as {
+          error?: string;
+          tasksCompleted?: number;
+        };
+        if (!res.ok) {
+          failures.push(`${agent.name}: ${json?.error || `HTTP ${res.status}`}`);
+        } else {
+          completed += Number(json.tasksCompleted ?? 0);
+        }
+        await loadOverview(true);
+      }
+      setBanner(
+        failures.length === 0
+          ? {
+              type: "ok",
+              text: `All 5 agents started work (${completed}/5 completed). Check the Tasks tab and Reports bell.`,
+            }
+          : {
+              type: "err",
+              text: `${completed}/5 completed. Issues: ${failures.join(" | ")}`,
+            }
+      );
       setTab("tasks");
-      await loadOverview();
     } catch (err) {
       setBanner({
         type: "err",
