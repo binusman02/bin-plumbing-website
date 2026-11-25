@@ -18,13 +18,17 @@ ALTER TABLE public.ai_tasks
   ADD COLUMN IF NOT EXISTS chased_count INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS lessons TEXT[] NOT NULL DEFAULT '{}'::text[];
 
+UPDATE public.ai_tasks
+SET owner_agent = assigned_agent_id
+WHERE owner_agent IS NULL;
+
 ALTER TABLE public.ai_tasks DROP CONSTRAINT IF EXISTS ai_tasks_status_check;
 ALTER TABLE public.ai_tasks ADD CONSTRAINT ai_tasks_status_check
   CHECK (status IN (
     'queued', 'accepted', 'in_progress', 'running',
     'submitted', 'qa_review', 'approved_by_ops', 'rework',
-    'reported', 'closed', 'waiting_approval', 'blocked',
-    'failed', 'cancelled'
+    'reported', 'closed', 'completed', 'waiting_approval',
+    'blocked', 'failed', 'cancelled'
   ));
 
 ALTER TABLE public.ai_tasks DROP CONSTRAINT IF EXISTS ai_tasks_qa_status_check;
