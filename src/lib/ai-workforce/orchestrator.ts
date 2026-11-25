@@ -531,7 +531,7 @@ export class WorkforceOrchestrator {
 
     // Step 4: Claim check + SOP checklist + QA Gate with max 2 reworks
     for (let qaLoop = 0; qaLoop < 3; qaLoop += 1) {
-      let executedToolNames = evidence
+      const executedToolNames = evidence
         .filter((e) => e.startsWith("tool:"))
         .map((e) => e.slice(5));
 
