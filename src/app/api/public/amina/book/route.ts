@@ -6,8 +6,10 @@ import {
 } from "@/lib/ai-workforce/public-amina";
 import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
 import { createUniversalServiceRequest } from "@/lib/marketplace";
+import { isValidCoordinate } from "@/lib/live-location";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { checkRateLimit } from "@/lib/security";
+import { getServiceSupabase } from "@/lib/supabase/admin";
 
 export const maxDuration = 60;
 
@@ -50,6 +52,9 @@ export async function POST(request: Request) {
     problemType?: string;
     issueSummary?: string;
     urgency?: string;
+    customerLat?: number;
+    customerLng?: number;
+    customerLocationSource?: string;
   };
 
   const fullName = String(body?.fullName || "").trim();
@@ -95,6 +100,41 @@ export async function POST(request: Request) {
     createdByRole: "customer",
   });
 
+  const hasValidGps =
+    typeof body?.customerLat === "number" &&
+    typeof body?.customerLng === "number" &&
+    isValidCoordinate(body.customerLat, body.customerLng);
+
+  if (hasValidGps) {
+    const source =
+      body?.customerLocationSource === "gps" || body?.customerLocationSource === "map_pin"
+        ? body.customerLocationSource
+        : "gps";
+    try {
+      const supabase = getServiceSupabase();
+      const { error: gpsErr } = await supabase
+        .from("service_requests")
+        .update({
+          customer_lat: body.customerLat,
+          customer_lng: body.customerLng,
+          customer_location_source: source,
+          customer_location_updated_at: new Date().toISOString(),
+        })
+        .eq("id", created.id);
+      if (gpsErr) {
+        await supabase
+          .from("service_requests")
+          .update({
+            customer_lat: body.customerLat,
+            customer_lng: body.customerLng,
+          })
+          .eq("id", created.id);
+      }
+    } catch {
+      // Non-fatal if live-location columns are not migrated yet
+    }
+  }
+
   await sendBookingConfirmationEmail({
     email,
     customerName: fullName,
@@ -113,7 +153,7 @@ export async function POST(request: Request) {
     lastTopic: `Booked ${problemType} in ${cityOrLga}`,
   });
 
-  const confirmMsg = `I've booked your request! Your ticket number is ${created.ticket_number}. Our coordinator is reviewing approved technicians in ${cityOrLga}, and you'll get an update by email and right here in this chat as soon as a plumber is assigned.`;
+  const confirmMsg = `I've booked your request! Your ticket number is ${created.ticket_number}.${hasValidGps ? " Your GPS location is synced so your assigned plumber can navigate straight to you." : ""} You'll get an update by email and here in chat as soon as an approved plumber is assigned, and you can track your plumber's live GPS location online at /tracking?ticket=${created.ticket_number} once they start their trip.`;
   const confirmRecord = await defaultPublicAminaStore.appendMessage({
     sessionId: session.id,
     role: "assistant",

@@ -106,6 +106,32 @@ META_JSON: {"topicSummary":"Visitor asked about Tarauni coverage","shouldReportT
 
     assert.doesNotMatch(turn.reply, /₦12,000|fixed price|assigned plumber/i);
     assert.match(turn.reply, /inspect on-site first/i);
+    assert.doesNotMatch(turn.reply, /drafted \/ waiting approval \/ not done/i);
+  });
+
+  await t.test("3b. Rewrites 'I sent' naturally without leaking internal SOP markers to customers", async () => {
+    const store = new InMemoryPublicAminaStore();
+    const teamStore = new InMemoryTeamBoardAndMemoryStore();
+    const reportStore = new InMemoryReportStore();
+
+    const turn = await handlePublicAminaTurn({
+      customerMessage: "How do I track my ticket?",
+      store,
+      teamStore,
+      reportStore,
+      notifyFn: (async () => ({ id: "n-track" })) as never,
+      modelRunner: async () => ({
+        ok: true,
+        text: "You can follow your ticket straight through the tracking link I sent you.",
+        provider: "openai_compatible",
+        modelId: "xiaomi/mimo-v2.6-flash",
+        inputTokens: 80,
+        outputTokens: 25,
+      }),
+    });
+
+    assert.doesNotMatch(turn.reply, /drafted \/ waiting approval \/ not done/i);
+    assert.doesNotMatch(turn.reply, /\bi sent\b/i);
   });
 
   await t.test("4. Escalates urgent flooding visitor immediately to Owner", async () => {

@@ -6,8 +6,10 @@ import { usePathname } from "next/navigation";
 import {
   CheckCircle2,
   ClipboardList,
+  Crosshair,
   ExternalLink,
   Loader2,
+  MapPin,
   Mic,
   Send,
   Square,
@@ -105,6 +107,9 @@ export default function AminaConciergeWidget({
   );
   const [issueSummary, setIssueSummary] = useState("");
   const [urgency, setUrgency] = useState<"standard" | "urgent">("standard");
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locatingGps, setLocatingGps] = useState(false);
+  const [gpsStatusMsg, setGpsStatusMsg] = useState<string | null>(null);
 
   const listEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -398,6 +403,31 @@ export default function AminaConciergeWidget({
     }
   }
 
+  function handleCaptureGps() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGpsStatusMsg("GPS is unavailable on this browser. Your street address will be used.");
+      return;
+    }
+    setLocatingGps(true);
+    setGpsStatusMsg(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocatingGps(false);
+        setGpsStatusMsg("GPS pinned — your plumber will see your exact location on the map.");
+      },
+      (err) => {
+        setLocatingGps(false);
+        setGpsStatusMsg(
+          err.code === 1
+            ? "Location permission denied. You can still book using your street address."
+            : "Could not lock GPS signal right now. Try again or continue with your address."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  }
+
   async function handleBookSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (bookingSubmitting) return;
@@ -418,6 +448,8 @@ export default function AminaConciergeWidget({
           problemType,
           issueSummary,
           urgency,
+          customerLocationSource: gpsCoords ? "gps" : "address_only",
+          ...(gpsCoords ? { customerLat: gpsCoords.lat, customerLng: gpsCoords.lng } : {}),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as {
@@ -729,6 +761,56 @@ export default function AminaConciergeWidget({
                   placeholder="House number / street address"
                   className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-xs text-[#0B1F3A]"
                 />
+                <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[#0B1F3A]">
+                      <MapPin className="h-3.5 w-3.5 text-[#F5B301]" />
+                      {gpsCoords
+                        ? `GPS pinned (${gpsCoords.lat.toFixed(4)}, ${gpsCoords.lng.toFixed(4)})`
+                        : "Share GPS for plumber directions"}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleCaptureGps}
+                        disabled={locatingGps}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-[#0B1F3A]/20 bg-white px-2 text-[11px] font-bold text-[#0B1F3A] hover:bg-slate-100 disabled:opacity-50"
+                      >
+                        {locatingGps ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Crosshair className="h-3 w-3" />
+                        )}
+                        {locatingGps
+                          ? "Pinning..."
+                          : gpsCoords
+                            ? "Re-pin GPS"
+                            : "Pin My GPS"}
+                      </button>
+                      {gpsCoords && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGpsCoords(null);
+                            setGpsStatusMsg(null);
+                          }}
+                          className="text-[10px] font-semibold text-slate-500 hover:text-red-600"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {gpsStatusMsg && (
+                    <p
+                      className={`mt-1 text-[10px] font-medium ${
+                        gpsCoords ? "text-emerald-700" : "text-amber-700"
+                      }`}
+                    >
+                      {gpsStatusMsg}
+                    </p>
+                  )}
+                </div>
                 <textarea
                   required
                   rows={2}

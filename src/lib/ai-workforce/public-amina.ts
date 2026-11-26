@@ -334,8 +334,8 @@ export function buildKnowledgeFallbackReply(userMessage: string): string {
     return "We don't give fixed prices before seeing the job. An approved FlowGuard technician inspects on-site first and sends you an itemised quotation (materials, labour, and transport) to approve before any repair starts.";
   }
 
-  if (/\b(track|status|reference|ticket|where is)\b/.test(lower)) {
-    return "You can follow live progress anytime on the Track Request page using your ticket reference number and the phone number you booked with. If you haven't booked yet, tap Book above and I'll set up a request for you.";
+  if (/\b(track|status|reference|ticket|where is|live location)\b/.test(lower)) {
+    return "You can track your ticket online anytime on our Tracking page (/tracking) using your ticket number and phone number. Once our coordinator assigns an approved plumber and they start their trip to your house, you'll be able to see their live GPS location on the map.";
   }
 
   if (/\b(area|location|cover|coverage|where|kano|lga|nassarawa|tarauni|bompai|fagge|dala|gwale|ungogo|kumbotso|sabon gari)\b/.test(lower)) {
@@ -521,8 +521,10 @@ export async function handlePublicAminaTurn(params: {
     "- NEVER quote fixed Naira/dollar prices or promise discounts. Explain clearly that an approved technician inspects on-site first and gives a transparent itemised quote before work starts.",
     "- If the customer asks about FlowGuard, our services, Kano coverage, pricing policy, or how booking/tracking works, answer directly and clearly using the approved company info.",
     "- If the customer mentions flooding, burst pipes, or water near electricity, advise shutting off the main stopcock valve and switching off nearby sockets right away, then offer to book an urgent plumber immediately.",
-    "- If the customer wants to book a plumber, warmly ask for any missing details (Full Name, Phone, Email, Kano Area/LGA, Address, and Issue) or set readyToBook=true so the booking card opens for them.",
-    "- NEVER claim you already assigned a plumber unless the conversation already includes an assignment update. Booking creates a ticket first, then our coordinator assigns an approved plumber and notifies the customer.",
+    "- If the customer wants to book a plumber, warmly ask for any missing details (Full Name, Phone, Email, Kano Area/LGA, Address, and Issue) or set readyToBook=true so the booking card opens for them. Mention they can tap 'Pin My GPS Location' in the booking card so the plumber gets exact directions to their door.",
+    "- Explain live tracking clearly when asked: customers don't need a separate app or Play Store download — once a plumber is assigned and starts their trip, they can watch the plumber's live GPS location and progress online at /tracking using their ticket number and phone number.",
+    "- NEVER tell customers to download an app from the Play Store or use internal phrases like 'waiting approval'.",
+    "- NEVER say 'I have sent' or claim you already assigned a plumber or verified a payment. Say 'you can follow your ticket online' or 'we'll email you and update you here as soon as a plumber is assigned'.",
     "- NEVER invent ticket numbers or pretend you can access private records.",
     `APPROVED COMPANY INFO:\n${publicKnowledge}`,
     playbookLines ? `OWNER PLAYBOOK RULES:\n${playbookLines}` : "",
@@ -557,10 +559,7 @@ export async function handlePublicAminaTurn(params: {
       : buildKnowledgeFallbackReply(cleanUserMsg);
 
   const parsed = parseAminaConciergeOutput(rawText);
-  let safeReply = verifyToolClaimsInText({
-    text: parsed.reply,
-    executedTools: [],
-  }).text;
+  let safeReply = parsed.reply;
 
   const sopCheck = runRoleSopChecklist({
     agentId: "sales_ai",
@@ -570,6 +569,25 @@ export async function handlePublicAminaTurn(params: {
   if (!sopCheck.passed) {
     safeReply =
       "We always send an approved FlowGuard technician to inspect on-site first and give you a clear itemised quote before work begins. Share your name, phone, email, Kano area, and address whenever you'd like me to book an inspection.";
+  }
+
+  const claimResult = verifyToolClaimsInText({
+    text: safeReply,
+    executedTools: [],
+  });
+  if (claimResult.rewritten) {
+    const onlySentClaim =
+      claimResult.flaggedClaims.length === 1 && claimResult.flaggedClaims[0] === "sent";
+    if (onlySentClaim) {
+      safeReply = safeReply
+        .replace(/\bi\s+(?:have\s+)?sent\s+(?:you\s+)?/gi, "we share ")
+        .replace(/\bwe\s+emailed\s+/gi, "we notify by email ")
+        .trim();
+    } else {
+      safeReply = session.ticketNumber
+        ? `Your ticket (${session.ticketNumber}) is logged cleanly. As soon as our coordinator assigns an approved plumber, we'll notify you by email and here in chat so you can track your plumber's live GPS location online at /tracking?ticket=${session.ticketNumber}.`
+        : "Your request can be booked right here in chat or on our Request page. Once a ticket is logged and our coordinator assigns an approved plumber, the technician will inspect on-site first and you can watch their live GPS location online as they head to you.";
+    }
   }
 
   const assistantMsgRecord = await store.appendMessage({
