@@ -29,8 +29,15 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function CustomerPortalPage() {
+export default async function CustomerPortalPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ mode?: string }>;
+}) {
   await connection();
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const initialAuthMode =
+    resolvedSearchParams?.mode === "register" ? "register" : "signin";
   const [settings, serviceCategories] = await Promise.all([
     getMarketplaceSettings(),
     getServiceCategories(true),
@@ -212,6 +219,7 @@ export default async function CustomerPortalPage() {
         bankAccountName: settings.bank_account_name,
         bankAccountNumber: settings.bank_account_number,
       }}
+      initialAuthMode={initialAuthMode}
     />
   );
 }

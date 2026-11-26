@@ -87,6 +87,7 @@ interface CustomerPortalClientProps {
   activeLocations?: string[];
   serviceCategories?: ServiceCategorySetting[];
   bankDetails?: BankDetailsInfo;
+  initialAuthMode?: "signin" | "register" | "forgot";
 }
 
 type CustomerTab = "home" | "requests" | "messages" | "payments" | "profile";
@@ -103,6 +104,7 @@ export default function CustomerPortalClient({
   activeLocations = [],
   serviceCategories = [],
   bankDetails,
+  initialAuthMode = "signin",
 }: CustomerPortalClientProps) {
   const router = useRouter();
   const lastSyncRef = useRef(0);
@@ -636,7 +638,12 @@ export default function CustomerPortalClient({
 
   // Unauthenticated View -> Shared AuthLayout
   if (!authenticatedCustomerId || !currentCustomer) {
-    return <CustomerAuthView activeLocations={activeLocations} />;
+    return (
+      <CustomerAuthView
+        activeLocations={activeLocations}
+        initialMode={initialAuthMode}
+      />
+    );
   }
 
   // Authenticated Dashboard -> PortalShell

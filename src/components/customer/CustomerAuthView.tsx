@@ -36,10 +36,14 @@ function isValidNigerianPhone(phone: string): boolean {
 
 interface CustomerAuthViewProps {
   activeLocations?: string[];
+  initialMode?: "signin" | "register" | "forgot";
 }
 
-export function CustomerAuthView({ activeLocations = [] }: CustomerAuthViewProps) {
-  const [authMode, setAuthMode] = useState<"signin" | "register" | "forgot">("signin");
+export function CustomerAuthView({
+  activeLocations = [],
+  initialMode = "signin",
+}: CustomerAuthViewProps) {
+  const [authMode, setAuthMode] = useState<"signin" | "register" | "forgot">(initialMode);
   const [identifierInput, setIdentifierInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);

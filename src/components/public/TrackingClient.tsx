@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
   CheckCircle2,
@@ -30,6 +30,7 @@ import type {
 } from "@/lib/marketplace";
 
 export default function TrackingClient() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialTicket = searchParams.get("ticket") || "";
   const initialPhone = searchParams.get("phone") || "";
@@ -94,7 +95,13 @@ export default function TrackingClient() {
         // Refresh tracking data
         await fetchTracking(request.ticket_number, phoneInput);
       } else {
-        alert(res.error || "Failed to update quotation decision.");
+        const msg = res.error || "Failed to update quotation decision.";
+        alert(msg);
+        if (/authentication required|sign in|log in|unauthorized/i.test(msg)) {
+          router.push(
+            `/customer?mode=register&ticket=${encodeURIComponent(request.ticket_number)}`
+          );
+        }
       }
     } catch (err: any) {
       alert(err.message || "Error submitting decision.");
@@ -121,7 +128,13 @@ export default function TrackingClient() {
         setNewMessage("");
         await fetchTracking(request.ticket_number, phoneInput);
       } else {
-        alert(res.error || "Failed to post message.");
+        const msg = res.error || "Failed to post message.";
+        alert(msg);
+        if (/authentication required|sign in|log in|unauthorized/i.test(msg)) {
+          router.push(
+            `/customer?mode=register&ticket=${encodeURIComponent(request.ticket_number)}`
+          );
+        }
       }
     } catch (err: any) {
       alert(err.message || "Error sending message.");
