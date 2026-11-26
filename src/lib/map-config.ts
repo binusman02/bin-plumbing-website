@@ -43,6 +43,23 @@ function envNumber(v: string | undefined): number | null {
 }
 
 /**
+ * Resolves a browser/mobile-safe Mapbox public token (`pk.*`).
+ * Strictly rejects secret `sk.*` server tokens so they never leave the server.
+ */
+export function resolvePublicMapboxToken(
+  env: Record<string, string | undefined> = process.env
+): string {
+  const candidates = [
+    env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?.trim(),
+    env.MAPBOX_ACCESS_TOKEN?.trim(),
+    env.MAPBOX_PUBLIC_TOKEN?.trim(),
+    env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim(),
+    env.MAPBOX_SERVER_TOKEN?.trim(),
+  ];
+  return candidates.find((t) => Boolean(t && t.startsWith("pk."))) || "";
+}
+
+/**
  * Centre of the service area. Used ONLY when no better coordinate (job, property
  * or the viewer's real GPS fix) exists, and always labelled as a default view.
  */

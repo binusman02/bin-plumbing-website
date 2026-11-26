@@ -392,7 +392,9 @@ export async function runWithFreeFirstModel(
     };
   }
 
-  const timeoutMs = req.timeoutMs ?? 22000;
+  const timeoutMs = req.timeoutMs ?? 15000;
+  const startedAt = Date.now();
+  const maxTotalWaitMs = Math.max(timeoutMs * 2, 36000);
   const exec = options.routeExecutor ?? executeSingleRoute;
   let lastError: ModelExecutionResult = {
     ok: false,
@@ -401,9 +403,12 @@ export async function runWithFreeFirstModel(
   };
 
   for (const entry of chain) {
+    if (Date.now() - startedAt >= maxTotalWaitMs) {
+      break;
+    }
     let res = await exec(req, entry.route, entry.apiKey, timeoutMs);
-    if (!res.ok && isTransientModelError(res)) {
-      // Retry once on transient timeout or 5xx error
+    if (!res.ok && isTransientModelError(res) && Date.now() - startedAt < 10000) {
+      // Retry quickly once on transient fast failures; move directly to fallback after slow hangs
       res = await exec(req, entry.route, entry.apiKey, timeoutMs);
     }
     if (res.ok) {

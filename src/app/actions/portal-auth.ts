@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getVerifiedAppRole } from "@/lib/auth-role";
 import { checkRateLimit } from "@/lib/security";
+import { SITE_URL } from "@/lib/seo";
 import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { findCustomerByIdentifier, findPlumberByIdentifier } from "@/lib/auth-lookup";
 import {
@@ -313,10 +314,7 @@ export async function registerCustomerWithPasswordAction(input: {
     const authEmail =
       email.toLowerCase() || `c_${normalizedDigits}@customer.binplumbing.local`;
 
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      process.env.NEXT_PUBLIC_SITE_UR ||
-      "https://flowguard-ng.vercel.app";
+    const siteUrl = SITE_URL;
     const supabase = await createClient();
     const { data, error } = await supabase.auth.signUp({
       email: authEmail,
@@ -461,7 +459,7 @@ export async function resendCustomerConfirmationAction(email: string) {
     if (!cleanEmail || !cleanEmail.includes("@")) {
       return { success: false, error: "Please enter a valid email address." };
     }
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const siteUrl = SITE_URL;
     const supabase = await createClient();
     const { error } = await supabase.auth.resend({
       type: "signup",
@@ -533,7 +531,7 @@ export async function registerPlumberAccountAction(input: {
       };
     }
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const siteUrl = SITE_URL;
     const supabase = await createClient();
     const { data, error } = await supabase.auth.signUp({
       email,

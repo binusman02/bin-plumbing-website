@@ -10,7 +10,7 @@ import {
   isAuthorizedCronRequest,
   resolveRoutineKind,
 } from "../src/lib/ai-workforce/routine-runner";
-import { MAP_CONFIG } from "../src/lib/map-config";
+import { MAP_CONFIG, resolvePublicMapboxToken } from "../src/lib/map-config";
 import {
   mergePresenceSnapshots,
   resolveThreadPresenceStatus,
@@ -211,5 +211,23 @@ describe("System consistency: maps, Tavily key fallback, and scheduled workforce
     assert.equal(cleared.adminOnline, false);
     assert.equal(cleared.plumberOnline, false);
     assert.deepEqual(cleared.onlinePlumberIds, []);
+  });
+
+  it("exposes pk.* Mapbox tokens safely for mobile/client while blocking sk.* secret tokens", () => {
+    assert.equal(
+      resolvePublicMapboxToken({ MAPBOX_SERVER_TOKEN: "sk.secret-server-token" }),
+      ""
+    );
+    assert.equal(
+      resolvePublicMapboxToken({ MAPBOX_SERVER_TOKEN: "pk.public-token-from-server-var" }),
+      "pk.public-token-from-server-var"
+    );
+    assert.equal(
+      resolvePublicMapboxToken({
+        MAPBOX_ACCESS_TOKEN: "pk.primary-public-token",
+        MAPBOX_SERVER_TOKEN: "sk.secret-server-token",
+      }),
+      "pk.primary-public-token"
+    );
   });
 });
