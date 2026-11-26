@@ -91,7 +91,8 @@ const TOOL_LABELS: Record<string, string> = {
   research_save_report: "Saved Research Brief",
   eng_read_repo: "Checked System Files",
   eng_run_checks: "Ran System Health Checks",
-  eng_prepare_pr: "Prepared Code Fix Proposal",
+  eng_prepare_pr: "Prepared Code Fix Draft PR",
+  eng_repair_system_state: "Run Safe System Repair",
   workforce_create_task: "Assigned Follow-Up Work",
   workforce_read_tasks: "Checked Team Task Board",
   workforce_read_agent_status: "Checked Team Workload",
@@ -160,6 +161,13 @@ function humanEventLabel(raw: string): string {
   return EVENT_LABELS[raw] || humanStatusLabel(raw);
 }
 
+const REPAIR_TYPE_LABELS: Record<string, string> = {
+  reconcile_workforce: "Sync Stuck Tasks & Approvals",
+  relink_guest_bookings: "Link Guest Bookings to Customer Accounts",
+  clear_noise_incidents: "Clear Harmless Redirect Alerts",
+  sync_stale_plumber_locations: "Refresh Live Plumber Location Sharing",
+};
+
 const FIELD_LABELS: Record<string, string> = {
   ticketNumber: "Ticket Number",
   plumberNameOrId: "Plumber Selected",
@@ -173,6 +181,12 @@ const FIELD_LABELS: Record<string, string> = {
   internalNote: "Internal Note",
   amount: "Amount",
   complaintIdOrTicket: "Complaint / Ticket",
+  repairType: "Repair Action",
+  summary: "What This Fixes",
+  branchName: "Fix Branch",
+  draftPrUrl: "Draft Review Link",
+  committedFiles: "Files Updated",
+  fileChanges: "Proposed Code Files",
 };
 
 function humanPayloadRows(payload: Record<string, unknown>): Array<{ label: string; value: string }> {
@@ -182,12 +196,25 @@ function humanPayloadRows(payload: Record<string, unknown>): Array<{ label: stri
       const label =
         FIELD_LABELS[key] ||
         key.replace(/([A-Z])/g, " $1").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
-      const value =
-        typeof val === "object"
-          ? JSON.stringify(val)
-          : key === "decision"
-            ? humanStatusLabel(String(val))
-            : String(val);
+      let value: string;
+      if (key === "repairType") {
+        value = REPAIR_TYPE_LABELS[String(val)] || humanStatusLabel(String(val));
+      } else if (key === "fileChanges" && Array.isArray(val)) {
+        value = `${val.length} file(s): ${val
+          .map((f) =>
+            f && typeof f === "object" && "path" in f ? String((f as Record<string, unknown>).path) : ""
+          )
+          .filter(Boolean)
+          .join(", ")}`;
+      } else if (Array.isArray(val)) {
+        value = val.map(String).join(", ");
+      } else if (typeof val === "object") {
+        value = JSON.stringify(val);
+      } else if (key === "decision") {
+        value = humanStatusLabel(String(val));
+      } else {
+        value = String(val);
+      }
       return { label, value };
     });
 }
@@ -453,6 +480,7 @@ export function WorkforceConsoleClient() {
   const [noteDetailError, setNoteDetailError] = useState<string | null>(null);
   const [approvalDecisionNote, setApprovalDecisionNote] = useState("");
   const [decidingApprovalId, setDecidingApprovalId] = useState<string | null>(null);
+  const [requestingFix, setRequestingFix] = useState(false);
 
   const loadOverview = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -621,6 +649,41 @@ export function WorkforceConsoleClient() {
       });
     } finally {
       setDecidingApprovalId(null);
+    }
+  }
+
+  async function askBashirToPrepareFix(detail: TeamNoteDetailPayload) {
+    setRequestingFix(true);
+    setBanner(null);
+    try {
+      const issueText = cleanEventSummary(detail.task?.deliverable || detail.note.note || "");
+      const res = await fetch("/api/admin/workforce/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetAgentId: "engineering_ai",
+          title: `Prepare Fix: ${(detail.task?.title || "System Issue").slice(0, 55)}`,
+          priority: "high",
+          instruction: `Inspect this reported issue and help fix it cleanly in plain English: "${issueText}". If a safe operational repair applies (reconcile_workforce, relink_guest_bookings, clear_noise_incidents, sync_stale_plumber_locations), queue eng_repair_system_state for my approval. If code needs updating, read the relevant file with eng_read_repo and prepare a Draft PR on a fix/... branch with eng_prepare_pr (or explain the exact fix clearly in plain English).`,
+        }),
+      });
+      const json = (await readJsonSafe(res)) as { error?: string };
+      if (!res.ok) throw new Error(json?.error || "Could not ask Bashir right now.");
+      setBanner({
+        type: "ok",
+        text: "Asked Bashir to inspect and prepare a fix. Check Approvals or Tasks for his update.",
+      });
+      await loadOverview(true);
+      if (selectedNoteId) {
+        await openTeamNoteDetail(selectedNoteId);
+      }
+    } catch (err) {
+      setBanner({
+        type: "err",
+        text: err instanceof Error ? err.message : "Could not dispatch fix request.",
+      });
+    } finally {
+      setRequestingFix(false);
     }
   }
 
@@ -1824,6 +1887,26 @@ export function WorkforceConsoleClient() {
                         )}
                       </div>
                     )}
+                    {noteDetail.note.from_agent === "engineering_ai" && (
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-3">
+                        <span className="text-[11px] text-slate-600">
+                          Want Bashir to fix this or prepare a Draft PR?
+                        </span>
+                        <button
+                          type="button"
+                          disabled={requestingFix}
+                          onClick={() => void askBashirToPrepareFix(noteDetail)}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3 text-[11px] font-bold text-white hover:bg-[#132f57] disabled:opacity-50"
+                        >
+                          {requestingFix ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Wrench className="h-3.5 w-3.5 text-[#F5B301]" />
+                          )}
+                          <span>{requestingFix ? "Asking Bashir..." : "Ask Bashir to Prepare Fix"}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* 2. Approvals Right Inside Modal */}
@@ -1932,7 +2015,9 @@ export function WorkforceConsoleClient() {
                                       ) : (
                                         <CheckCircle2 className="h-4 w-4" />
                                       )}
-                                      Approve &amp; Execute
+                                      {ap.toolName === "eng_repair_system_state"
+                                        ? "Approve & Apply Fix"
+                                        : "Approve & Execute"}
                                     </button>
                                     <button
                                       type="button"

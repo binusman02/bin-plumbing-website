@@ -1,5 +1,10 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import {
+  executeSafeSystemRepair,
+  SYSTEM_REPAIR_TYPES,
+  type SystemRepairType,
+} from "@/lib/ai-workforce/system-repairs";
 import type { ToolGateway } from "@/lib/ai-workforce/tool-gateway";
 
 const BLOCKED_SECRET_PATTERNS = [
@@ -13,10 +18,55 @@ const BLOCKED_SECRET_PATTERNS = [
   /node_modules(\/|\\)/i,
 ];
 
+const SECRET_IN_PATCH_RX =
+  /(sk_[a-z0-9_]{12,}|github_pat_[a-z0-9_]+|ghp_[a-zA-Z0-9]{20,}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}|-----BEGIN (?:RSA |EC )?PRIVATE KEY-----)/;
+
+export interface DraftPrFileChange {
+  path: string;
+  content: string;
+  reason?: string;
+}
+
 export function isPathBlockedForEngineeringAi(relPath: string): boolean {
   const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
-  if (normalized.includes("..")) return true;
+  if (!normalized || normalized.includes("..")) return true;
   return BLOCKED_SECRET_PATTERNS.some((rx) => rx.test(normalized));
+}
+
+export function validateDraftPrFileChanges(
+  raw: unknown
+): { ok: true; files: DraftPrFileChange[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, files: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "fileChanges must be an array of { path, content }." };
+  }
+  if (raw.length > 6) {
+    return { ok: false, error: "At most 6 file changes are allowed per automated Draft PR." };
+  }
+  const files: DraftPrFileChange[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      return { ok: false, error: "Each file change must include path and content." };
+    }
+    const obj = entry as Record<string, unknown>;
+    const filePath = typeof obj.path === "string" ? obj.path.trim().replace(/\\/g, "/").replace(/^\/+/, "") : "";
+    const content = typeof obj.content === "string" ? obj.content : "";
+    const reason = typeof obj.reason === "string" ? obj.reason.trim() : undefined;
+    if (!filePath || !content) {
+      return { ok: false, error: "Every file change requires non-empty path and content." };
+    }
+    if (isPathBlockedForEngineeringAi(filePath)) {
+      return { ok: false, error: `Refused protected or restricted path "${filePath}".` };
+    }
+    if (content.length > 60_000) {
+      return { ok: false, error: `Patch content for "${filePath}" exceeds 60 KB limit.` };
+    }
+    if (SECRET_IN_PATCH_RX.test(content)) {
+      return { ok: false, error: `Refused patch for "${filePath}" containing secret key material.` };
+    }
+    files.push({ path: filePath, content, reason });
+  }
+  return { ok: true, files };
 }
 
 export interface GitHubConnector {
@@ -28,7 +78,14 @@ export interface GitHubConnector {
     summary: string;
     testEvidence: string;
     changedFiles: string[];
-  }): Promise<{ ok: boolean; draftPrUrl?: string; branchName: string; error?: string }>;
+    fileChanges?: DraftPrFileChange[];
+  }): Promise<{
+    ok: boolean;
+    draftPrUrl?: string;
+    branchName: string;
+    committedFiles?: string[];
+    error?: string;
+  }>;
 }
 
 export class LocalSafeRepoConnector implements GitHubConnector {
@@ -59,7 +116,14 @@ export class LocalSafeRepoConnector implements GitHubConnector {
     summary: string;
     testEvidence: string;
     changedFiles: string[];
-  }): Promise<{ ok: boolean; draftPrUrl?: string; branchName: string; error?: string }> {
+    fileChanges?: DraftPrFileChange[];
+  }): Promise<{
+    ok: boolean;
+    draftPrUrl?: string;
+    branchName: string;
+    committedFiles?: string[];
+    error?: string;
+  }> {
     if (!input.testEvidence.trim()) {
       return {
         ok: false,
@@ -67,16 +131,26 @@ export class LocalSafeRepoConnector implements GitHubConnector {
         error: "Test evidence is required before preparing a pull request.",
       };
     }
-    if (input.branchName === "master" || input.branchName === "main") {
+    const cleanBranch = input.branchName.trim().toLowerCase();
+    if (cleanBranch === "master" || cleanBranch === "main") {
       return {
         ok: false,
         branchName: input.branchName,
         error: "Direct work on protected branches (master/main) is forbidden.",
       };
     }
+    const checked = validateDraftPrFileChanges(input.fileChanges);
+    if (!checked.ok) {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: checked.error,
+      };
+    }
     return {
       ok: true,
       branchName: input.branchName,
+      committedFiles: checked.files.map((f) => f.path),
       draftPrUrl: `draft://github.com/binusman02/bin-plumbing-website/compare/${encodeURIComponent(input.branchName)}`,
     };
   }
@@ -134,7 +208,14 @@ export class GitHubApiConnector implements GitHubConnector {
     summary: string;
     testEvidence: string;
     changedFiles: string[];
-  }): Promise<{ ok: boolean; draftPrUrl?: string; branchName: string; error?: string }> {
+    fileChanges?: DraftPrFileChange[];
+  }): Promise<{
+    ok: boolean;
+    draftPrUrl?: string;
+    branchName: string;
+    committedFiles?: string[];
+    error?: string;
+  }> {
     if (!input.testEvidence.trim()) {
       return {
         ok: false,
@@ -142,11 +223,20 @@ export class GitHubApiConnector implements GitHubConnector {
         error: "Test evidence is required before preparing a pull request.",
       };
     }
-    if (input.branchName === "master" || input.branchName === "main") {
+    const cleanBranch = input.branchName.trim().toLowerCase();
+    if (cleanBranch === "master" || cleanBranch === "main") {
       return {
         ok: false,
         branchName: input.branchName,
         error: "Direct work on protected branches (master/main) is forbidden.",
+      };
+    }
+    const checked = validateDraftPrFileChanges(input.fileChanges);
+    if (!checked.ok) {
+      return {
+        ok: false,
+        branchName: input.branchName,
+        error: checked.error,
       };
     }
 
@@ -178,6 +268,35 @@ export class GitHubApiConnector implements GitHubConnector {
       };
     }
 
+    const committedFiles: string[] = [];
+    for (const fileChange of checked.files) {
+      const encodedPath = fileChange.path.split("/").map(encodeURIComponent).join("/");
+      const existing = await this.githubFetch<{ sha?: string }>(
+        `/contents/${encodedPath}?ref=${encodeURIComponent(input.branchName)}`
+      );
+      const putRes = await this.githubFetch<{ message?: string }>(`/contents/${encodedPath}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          message: `fix(ai-bashir): ${fileChange.reason || input.title}`.slice(0, 120),
+          content: Buffer.from(fileChange.content, "utf8").toString("base64"),
+          branch: input.branchName,
+          ...(existing.ok && existing.data.sha ? { sha: existing.data.sha } : {}),
+        }),
+      });
+      if (!putRes.ok) {
+        return {
+          ok: false,
+          branchName: input.branchName,
+          committedFiles,
+          error: putRes.data.message || `Failed to commit "${fileChange.path}" to GitHub.`,
+        };
+      }
+      committedFiles.push(fileChange.path);
+    }
+
+    const allTargetFiles = Array.from(
+      new Set([...input.changedFiles, ...committedFiles].filter(Boolean))
+    );
     const prBody = [
       `## Summary`,
       input.summary,
@@ -186,7 +305,7 @@ export class GitHubApiConnector implements GitHubConnector {
       input.testEvidence,
       ``,
       `## Target Files`,
-      input.changedFiles.length > 0 ? input.changedFiles.map((f) => `- \`${f}\``).join("\n") : "- Proposal only",
+      allTargetFiles.length > 0 ? allTargetFiles.map((f) => `- \`${f}\``).join("\n") : "- Proposal only",
     ].join("\n");
 
     let prRes = await this.githubFetch<{ html_url?: string; message?: string }>("/pulls", {
@@ -201,7 +320,7 @@ export class GitHubApiConnector implements GitHubConnector {
     });
 
     // GitHub rejects PRs when head has 0 commits ahead of base; add a proposal doc commit on the feature branch
-    if (!prRes.ok && prRes.status === 422) {
+    if (!prRes.ok && prRes.status === 422 && committedFiles.length === 0) {
       const slug = input.branchName.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 60) || "proposal";
       const filePath = `.flowguard-proposals/${slug}.md`;
       await this.githubFetch(`/contents/${filePath}`, {
@@ -212,6 +331,7 @@ export class GitHubApiConnector implements GitHubConnector {
           branch: input.branchName,
         }),
       });
+      committedFiles.push(filePath);
 
       prRes = await this.githubFetch<{ html_url?: string; message?: string }>("/pulls", {
         method: "POST",
@@ -229,6 +349,7 @@ export class GitHubApiConnector implements GitHubConnector {
       return {
         ok: false,
         branchName: input.branchName,
+        committedFiles,
         error: prRes.data.message || `GitHub PR creation failed (HTTP ${prRes.status}).`,
       };
     }
@@ -236,6 +357,7 @@ export class GitHubApiConnector implements GitHubConnector {
     return {
       ok: true,
       branchName: input.branchName,
+      committedFiles,
       draftPrUrl: prRes.data.html_url,
     };
   }
@@ -258,6 +380,13 @@ export function registerEngineeringTools(
     description: "Read authorised source/documentation file in isolated dev workspace",
     tier: "green",
     requiredScope: "eng:repo:read",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative file path inside repo, e.g. src/lib/marketplace.ts" },
+      },
+      required: ["path"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       if (typeof obj.path !== "string" || !obj.path.trim()) {
@@ -277,6 +406,14 @@ export function registerEngineeringTools(
     description: "Record/run safe development check status (tests, typecheck, lint)",
     tier: "green",
     requiredScope: "eng:checks:run",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        suite: { type: "string", description: "Check suite name e.g. unit, typecheck, lint" },
+        passed: { type: "boolean" },
+      },
+      required: ["suite"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const suite = typeof obj.suite === "string" ? obj.suite.trim() : "unit";
@@ -289,9 +426,33 @@ export function registerEngineeringTools(
 
   gateway.registerTool({
     name: "eng_prepare_pr",
-    description: "Prepare a draft pull request on a non-protected development branch with test evidence",
+    description:
+      "Commit real non-secret code fixes onto a non-protected feature branch and open a Draft Pull Request for Owner review",
     tier: "green",
     requiredScope: "eng:pr:prepare",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        branchName: { type: "string", description: "Feature branch e.g. fix/customer-signup-edge" },
+        title: { type: "string", description: "Clear PR title" },
+        summary: { type: "string", description: "Plain-English explanation of what was fixed and why" },
+        testEvidence: { type: "string", description: "Checks or verification evidence" },
+        changedFiles: { type: "array", items: { type: "string" } },
+        fileChanges: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+              reason: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      },
+      required: ["branchName", "title", "summary", "testEvidence"],
+    },
     validateInput(raw) {
       const obj = (raw || {}) as Record<string, unknown>;
       const branchName = typeof obj.branchName === "string" ? obj.branchName.trim() : "";
@@ -301,6 +462,10 @@ export function registerEngineeringTools(
       const changedFiles = Array.isArray(obj.changedFiles)
         ? obj.changedFiles.map(String)
         : [];
+      const checkedFiles = validateDraftPrFileChanges(obj.fileChanges);
+      if (!checkedFiles.ok) {
+        return { ok: false, error: checkedFiles.error };
+      }
       if (!branchName || !title || !summary || !testEvidence) {
         return {
           ok: false,
@@ -309,13 +474,58 @@ export function registerEngineeringTools(
       }
       return {
         ok: true,
-        data: { branchName, title, summary, testEvidence, changedFiles },
+        data: {
+          branchName,
+          title,
+          summary,
+          testEvidence,
+          changedFiles,
+          fileChanges: checkedFiles.files,
+        },
       };
     },
     async execute(input) {
       const res = await connector.prepareDraftPr(input);
       if (!res.ok) throw new Error(res.error || "Failed to prepare draft PR.");
       return res;
+    },
+  });
+
+  gateway.registerTool({
+    name: "eng_repair_system_state",
+    description:
+      "Queue an Owner-approved safe operational repair (sync stuck tasks/approvals, relink guest bookings, clear redirect noise, or refresh live location sharing)",
+    tier: "amber",
+    requiredScope: "eng:system:repair",
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        repairType: {
+          type: "string",
+          enum: [...SYSTEM_REPAIR_TYPES],
+          description: "Safe non-destructive repair action to run once approved",
+        },
+        summary: { type: "string", description: "Plain-English explanation of what this repair fixes" },
+      },
+      required: ["repairType", "summary"],
+    },
+    validateInput(raw) {
+      const obj = (raw || {}) as Record<string, unknown>;
+      const repairType = typeof obj.repairType === "string" ? obj.repairType.trim() : "";
+      const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+      if (!SYSTEM_REPAIR_TYPES.includes(repairType as SystemRepairType)) {
+        return {
+          ok: false,
+          error: `Unsupported repairType "${repairType}". Must be one of: ${SYSTEM_REPAIR_TYPES.join(", ")}.`,
+        };
+      }
+      if (!summary) {
+        return { ok: false, error: "summary is required in plain English." };
+      }
+      return { ok: true, data: { repairType: repairType as SystemRepairType, summary } };
+    },
+    async execute(input) {
+      return executeSafeSystemRepair(input.repairType, input.summary);
     },
   });
 
