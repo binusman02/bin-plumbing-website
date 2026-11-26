@@ -602,17 +602,25 @@ export default function AminaConciergeWidget({
 
           {/* Active Ticket Banner */}
           {ticketNumber && (
-            <div className="flex shrink-0 items-center justify-between border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900">
               <span className="flex items-center gap-1.5 font-bold">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                Ticket: {ticketNumber}
+                {ticketNumber}
               </span>
-              <Link
-                href={`/tracking?ticket=${encodeURIComponent(ticketNumber)}`}
-                className="inline-flex items-center gap-1 font-extrabold text-[#0B1F3A] underline"
-              >
-                Track live <ExternalLink className="h-3 w-3" />
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/customer"
+                  className="font-bold text-emerald-800 underline hover:text-[#0B1F3A]"
+                >
+                  Customer App
+                </Link>
+                <Link
+                  href={`/tracking?ticket=${encodeURIComponent(ticketNumber)}`}
+                  className="inline-flex items-center gap-1 font-extrabold text-[#0B1F3A] underline"
+                >
+                  Track live <ExternalLink className="h-3 w-3" />
+                </Link>
+              </div>
             </div>
           )}
 
@@ -630,9 +638,13 @@ export default function AminaConciergeWidget({
                   className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover"
                 />
                 <div className="rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-3.5 py-2.5 text-xs leading-relaxed text-[#1B2430] shadow-sm">
-                  Hello! I&apos;m Amina at FlowGuard Plumbing in Kano. You can type or send a quick
-                  voice note to ask about any plumbing issue, or tap <strong>Book</strong> above and
-                  I&apos;ll arrange an approved technician for you.
+                  Hello! I&apos;m Amina at FlowGuard Plumbing in Kano. Ask me anything or send a
+                  voice note, or tap <strong>Book</strong> above. Tip: install our app from the
+                  website or create an account at{" "}
+                  <Link href="/customer" className="font-bold text-[#0B1F3A] underline">
+                    /customer
+                  </Link>{" "}
+                  to watch your plumber&apos;s live GPS location once dispatched.
                 </div>
               </div>
             )}

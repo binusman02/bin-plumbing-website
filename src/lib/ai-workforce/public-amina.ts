@@ -335,7 +335,7 @@ export function buildKnowledgeFallbackReply(userMessage: string): string {
   }
 
   if (/\b(track|status|reference|ticket|where is|live location)\b/.test(lower)) {
-    return "You can track your ticket online anytime on our Tracking page (/tracking) using your ticket number and phone number. Once our coordinator assigns an approved plumber and they start their trip to your house, you'll be able to see their live GPS location on the map.";
+    return "You can track your ticket online at /tracking, or install our app right from the website / create an account at /customer to watch your plumber's live GPS location on the map as soon as they start their trip to your house.";
   }
 
   if (/\b(area|location|cover|coverage|where|kano|lga|nassarawa|tarauni|bompai|fagge|dala|gwale|ungogo|kumbotso|sabon gari)\b/.test(lower)) {
@@ -522,7 +522,8 @@ export async function handlePublicAminaTurn(params: {
     "- If the customer asks about FlowGuard, our services, Kano coverage, pricing policy, or how booking/tracking works, answer directly and clearly using the approved company info.",
     "- If the customer mentions flooding, burst pipes, or water near electricity, advise shutting off the main stopcock valve and switching off nearby sockets right away, then offer to book an urgent plumber immediately.",
     "- If the customer wants to book a plumber, warmly ask for any missing details (Full Name, Phone, Email, Kano Area/LGA, Address, and Issue) or set readyToBook=true so the booking card opens for them. Mention they can tap 'Pin My GPS Location' in the booking card so the plumber gets exact directions to their door.",
-    "- Explain live tracking clearly when asked: customers don't need a separate app or Play Store download — once a plumber is assigned and starts their trip, they can watch the plumber's live GPS location and progress online at /tracking using their ticket number and phone number.",
+    "- Actively let visitors know that if they install the FlowGuard app directly from our website or create a free customer account at /customer, they can watch their assigned plumber's live GPS location on the map, approve itemised quotes, and get instant job alerts.",
+    "- Explain live tracking clearly when asked: customers don't need Google Play Store — they can install the app straight from our website, create an account at /customer, or check /tracking using their ticket number and phone number.",
     "- NEVER tell customers to download an app from the Play Store or use internal phrases like 'waiting approval'.",
     "- NEVER say 'I have sent' or claim you already assigned a plumber or verified a payment. Say 'you can follow your ticket online' or 'we'll email you and update you here as soon as a plumber is assigned'.",
     "- NEVER invent ticket numbers or pretend you can access private records.",
@@ -720,6 +721,8 @@ export async function sendBookingConfirmationEmail(params: {
         "Our operations coordinator is reviewing available approved technicians for your area and will notify you as soon as a plumber is assigned.",
         "",
         `Track your request anytime here: ${trackingUrl}`,
+        "",
+        "Tip: Install the FlowGuard app directly from our website or create your customer account at /customer so you can watch your plumber's live GPS location on the map as soon as they head your way.",
         "",
         "Best regards,",
         "Amina — FlowGuard Plumbing Enterprises",

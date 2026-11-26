@@ -153,7 +153,7 @@ export async function POST(request: Request) {
     lastTopic: `Booked ${problemType} in ${cityOrLga}`,
   });
 
-  const confirmMsg = `I've booked your request! Your ticket number is ${created.ticket_number}.${hasValidGps ? " Your GPS location is synced so your assigned plumber can navigate straight to you." : ""} You'll get an update by email and here in chat as soon as an approved plumber is assigned, and you can track your plumber's live GPS location online at /tracking?ticket=${created.ticket_number} once they start their trip.`;
+  const confirmMsg = `I've booked your request! Your ticket number is ${created.ticket_number}.${hasValidGps ? " Your GPS location is synced so your assigned plumber can navigate straight to you." : ""} You'll get an update by email and here in chat as soon as an approved plumber is assigned. Tip: Install our app directly from the website or create a customer account at /customer so you can see your plumber's live GPS location on the map when they're on the way (or check /tracking anytime).`;
   const confirmRecord = await defaultPublicAminaStore.appendMessage({
     sessionId: session.id,
     role: "assistant",

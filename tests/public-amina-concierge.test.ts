@@ -64,6 +64,8 @@ META_JSON: {"topicSummary":"Visitor asked about Tarauni coverage","shouldReportT
     });
 
     assert.match(promptSeen, /Always confirm Kano neighbourhood name warmly/);
+    assert.match(promptSeen, /install the FlowGuard app directly from our website/i);
+    assert.match(promptSeen, /live GPS location/i);
     assert.equal(turn.readyToBook, true);
     assert.equal(turn.messages.length, 2);
     assert.equal(turn.messages[0].source, "voice");

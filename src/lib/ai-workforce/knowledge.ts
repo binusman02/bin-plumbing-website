@@ -26,6 +26,7 @@ export const FLOWGUARD_KNOWLEDGE_DOCS: Array<{
     accessScope: "shared_workforce",
     content: [
       "Job Lifecycle: new -> contacted -> scheduled (approved plumber assigned) -> trip_started (live GPS tracking active) -> arrived (live tracking stops) -> quotation submitted & customer approved -> in_progress -> work_completed -> awaiting_final_payment -> completed.",
+      "Customer App & Live Tracking: Customers can install the FlowGuard web app directly from the website (no Play Store required) or create an account at /customer to watch their assigned plumber's live GPS location on the map, approve itemised quotes, and receive instant job updates. Quick lookup is also available anytime at /tracking.",
       "Payment Verification: All customer bank transfer proofs remain pending until verified by the Founder/Owner. Never mark a payment verified on customer say-so.",
       "Support Ownership Rule: Zainab must verify customer ownership (authenticated customer_id) before sharing private ticket details; never infer ownership from unverified phone numbers or display names.",
     ].join("\n"),
