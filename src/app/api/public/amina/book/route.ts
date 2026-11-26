@@ -114,7 +114,7 @@ export async function POST(request: Request) {
   });
 
   const confirmMsg = `I've booked your request! Your ticket number is ${created.ticket_number}. Our coordinator is reviewing approved technicians in ${cityOrLga}, and you'll get an update by email and right here in this chat as soon as a plumber is assigned.`;
-  await defaultPublicAminaStore.appendMessage({
+  const confirmRecord = await defaultPublicAminaStore.appendMessage({
     sessionId: session.id,
     role: "assistant",
     content: confirmMsg,
@@ -137,12 +137,14 @@ export async function POST(request: Request) {
     forceStoreReport: true,
   }).catch(() => {});
 
-  const messages = await defaultPublicAminaStore.listMessages(session.id, 40);
+  const storedMessages = await defaultPublicAminaStore.listMessages(session.id, 40);
+  const messages = storedMessages.length > 0 ? storedMessages : [confirmRecord];
   const res = NextResponse.json({
     ok: true,
     ticketNumber: created.ticket_number,
     trackingUrl: `/tracking?ticket=${encodeURIComponent(created.ticket_number)}`,
     sessionToken: session.sessionToken,
+    confirmMessage: confirmMsg,
     messages,
   });
 

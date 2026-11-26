@@ -82,6 +82,7 @@ export async function POST(request: Request) {
     message?: string;
     source?: "text" | "voice";
     sessionToken?: string;
+    history?: Array<{ role?: string; content?: string; source?: string }>;
   };
   const message = typeof body?.message === "string" ? body.message.trim() : "";
   if (!message) {
@@ -95,10 +96,28 @@ export async function POST(request: Request) {
       : null;
   const sessionToken = bodyToken || readTokenFromRequest(request);
 
+  const clientHistory = Array.isArray(body?.history)
+    ? body.history
+        .filter(
+          (item): item is { role: "customer" | "assistant"; content: string; source?: "text" | "voice" } =>
+            Boolean(item) &&
+            (item.role === "customer" || item.role === "assistant") &&
+            typeof item.content === "string" &&
+            item.content.trim().length > 0
+        )
+        .slice(-12)
+        .map((item) => ({
+          role: item.role,
+          content: item.content.trim().slice(0, 700),
+          source: (item.source === "voice" ? "voice" : "text") as "text" | "voice",
+        }))
+    : undefined;
+
   const result = await handlePublicAminaTurn({
     sessionToken,
     customerMessage: message,
     source: body?.source === "voice" ? "voice" : "text",
+    clientHistory,
   });
 
   const res = NextResponse.json({

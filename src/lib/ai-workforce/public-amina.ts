@@ -172,34 +172,38 @@ export class InMemoryPublicAminaStore implements PublicAminaStore {
 }
 
 export class SupabasePublicAminaStore implements PublicAminaStore {
+  private fallbackStore = new InMemoryPublicAminaStore();
+
   async findSessionByToken(sessionToken: string): Promise<PublicAminaSession | null> {
     try {
       const supabase = getServiceSupabase();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ai_public_sessions")
         .select("*")
         .eq("session_token", sessionToken)
         .maybeSingle();
-      return data ? mapSessionRow(data) : null;
+      if (!error && data) return mapSessionRow(data);
     } catch {
-      return null;
+      // Fall through to in-memory fallback
     }
+    return this.fallbackStore.findSessionByToken(sessionToken);
   }
 
   async findSessionByTicket(ticketNumber: string): Promise<PublicAminaSession | null> {
     try {
       const supabase = getServiceSupabase();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ai_public_sessions")
         .select("*")
         .eq("ticket_number", ticketNumber)
         .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      return data ? mapSessionRow(data) : null;
+      if (!error && data) return mapSessionRow(data);
     } catch {
-      return null;
+      // Fall through to in-memory fallback
     }
+    return this.fallbackStore.findSessionByTicket(ticketNumber);
   }
 
   async getOrCreateSession(sessionToken?: string | null): Promise<PublicAminaSession> {
@@ -208,30 +212,21 @@ export class SupabasePublicAminaStore implements PublicAminaStore {
       if (existing) return existing;
     }
     const token = sessionToken || `amina_${randomUUID()}`;
-    const now = new Date().toISOString();
     try {
       const supabase = getServiceSupabase();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ai_public_sessions")
         .insert({ session_token: token })
         .select("*")
         .single();
-      if (data) return mapSessionRow(data);
+      if (!error && data) return mapSessionRow(data);
+      if (error) {
+        console.warn("[public-amina] Session insert fallback:", error.message);
+      }
     } catch {
       // Fallback if table not migrated yet
     }
-    return {
-      id: randomUUID(),
-      sessionToken: token,
-      visitorName: null,
-      visitorPhone: null,
-      visitorEmail: null,
-      ticketNumber: null,
-      lastTopic: null,
-      reportedToOwnerAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
+    return this.fallbackStore.getOrCreateSession(token);
   }
 
   async updateSession(
@@ -249,31 +244,35 @@ export class SupabasePublicAminaStore implements PublicAminaStore {
       if (patch.reportedToOwnerAt !== undefined) {
         dbPatch.reported_to_owner_at = patch.reportedToOwnerAt;
       }
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ai_public_sessions")
         .update(dbPatch)
         .eq("id", sessionId)
         .select("*")
         .maybeSingle();
-      return data ? mapSessionRow(data) : null;
+      if (!error && data) return mapSessionRow(data);
     } catch {
-      return null;
+      // Fall through to in-memory fallback
     }
+    return this.fallbackStore.updateSession(sessionId, patch);
   }
 
   async listMessages(sessionId: string, limit = 40): Promise<PublicAminaMessage[]> {
     try {
       const supabase = getServiceSupabase();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ai_public_messages")
         .select("*")
         .eq("session_id", sessionId)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(limit);
-      return (data || []).map((r) => mapMessageRow(r));
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.slice().reverse().map((r) => mapMessageRow(r));
+      }
     } catch {
-      return [];
+      // Fall through to in-memory fallback
     }
+    return this.fallbackStore.listMessages(sessionId, limit);
   }
 
   async appendMessage(
@@ -283,7 +282,7 @@ export class SupabasePublicAminaStore implements PublicAminaStore {
     const now = new Date().toISOString();
     try {
       const supabase = getServiceSupabase();
-      await supabase.from("ai_public_messages").insert({
+      const { error } = await supabase.from("ai_public_messages").insert({
         id,
         session_id: msg.sessionId,
         role: msg.role,
@@ -291,17 +290,21 @@ export class SupabasePublicAminaStore implements PublicAminaStore {
         source: msg.source,
         created_at: now,
       });
+      if (!error) {
+        return {
+          id,
+          sessionId: msg.sessionId,
+          role: msg.role,
+          content: msg.content,
+          source: msg.source,
+          createdAt: now,
+        };
+      }
+      console.warn("[public-amina] Message insert fallback:", error.message);
     } catch {
       // Non-fatal in test/unmigrated DB
     }
-    return {
-      id,
-      sessionId: msg.sessionId,
-      role: msg.role,
-      content: msg.content,
-      source: msg.source,
-      createdAt: now,
-    };
+    return this.fallbackStore.appendMessage(msg);
   }
 }
 
@@ -313,8 +316,41 @@ export function cleanPublicReplyText(raw: string): string {
     .replace(/__([^_]+)__/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")
-    .replace(/\s+/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+export function buildKnowledgeFallbackReply(userMessage: string): string {
+  const lower = userMessage.toLowerCase();
+
+  if (/\b(burst|flood|flooding|gushing|water everywhere|electric|shock|spark)\b/.test(lower)) {
+    return "Please shut off your main water stopcock valve and switch off any nearby electrical sockets right away for safety. Once it's safe, share your name, phone, email, Kano area, and street address or tap Book above so we can dispatch an urgent plumber.";
+  }
+
+  if (/\b(price|cost|how much|charge|fee|quote|quotation|estimate|naira|ngn)\b/.test(lower)) {
+    return "We don't give fixed prices before seeing the job. An approved FlowGuard technician inspects on-site first and sends you an itemised quotation (materials, labour, and transport) to approve before any repair starts.";
+  }
+
+  if (/\b(track|status|reference|ticket|where is)\b/.test(lower)) {
+    return "You can follow live progress anytime on the Track Request page using your ticket reference number and the phone number you booked with. If you haven't booked yet, tap Book above and I'll set up a request for you.";
+  }
+
+  if (/\b(area|location|cover|coverage|where|kano|lga|nassarawa|tarauni|bompai|fagge|dala|gwale|ungogo|kumbotso|sabon gari)\b/.test(lower)) {
+    return "FlowGuard covers homes and businesses across Kano metropolitan areas including Nassarawa, Tarauni, Bompai, Fagge, Dala, Gwale, Kano Municipal, Ungogo, Kumbotso, and Sabon Gari. Which area are you in and what plumbing work do you need?";
+  }
+
+  if (/\b(service|offer|do you do|pipe|leak|drain|borehole|pump|tank|toilet|sink|tap|plumbing)\b/.test(lower) && !/\b(about|what is)\b/.test(lower)) {
+    return "We handle pipe installation and repairs, leak detection, drainage unblocking, borehole and water pump systems, tanks, sanitaryware, and emergency dispatch across Kano. Tell me what's going on or tap Book above for an on-site inspection.";
+  }
+
+  if (/\b(flowguard|fluw|flw|about|who are you|what is|how does it work|how it works|explain|know about)\b/.test(lower)) {
+    return "FlowGuard Plumbing Enterprises connects homes and businesses in Kano with vetted, approved plumbers through a clear, trackable process.\n\nYou submit your issue to get a reference number, our coordinator assigns a reviewed technician, the plumber inspects on-site and sends an itemised quote for your approval before work starts, and you can track every step live. Would you like to ask about a specific issue or book an inspection?";
+  }
+
+  return "I'm Amina at FlowGuard Plumbing in Kano. We handle leaks, pipes, drainage, boreholes, pumps, and emergency plumbing with on-site inspection and upfront itemised quotes before work begins. Tell me what plumbing issue you need help with or which area in Kano you're in.";
 }
 
 export function parseAminaConciergeOutput(rawText: string): {
@@ -325,7 +361,8 @@ export function parseAminaConciergeOutput(rawText: string): {
   bookingDraft: PublicBookingDraft | null;
 } {
   const markerIdx = rawText.indexOf("META_JSON:");
-  const replyPart = markerIdx >= 0 ? rawText.slice(0, markerIdx) : rawText;
+  const rawReplyPart = markerIdx >= 0 ? rawText.slice(0, markerIdx) : rawText;
+  const replyPart = rawReplyPart.replace(/```json\s*$/i, "").replace(/```\s*$/i, "");
   const reply = cleanPublicReplyText(replyPart);
 
   let topicSummary: string | null = null;
@@ -402,6 +439,7 @@ export async function handlePublicAminaTurn(params: {
   sessionToken?: string | null;
   customerMessage: string;
   source?: "text" | "voice";
+  clientHistory?: Array<{ role: "customer" | "assistant"; content: string; source?: "text" | "voice" }>;
   store?: PublicAminaStore;
   teamStore?: TeamBoardAndMemoryStore;
   reportStore?: ReportStore;
@@ -423,17 +461,40 @@ export async function handlePublicAminaTurn(params: {
 
   const session = await store.getOrCreateSession(params.sessionToken);
   const cleanUserMsg = cleanPublicReplyText(params.customerMessage).slice(0, 700);
-  await store.appendMessage({
+  const userMsgRecord = await store.appendMessage({
     sessionId: session.id,
     role: "customer",
     content: cleanUserMsg,
     source: params.source ?? "text",
   });
 
-  const [history, memories] = await Promise.all([
+  const [storedHistory, memories] = await Promise.all([
     store.listMessages(session.id, 16),
     teamStore.loadMemories("sales_ai", "ns_sales_ai", 10).catch(() => []),
   ]);
+
+  const sanitizedClientHistory: PublicAminaMessage[] = (params.clientHistory || [])
+    .filter(
+      (m) =>
+        m &&
+        (m.role === "customer" || m.role === "assistant") &&
+        typeof m.content === "string" &&
+        m.content.trim().length > 0
+    )
+    .slice(-12)
+    .map((m, idx) => ({
+      id: `client-${idx}`,
+      sessionId: session.id,
+      role: m.role,
+      content: cleanPublicReplyText(m.content).slice(0, 700),
+      source: m.source === "voice" ? "voice" : "text",
+      createdAt: new Date().toISOString(),
+    }));
+
+  const history: PublicAminaMessage[] =
+    storedHistory.length > 1
+      ? storedHistory
+      : [...sanitizedClientHistory, userMsgRecord];
 
   const publicKnowledge = FLOWGUARD_KNOWLEDGE_DOCS.filter(
     (d) => d.accessScope === "shared_workforce"
@@ -452,11 +513,13 @@ export async function handlePublicAminaTurn(params: {
 
   const aminaDef = getAgentDefinition("sales_ai");
   const systemPrompt = [
-    "You are Amina, the friendly front-desk customer representative at FlowGuard Plumbing Enterprises in Kano, Nigeria.",
-    "Reply naturally and warmly like a real human colleague messaging a customer. Keep replies concise (1 to 3 sentences) unless explaining a step.",
+    "You are Amina, the intelligent and friendly front-desk customer representative at FlowGuard Plumbing Enterprises in Kano, Nigeria.",
+    "Think carefully about what the customer is actually asking (even if they have spelling typos like 'fluw gauard') and give a clear, helpful, accurate answer grounded in the approved company info below.",
+    "Reply naturally and warmly like a real human colleague messaging a customer. Keep replies concise (1 to 4 sentences) unless explaining FlowGuard's steps or answering a multi-part question.",
     SHARED_COMMUNICATION_STANDARD,
     "STRICT PUBLIC RULES:",
     "- NEVER quote fixed Naira/dollar prices or promise discounts. Explain clearly that an approved technician inspects on-site first and gives a transparent itemised quote before work starts.",
+    "- If the customer asks about FlowGuard, our services, Kano coverage, pricing policy, or how booking/tracking works, answer directly and clearly using the approved company info.",
     "- If the customer mentions flooding, burst pipes, or water near electricity, advise shutting off the main stopcock valve and switching off nearby sockets right away, then offer to book an urgent plumber immediately.",
     "- If the customer wants to book a plumber, warmly ask for any missing details (Full Name, Phone, Email, Kano Area/LGA, Address, and Issue) or set readyToBook=true so the booking card opens for them.",
     "- NEVER claim you already assigned a plumber unless the conversation already includes an assignment update. Booking creates a ticket first, then our coordinator assigns an approved plumber and notifies the customer.",
@@ -475,14 +538,23 @@ export async function handlePublicAminaTurn(params: {
     agentId: "sales_ai",
     routeId: aminaDef?.modelRoute || "mimo-v2-6-flash-free",
     systemPrompt,
-    userPrompt: `CONVERSATION SO FAR:\n${conversationLines}\n\nReply to the customer's latest message naturally.`,
-    maxTokens: 420,
+    userPrompt: `CONVERSATION SO FAR:\n${conversationLines}\n\nThink through what the customer asked and write a helpful, natural reply.`,
+    maxTokens: 1400,
+    timeoutMs: 25000,
   });
+
+  if (!modelRes.ok || !modelRes.text) {
+    console.warn(
+      "[public-amina] Model response unavailable, using knowledge fallback:",
+      modelRes.code,
+      modelRes.error
+    );
+  }
 
   const rawText =
     modelRes.ok && modelRes.text
       ? modelRes.text
-      : "Sorry, my connection flickered for a second. Tell me again what plumbing help you need and your area in Kano, and I'll sort you out.";
+      : buildKnowledgeFallbackReply(cleanUserMsg);
 
   const parsed = parseAminaConciergeOutput(rawText);
   let safeReply = verifyToolClaimsInText({
@@ -500,7 +572,7 @@ export async function handlePublicAminaTurn(params: {
       "We always send an approved FlowGuard technician to inspect on-site first and give you a clear itemised quote before work begins. Share your name, phone, email, Kano area, and address whenever you'd like me to book an inspection.";
   }
 
-  await store.appendMessage({
+  const assistantMsgRecord = await store.appendMessage({
     sessionId: session.id,
     role: "assistant",
     content: safeReply,
@@ -588,7 +660,12 @@ export async function handlePublicAminaTurn(params: {
       cleanUserMsg
     );
 
-  const updatedMessages = await store.listMessages(session.id, 40);
+  const storedMessages = await store.listMessages(session.id, 40);
+  const updatedMessages =
+    storedMessages.length >= 2
+      ? storedMessages
+      : [...sanitizedClientHistory, userMsgRecord, assistantMsgRecord];
+
   return {
     sessionToken: session.sessionToken,
     reply: safeReply,

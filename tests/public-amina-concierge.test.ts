@@ -183,4 +183,58 @@ META_JSON: {"topicSummary":"Visitor asked about Tarauni coverage","shouldReportT
     assert.match(msgs[0].content, /Ibrahim Danjuma/);
     assert.match(msgs[0].content, /BP-261126-4411/);
   });
+
+  await t.test("6. Preserves conversation history and answers thoughtfully even when DB read returns empty or model fails", async () => {
+    const emptyReadStore: InMemoryPublicAminaStore = new InMemoryPublicAminaStore();
+    emptyReadStore.listMessages = async () => [];
+
+    let capturedMaxTokens = 0;
+    let capturedPrompt = "";
+    const turnWithModel = await handlePublicAminaTurn({
+      customerMessage: "Do you cover Tarauni?",
+      clientHistory: [
+        { role: "customer", content: "I want to know about fluw gauard" },
+        { role: "assistant", content: "FlowGuard connects you with vetted plumbers in Kano." },
+      ],
+      store: emptyReadStore,
+      teamStore: new InMemoryTeamBoardAndMemoryStore(),
+      reportStore: new InMemoryReportStore(),
+      notifyFn: (async () => ({ id: "n-1" })) as never,
+      modelRunner: async (req) => {
+        capturedMaxTokens = req.maxTokens;
+        capturedPrompt = req.userPrompt;
+        return {
+          ok: true,
+          text: `Yes, we cover Tarauni and nearby Kano areas.\nMETA_JSON: {"topicSummary":"Tarauni coverage","shouldReportToOwner":false,"readyToBook":false}`,
+          provider: "openai_compatible",
+          modelId: "xiaomi/mimo-v2.6-flash",
+          inputTokens: 100,
+          outputTokens: 30,
+        };
+      },
+    });
+
+    assert.ok(capturedMaxTokens >= 1200);
+    assert.match(capturedPrompt, /I want to know about fluw gauard/);
+    assert.equal(turnWithModel.messages.length, 4);
+    assert.equal(turnWithModel.messages[2].role, "customer");
+    assert.equal(turnWithModel.messages[3].role, "assistant");
+
+    const fallbackTurn = await handlePublicAminaTurn({
+      customerMessage: "I want to know about fluw gauard",
+      store: emptyReadStore,
+      teamStore: new InMemoryTeamBoardAndMemoryStore(),
+      reportStore: new InMemoryReportStore(),
+      notifyFn: (async () => ({ id: "n-2" })) as never,
+      modelRunner: async () => ({
+        ok: false,
+        code: "PROVIDER_ERROR",
+        error: "Simulated provider timeout",
+      }),
+    });
+
+    assert.match(fallbackTurn.reply, /FlowGuard Plumbing Enterprises/i);
+    assert.match(fallbackTurn.reply, /itemised quote/i);
+    assert.equal(fallbackTurn.messages.length, 2);
+  });
 });

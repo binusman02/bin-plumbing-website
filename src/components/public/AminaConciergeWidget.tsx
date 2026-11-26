@@ -41,6 +41,40 @@ interface AminaConciergeWidgetProps {
 }
 
 const TOKEN_STORAGE_KEY = "fg_amina_session_token_v1";
+const MESSAGES_STORAGE_KEY = "fg_amina_messages_v1";
+
+function readCachedMessages(): ChatMsg[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MESSAGES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (m): m is ChatMsg =>
+          Boolean(m) &&
+          typeof m === "object" &&
+          typeof (m as ChatMsg).id === "string" &&
+          typeof (m as ChatMsg).content === "string" &&
+          ((m as ChatMsg).role === "customer" ||
+            (m as ChatMsg).role === "assistant" ||
+            (m as ChatMsg).role === "system")
+      )
+      .slice(-40);
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedMessages(msgs: ChatMsg[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(msgs.slice(-40)));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
 
 export default function AminaConciergeWidget({
   activeLocations = [],
@@ -73,6 +107,10 @@ export default function AminaConciergeWidget({
   const [urgency, setUrgency] = useState<"standard" | "urgent">("standard");
 
   const listEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const prevMsgCountRef = useRef(0);
+  const wasOpenRef = useRef(false);
+  const wasBookingOpenRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -85,6 +123,11 @@ export default function AminaConciergeWidget({
 
   const syncConversation = useCallback(async (tokenOverride?: string | null) => {
     try {
+      const cached = readCachedMessages();
+      if (cached.length > 0) {
+        setMessages((prev) => (prev.length === 0 ? cached : prev));
+      }
+
       const saved =
         tokenOverride ??
         (typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_STORAGE_KEY) : null);
@@ -106,7 +149,13 @@ export default function AminaConciergeWidget({
         }
       }
       if (data.ticketNumber) setTicketNumber(data.ticketNumber);
-      if (Array.isArray(data.messages)) setMessages(data.messages);
+      if (Array.isArray(data.messages) && data.messages.length > 0) {
+        setMessages((prev) => {
+          const next = data.messages!.length >= prev.length ? data.messages! : prev;
+          writeCachedMessages(next);
+          return next;
+        });
+      }
       if (data.visitorProfile) {
         if (data.visitorProfile.fullName) setFullName((v) => v || data.visitorProfile!.fullName!);
         if (data.visitorProfile.phone) setPhone((v) => v || data.visitorProfile!.phone!);
@@ -132,8 +181,23 @@ export default function AminaConciergeWidget({
   }, [isInternalPortal, open, ticketNumber, sessionToken, syncConversation]);
 
   useEffect(() => {
-    if (open) {
-      listEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const justOpened = open && !wasOpenRef.current;
+    const bookingJustOpened = showBookingForm && !wasBookingOpenRef.current;
+    const countIncreased = messages.length > prevMsgCountRef.current;
+
+    wasOpenRef.current = open;
+    wasBookingOpenRef.current = showBookingForm;
+    prevMsgCountRef.current = messages.length;
+
+    if (!open) return;
+
+    const container = scrollContainerRef.current;
+    const isNearBottom = container
+      ? container.scrollHeight - container.scrollTop - container.clientHeight < 140
+      : true;
+
+    if (justOpened || bookingJustOpened || (countIncreased && (sending || isNearBottom))) {
+      listEndRef.current?.scrollIntoView({ behavior: justOpened ? "auto" : "smooth" });
     }
   }, [messages, open, showBookingForm, sending]);
 
@@ -168,6 +232,15 @@ export default function AminaConciergeWidget({
     setErrorMsg(null);
     if (source === "text") setInput("");
 
+    const priorHistory = messages
+      .filter((m) => m.role === "customer" || m.role === "assistant")
+      .slice(-12)
+      .map((m) => ({
+        role: m.role as "customer" | "assistant",
+        content: m.content,
+        source: m.source === "voice" ? ("voice" as const) : ("text" as const),
+      }));
+
     const optimisticMsg: ChatMsg = {
       id: `local-${Date.now()}`,
       role: "customer",
@@ -175,7 +248,11 @@ export default function AminaConciergeWidget({
       source,
       createdAt: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimisticMsg]);
+    setMessages((prev) => {
+      const next = [...prev, optimisticMsg];
+      writeCachedMessages(next);
+      return next;
+    });
     setSending(true);
 
     try {
@@ -185,12 +262,14 @@ export default function AminaConciergeWidget({
         body: JSON.stringify({
           message: trimmed,
           source,
+          history: priorHistory,
           ...(sessionToken ? { sessionToken } : {}),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
         sessionToken?: string;
+        reply?: string;
         readyToBook?: boolean;
         bookingDraft?: BookingDraft | null;
         ticketNumber?: string | null;
@@ -206,7 +285,32 @@ export default function AminaConciergeWidget({
         }
       }
       if (json.ticketNumber) setTicketNumber(json.ticketNumber);
-      if (Array.isArray(json.messages)) setMessages(json.messages);
+
+      setMessages((prev) => {
+        const serverMsgs = Array.isArray(json.messages) ? json.messages : [];
+        let next: ChatMsg[];
+        if (serverMsgs.length >= prev.length + 1) {
+          next = serverMsgs;
+        } else {
+          const replyText =
+            typeof json.reply === "string" && json.reply.trim()
+              ? json.reply.trim()
+              : serverMsgs.findLast((m) => m.role === "assistant")?.content || "";
+          const replyMsg: ChatMsg | null = replyText
+            ? {
+                id: `local-reply-${Date.now()}`,
+                role: "assistant",
+                content: replyText,
+                source: "text",
+                createdAt: new Date().toISOString(),
+              }
+            : null;
+          next = replyMsg ? [...prev, replyMsg] : prev;
+        }
+        writeCachedMessages(next);
+        return next;
+      });
+
       if (json.bookingDraft) applyDraft(json.bookingDraft);
       if (json.readyToBook && !json.ticketNumber) setShowBookingForm(true);
     } catch (err) {
@@ -320,6 +424,7 @@ export default function AminaConciergeWidget({
         error?: string;
         ticketNumber?: string;
         sessionToken?: string;
+        confirmMessage?: string;
         messages?: ChatMsg[];
       };
       if (!res.ok) throw new Error(json.error || "Could not submit booking.");
@@ -330,7 +435,28 @@ export default function AminaConciergeWidget({
         }
       }
       if (json.ticketNumber) setTicketNumber(json.ticketNumber);
-      if (Array.isArray(json.messages)) setMessages(json.messages);
+      setMessages((prev) => {
+        const serverMsgs = Array.isArray(json.messages) ? json.messages : [];
+        let next: ChatMsg[];
+        if (serverMsgs.length > prev.length) {
+          next = serverMsgs;
+        } else if (json.confirmMessage) {
+          next = [
+            ...prev,
+            {
+              id: `local-book-${Date.now()}`,
+              role: "assistant",
+              content: json.confirmMessage,
+              source: "text",
+              createdAt: new Date().toISOString(),
+            },
+          ];
+        } else {
+          next = prev;
+        }
+        writeCachedMessages(next);
+        return next;
+      });
       setShowBookingForm(false);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Booking failed. Please check fields.");
@@ -399,10 +525,10 @@ export default function AminaConciergeWidget({
       {open && (
         <section
           aria-label="Chat with Amina"
-          className="fixed bottom-4 right-4 z-50 flex max-h-[82vh] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:bottom-6 sm:right-6 sm:w-[400px]"
+          className="fixed bottom-4 right-4 z-50 flex max-h-[min(580px,82vh)] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:bottom-6 sm:right-6 sm:w-[400px]"
         >
           {/* Header */}
-          <div className="flex items-center justify-between bg-[#0B1F3A] px-4 py-3 text-white">
+          <div className="flex shrink-0 items-center justify-between bg-[#0B1F3A] px-4 py-3 text-white">
             <div className="flex items-center gap-2.5">
               <div className="relative h-10 w-10 shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -444,7 +570,7 @@ export default function AminaConciergeWidget({
 
           {/* Active Ticket Banner */}
           {ticketNumber && (
-            <div className="flex items-center justify-between border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900">
+            <div className="flex shrink-0 items-center justify-between border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900">
               <span className="flex items-center gap-1.5 font-bold">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                 Ticket: {ticketNumber}
@@ -459,8 +585,11 @@ export default function AminaConciergeWidget({
           )}
 
           {/* Conversation Body */}
-          <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/70 p-4">
-            {messages.length === 0 && !showBookingForm && (
+          <div
+            ref={scrollContainerRef}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain touch-pan-y bg-slate-50/70 p-4"
+          >
+            {(!showBookingForm || messages.length > 0) && (
               <div className="flex items-start gap-2.5">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -485,7 +614,7 @@ export default function AminaConciergeWidget({
                         <Mic className="h-2.5 w-2.5" /> Voice note
                       </span>
                     )}
-                    <p>{m.content}</p>
+                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
                   </div>
                 </div>
               ) : (
@@ -503,7 +632,7 @@ export default function AminaConciergeWidget({
                         : "border-slate-200 bg-white text-[#1B2430]"
                     }`}
                   >
-                    <p>{m.content}</p>
+                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
                   </div>
                 </div>
               )
@@ -623,7 +752,7 @@ export default function AminaConciergeWidget({
           </div>
 
           {errorMsg && (
-            <div className="border-t border-red-200 bg-red-50 px-3.5 py-2 text-[11px] font-semibold text-red-800">
+            <div className="shrink-0 border-t border-red-200 bg-red-50 px-3.5 py-2 text-[11px] font-semibold text-red-800">
               {errorMsg}
             </div>
           )}
@@ -634,7 +763,7 @@ export default function AminaConciergeWidget({
               e.preventDefault();
               void sendTextMessage(input, "text");
             }}
-            className="flex items-center gap-2 border-t border-slate-200 bg-white p-3"
+            className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white p-3"
           >
             <button
               type="button"
