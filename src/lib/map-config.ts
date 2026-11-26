@@ -22,6 +22,11 @@ export const MAP_CONFIG = {
   streetAttribution:
     process.env.NEXT_PUBLIC_MAP_TILE_ATTRIBUTION ||
     '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
+  streetFallbackUrl:
+    process.env.NEXT_PUBLIC_MAP_FALLBACK_TILE_URL ||
+    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+  streetFallbackAttribution:
+    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>',
   satelliteUrl:
     process.env.NEXT_PUBLIC_MAP_SATELLITE_URL ||
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",

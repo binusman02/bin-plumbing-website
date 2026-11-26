@@ -70,7 +70,7 @@ export class TavilyWebResearchProvider implements WebResearchProvider {
 export function createDefaultWebResearchProvider(
   env: Record<string, string | undefined> = process.env
 ): WebResearchProvider {
-  const tavilyKey = env.TAVILY_API_KEY?.trim();
+  const tavilyKey = (env.TAVILY_API_KEY || env.TAVILY_APT_KEY)?.trim();
   return tavilyKey ? new TavilyWebResearchProvider(tavilyKey) : new UnconfiguredWebResearchProvider();
 }
 

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "sadiq-chase-overdue": {
+      "schedule": "0 * * * *",
+      "path": "/api/cron/workforce/chase-overdue",
+      "requestMethod": "GET"
+    },
+    "sadiq-morning-standup": {
+      "schedule": "0 8 * * 1-6",
+      "timezone": "Africa/Lagos",
+      "path": "/api/cron/workforce/morning-standup",
+      "requestMethod": "GET"
+    },
+    "sadiq-eod-report": {
+      "schedule": "0 18 * * 1-6",
+      "timezone": "Africa/Lagos",
+      "path": "/api/cron/workforce/eod-report",
+      "requestMethod": "GET"
+    },
+    "sadiq-weekly-review": {
+      "schedule": "0 9 * * 1",
+      "timezone": "Africa/Lagos",
+      "path": "/api/cron/workforce/weekly-review",
+      "requestMethod": "GET"
+    }
+  }
+}

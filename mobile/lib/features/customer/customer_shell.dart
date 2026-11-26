@@ -2,6 +2,7 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:image_picker/image_picker.dart";
+import "package:intl/intl.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/app_state_badges.dart";
@@ -11,8 +12,10 @@ import "package:flowguard_plumbing/core/service_assets.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 import "package:flowguard_plumbing/features/customer/customer_request_detail_page.dart";
 import "package:flowguard_plumbing/features/customer/new_request_sheet.dart";
+import "package:flowguard_plumbing/features/customer/zainab_support_sheet.dart";
 import "package:flowguard_plumbing/features/shared/notifications_sheet.dart";
 import "package:flowguard_plumbing/features/shared/profile_and_edit_pages.dart";
+import "package:flowguard_plumbing/features/shared/receipt_and_quote_sheets.dart";
 import "package:flowguard_plumbing/features/shared/ticket_chat_view.dart";
 import "package:flowguard_plumbing/models/flowguard_models.dart";
 import "package:flowguard_plumbing/theme/app_theme.dart";
@@ -31,6 +34,7 @@ class _CustomerShellState extends State<CustomerShell> {
   bool _loading = true;
   List<ServiceCategoryItem> _categories = [];
   List<ServiceRequestItem> _requests = [];
+  Map<String, QuotationData> _quotesByTicket = {};
   List<Map<String, dynamic>> _payments = [];
   BankDetailsData? _bankDetails;
   String _customerId = "";
@@ -39,6 +43,7 @@ class _CustomerShellState extends State<CustomerShell> {
   String? _savedAddress;
   String? _avatarUrl;
   String? _loadError;
+  bool _quoteBusy = false;
 
   @override
   void initState() {
@@ -116,6 +121,7 @@ class _CustomerShellState extends State<CustomerShell> {
       }
 
       final reqList = <ServiceRequestItem>[];
+      final quotesMap = <String, QuotationData>{};
       if (customerId.isNotEmpty) {
         final rows = await client
             .from("service_requests")
@@ -127,12 +133,30 @@ class _CustomerShellState extends State<CustomerShell> {
             reqList.add(ServiceRequestItem.fromJson(row));
           }
         }
+        final ticketNumbers = reqList
+            .map((r) => r.ticketNumber)
+            .where((t) => t.isNotEmpty)
+            .toList();
+        if (ticketNumbers.isNotEmpty) {
+          final qRows = await client
+              .from("quotations")
+              .select()
+              .inFilter("ticket_number", ticketNumbers)
+              .order("created_at", ascending: false);
+          for (final qRow in qRows) {
+            final t = (qRow["ticket_number"] ?? "").toString();
+            if (t.isNotEmpty && !quotesMap.containsKey(t)) {
+              quotesMap[t] = QuotationData.fromJson(qRow);
+            }
+          }
+        }
       }
 
       if (mounted) {
         setState(() {
           _categories = parsedCategories;
           _requests = reqList;
+          _quotesByTicket = quotesMap;
           _payments = parsedPayments;
           _bankDetails = bank;
           _customerId = customerId;
@@ -261,6 +285,52 @@ class _CustomerShellState extends State<CustomerShell> {
     );
   }
 
+  void _openZainabSupport() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => ZainabSupportSheet(customerName: _customerName),
+    );
+  }
+
+  Future<void> _handleQuoteDecision(
+    QuotationData quote,
+    String decision,
+  ) async {
+    if (_quoteBusy) return;
+    setState(() => _quoteBusy = true);
+    try {
+      await FlowGuardApiClient.decideQuotation(
+        quotationId: quote.id,
+        decision: decision,
+      );
+      await _loadCustomerData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              decision == "approved"
+                  ? "Quotation approved — technician notified."
+                  : "Quotation declined — technician notified.",
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not update quote: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _quoteBusy = false);
+    }
+  }
+
   void _openRequestDetail(ServiceRequestItem req) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -280,13 +350,17 @@ class _CustomerShellState extends State<CustomerShell> {
       _CustomerHomeTab(
         customerName: _customerName,
         loading: _loading,
+        quoteBusy: _quoteBusy,
         categories: _categories,
         requests: _requests,
+        quotesByTicket: _quotesByTicket,
         onRefresh: _loadCustomerData,
         onSelectCategory: _openNewRequestSheet,
         onViewAllCategories: _openAllCategoriesSheet,
         onOpenRequest: _openRequestDetail,
         onViewAllRequests: () => setState(() => _tabIndex = 1),
+        onOpenZainab: _openZainabSupport,
+        onDecideQuote: _handleQuoteDecision,
       ),
       _CustomerRequestsTab(
         requests: _requests,
@@ -301,7 +375,10 @@ class _CustomerShellState extends State<CustomerShell> {
       ),
       _CustomerPaymentsTab(
         bankDetails: _bankDetails,
+        customerName: _customerName,
+        customerPhone: _customerPhone,
         requests: _requests,
+        quotesByTicket: _quotesByTicket,
         payments: _payments,
         onUploaded: _loadCustomerData,
       ),
@@ -350,6 +427,24 @@ class _CustomerShellState extends State<CustomerShell> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: "Ask Zainab Support",
+            onPressed: _openZainabSupport,
+            icon: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: FlowGuardTheme.gold, width: 1.5),
+              ),
+              child: ClipOval(
+                child: Image.asset(
+                  "assets/images/zainab-avatar.jpg",
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+          ),
           NotificationsButton(
             role: "customer",
             onNavigateLink: (link) {
@@ -466,24 +561,32 @@ class _CustomerShellState extends State<CustomerShell> {
 class _CustomerHomeTab extends StatefulWidget {
   final String customerName;
   final bool loading;
+  final bool quoteBusy;
   final List<ServiceCategoryItem> categories;
   final List<ServiceRequestItem> requests;
+  final Map<String, QuotationData> quotesByTicket;
   final Future<void> Function() onRefresh;
   final void Function([String?]) onSelectCategory;
   final VoidCallback onViewAllCategories;
   final void Function(ServiceRequestItem) onOpenRequest;
   final VoidCallback onViewAllRequests;
+  final VoidCallback onOpenZainab;
+  final Future<void> Function(QuotationData, String) onDecideQuote;
 
   const _CustomerHomeTab({
     required this.customerName,
     required this.loading,
+    required this.quoteBusy,
     required this.categories,
     required this.requests,
+    required this.quotesByTicket,
     required this.onRefresh,
     required this.onSelectCategory,
     required this.onViewAllCategories,
     required this.onOpenRequest,
     required this.onViewAllRequests,
+    required this.onOpenZainab,
+    required this.onDecideQuote,
   });
 
   @override
@@ -538,6 +641,21 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
     final activeRequests = widget.requests.where((r) => r.isActive).toList();
     final recentRequests = widget.requests.take(3).toList();
     final spotlight = widget.categories.take(5).toList();
+    final naira = NumberFormat.currency(
+      locale: "en_NG",
+      symbol: "₦",
+      decimalDigits: 0,
+    );
+    final pendingQuoteEntries = widget.requests
+        .where((r) => r.status != "cancelled")
+        .map((r) {
+          final q = widget.quotesByTicket[r.ticketNumber];
+          return (q != null && q.approvalStatus == "pending")
+              ? (request: r, quote: q)
+              : null;
+        })
+        .whereType<({ServiceRequestItem request, QuotationData quote})>()
+        .toList();
 
     return RefreshIndicator(
       onRefresh: widget.onRefresh,
@@ -563,20 +681,37 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Center(
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => widget.onSelectCategory(),
-                      icon: const Icon(Icons.add),
-                      label: const Text(
-                        "New Request",
-                        maxLines: 1,
-                        softWrap: false,
-                        overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => widget.onSelectCategory(),
+                        icon: const Icon(Icons.add),
+                        label: const Text(
+                          "New Request",
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
-                  ),
+                    const SizedBox(width: 10),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                      ),
+                      onPressed: widget.onOpenZainab,
+                      icon: const Icon(Icons.support_agent_rounded, size: 18),
+                      label: const Text(
+                        "Ask Zainab",
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -815,6 +950,109 @@ class _CustomerHomeTabState extends State<_CustomerHomeTab> {
               ],
             ),
           ],
+          if (pendingQuoteEntries.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            const Text(
+              "Quotes Waiting Your Approval",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: FlowGuardTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...pendingQuoteEntries.map((entry) {
+              final req = entry.request;
+              final q = entry.quote;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: FlowGuardTheme.gold.withValues(alpha: 0.7),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "#${req.ticketNumber} • ${req.problemCategory.isNotEmpty ? req.problemCategory : req.propertyType}",
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                        Text(
+                          naira.format(q.totalAmount),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            color: FlowGuardTheme.navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                          ),
+                          onPressed: () => showFullQuotationSheet(
+                            context: context,
+                            request: req,
+                            quote: q,
+                            formatter: naira,
+                          ),
+                          child: const Text("View Quote", maxLines: 1),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF059669),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                            ),
+                            onPressed: widget.quoteBusy
+                                ? null
+                                : () => widget.onDecideQuote(q, "approved"),
+                            child: const Text("Approve Quote", maxLines: 1),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFDC2626),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                          ),
+                          onPressed: widget.quoteBusy
+                              ? null
+                              : () => widget.onDecideQuote(q, "rejected"),
+                          child: const Text("Decline", maxLines: 1),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
           if (activeRequests.isNotEmpty) ...[
             const SizedBox(height: 20),
             Row(
@@ -1046,13 +1284,19 @@ class _RequestSummaryCard extends StatelessWidget {
 
 class _CustomerPaymentsTab extends StatefulWidget {
   final BankDetailsData? bankDetails;
+  final String customerName;
+  final String customerPhone;
   final List<ServiceRequestItem> requests;
+  final Map<String, QuotationData> quotesByTicket;
   final List<Map<String, dynamic>> payments;
   final Future<void> Function() onUploaded;
 
   const _CustomerPaymentsTab({
     this.bankDetails,
+    required this.customerName,
+    required this.customerPhone,
     required this.requests,
+    required this.quotesByTicket,
     required this.payments,
     required this.onUploaded,
   });
@@ -1146,6 +1390,74 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
   @override
   Widget build(BuildContext context) {
     final bank = widget.bankDetails;
+    final naira = NumberFormat.currency(
+      locale: "en_NG",
+      symbol: "₦",
+      decimalDigits: 0,
+    );
+    final selectedReq = widget.requests
+        .where((r) => r.ticketNumber == _selectedTicket)
+        .firstOrNull;
+    final selectedQuote =
+        selectedReq != null ? widget.quotesByTicket[selectedReq.ticketNumber] : null;
+
+    Widget navyCopyPill({
+      required String label,
+      required String value,
+      required String copyValue,
+      required String snackText,
+    }) {
+      return Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: Color(0xFFCBD5E1),
+                    ),
+                  ),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: copyValue));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(snackText)),
+                );
+              },
+              icon: const Icon(
+                Icons.copy_rounded,
+                size: 18,
+                color: FlowGuardTheme.gold,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -1178,7 +1490,7 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   bank.accountName,
                   style: const TextStyle(
@@ -1186,47 +1498,26 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
                     color: Color(0xFFCBD5E1),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        bank.accountNumber,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.2,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () {
-                          Clipboard.setData(
-                            ClipboardData(text: bank.accountNumber),
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Account number copied"),
-                            ),
-                          );
-                        },
-                        icon: const Icon(
-                          Icons.copy_rounded,
-                          color: FlowGuardTheme.gold,
-                        ),
-                      ),
-                    ],
-                  ),
+                navyCopyPill(
+                  label: "Account Number",
+                  value: bank.accountNumber,
+                  copyValue: bank.accountNumber,
+                  snackText: "Account number copied",
                 ),
+                if (selectedQuote != null && selectedQuote.totalAmount > 0)
+                  navyCopyPill(
+                    label: "Quote Amount (${selectedReq!.ticketNumber})",
+                    value: naira.format(selectedQuote.totalAmount),
+                    copyValue: selectedQuote.totalAmount.round().toString(),
+                    snackText: "Amount copied",
+                  ),
+                if (selectedReq != null)
+                  navyCopyPill(
+                    label: "Transfer Narration / Reference",
+                    value: selectedReq.ticketNumber,
+                    copyValue: selectedReq.ticketNumber,
+                    snackText: "Reference copied",
+                  ),
               ] else
                 const Text(
                   "Bank transfer details will appear here once configured in Admin Settings.",
@@ -1333,70 +1624,122 @@ class _CustomerPaymentsTabState extends State<_CustomerPaymentsTab> {
             final status = (p["verification_status"] ?? "pending").toString();
             final ticket = (p["ticket_number"] ?? "").toString();
             final total = (p["total_payment"] as num?)?.toDouble() ?? 0;
-            final isVerified = status == "verified";
-            final isRejected = status == "rejected";
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
+            final labourPortion =
+                (p["labour_portion"] as num?)?.toDouble() ?? 0;
+            final materialsPortion =
+                (p["materials_portion"] as num?)?.toDouble() ?? 0;
+            final paymentMethod = p["payment_method"]?.toString();
+            final paymentDate =
+                (p["payment_date"] ?? p["created_at"])?.toString();
+            final isPaid = isPaymentConfirmedStatus(status);
+            final isDeclined =
+                status.toLowerCase() == "rejected" ||
+                status.toLowerCase() == "declined";
+            final badgeLabel = formatPaymentStatusLabel(status);
+            final linkedReq = widget.requests
+                .where((r) => r.ticketNumber == ticket)
+                .firstOrNull;
+            final linkedQuote = widget.quotesByTicket[ticket];
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: InkWell(
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: FlowGuardTheme.border),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        ticket,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: FlowGuardTheme.navy,
+                onTap: () {
+                  if (isPaid) {
+                    showOfficialReceiptSheet(
+                      context: context,
+                      ticketNumber: ticket,
+                      customerName:
+                          linkedReq?.customerName ?? widget.customerName,
+                      customerPhone:
+                          linkedReq?.customerPhone ?? widget.customerPhone,
+                      address: linkedReq?.addressInKano ?? "",
+                      serviceLabel:
+                          (linkedReq?.problemCategory ?? "").isNotEmpty
+                              ? linkedReq!.problemCategory
+                              : (linkedReq?.propertyType ?? "Plumbing Service"),
+                      technicianName: linkedReq?.assignedTechnician,
+                      paymentStatus: status,
+                      paymentMethod: paymentMethod,
+                      paymentDate: paymentDate,
+                      quote: linkedQuote,
+                      fallbackTotalPayment: total,
+                      fallbackLabourPortion: labourPortion,
+                      fallbackMaterialsPortion: materialsPortion,
+                      formatter: naira,
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          "Official receipt unlocks once Admin confirms payment.",
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        "₦${total.toStringAsFixed(0)} • ${status.toUpperCase()}",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: FlowGuardTheme.mutedText,
+                    );
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: FlowGuardTheme.border),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              ticket,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: FlowGuardTheme.navy,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "${naira.format(total)} • ${isPaid ? "Tap for Official Receipt" : badgeLabel}",
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: FlowGuardTheme.mutedText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isPaid
+                              ? const Color(0xFFD1FAE5)
+                              : isDeclined
+                                  ? const Color(0xFFFEE2E2)
+                                  : const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          badgeLabel,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: isPaid
+                                ? const Color(0xFF065F46)
+                                : isDeclined
+                                    ? const Color(0xFF991B1B)
+                                    : const Color(0xFF92400E),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isVerified
-                          ? const Color(0xFFD1FAE5)
-                          : isRejected
-                              ? const Color(0xFFFEE2E2)
-                              : const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      isVerified
-                          ? "Verified"
-                          : isRejected
-                              ? "Rejected"
-                              : "Pending",
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: isVerified
-                            ? const Color(0xFF065F46)
-                            : isRejected
-                                ? const Color(0xFF991B1B)
-                                : const Color(0xFF92400E),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             );
           }),

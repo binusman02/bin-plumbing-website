@@ -720,6 +720,78 @@ class FlowGuardApiClient {
     throw Exception(_extractError(body, "Attachment upload failed."));
   }
 
+  static Future<List<Map<String, dynamic>>> fetchZainabMessages() async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/customer/zainab/chat",
+    );
+    final res = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map && decoded["messages"] is List) {
+        return (decoded["messages"] as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    }
+    return const [];
+  }
+
+  static Future<Map<String, dynamic>> sendZainabMessage({
+    required String message,
+    String source = "text",
+  }) async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/customer/zainab/chat",
+    );
+    final res = await http
+        .post(
+          uri,
+          headers: _authHeaders(),
+          body: jsonEncode({
+            "message": message,
+            "source": source,
+          }),
+        )
+        .timeout(const Duration(seconds: 25));
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return decoded;
+    }
+    throw Exception(decoded["error"]?.toString() ?? "Zainab could not reply right now.");
+  }
+
+  static Future<String> transcribeZainabAudio({
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final uri = Uri.parse(
+      "${SupabaseConfig.webBaseUrl}/api/customer/zainab/stt",
+    );
+    final req = http.MultipartRequest("POST", uri);
+    final token = _accessToken;
+    if (token != null && token.isNotEmpty) {
+      req.headers["Authorization"] = "Bearer $token";
+    }
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "audio",
+        bytes,
+        filename: filename,
+        contentType: _resolveMediaType(filename),
+      ),
+    );
+    final streamed = await req.send().timeout(const Duration(seconds: 22));
+    final raw = await streamed.stream.bytesToString();
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    if (streamed.statusCode >= 200 && streamed.statusCode < 300) {
+      return decoded["text"]?.toString() ?? "";
+    }
+    throw Exception(decoded["error"]?.toString() ?? "Voice transcription failed.");
+  }
+
   static String _extractError(String rawBody, String fallback) {
     try {
       final decoded = jsonDecode(rawBody);

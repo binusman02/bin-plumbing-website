@@ -128,16 +128,26 @@ function buildRasterStyle(
   };
 }
 
-function getMapStyle(mode: "street" | "satellite"): string | StyleSpecification {
+function getMapStyle(
+  mode: "street" | "satellite",
+  streetTier: 0 | 1 | 2 = MAP_CONFIG.styleUrl ? 0 : 1
+): string | StyleSpecification {
   if (mode === "satellite") {
     // Cap Esri World Imagery source at z17 so MapLibre overzooms smoothly instead of
     // requesting z18/z19 tiles where Esri returns "Map data not available" placeholders.
     return buildRasterStyle(MAP_CONFIG.satelliteUrl, MAP_CONFIG.satelliteAttribution, 17);
   }
-  if (MAP_CONFIG.styleUrl) {
+  if (streetTier === 0 && MAP_CONFIG.styleUrl) {
     return MAP_CONFIG.styleUrl;
   }
-  return buildRasterStyle(MAP_CONFIG.streetUrl, MAP_CONFIG.streetAttribution, 19);
+  if (streetTier <= 1) {
+    return buildRasterStyle(MAP_CONFIG.streetUrl, MAP_CONFIG.streetAttribution, 19);
+  }
+  return buildRasterStyle(
+    MAP_CONFIG.streetFallbackUrl,
+    MAP_CONFIG.streetFallbackAttribution,
+    19
+  );
 }
 
 function buildPinElement(
@@ -402,6 +412,8 @@ export function LiveMap({
   const onNeedRerouteRef = useRef(onNeedReroute);
 
   const [mapStyle, setMapStyle] = useState<"street" | "satellite">("street");
+  const mapStyleRef = useRef<"street" | "satellite">("street");
+  const streetTierRef = useRef<0 | 1 | 2>(MAP_CONFIG.styleUrl ? 0 : 1);
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [tileError, setTileError] = useState(false);
   const [userLocation, setUserLocation] = useState<{
@@ -698,12 +710,31 @@ export function LiveMap({
       const initialCenter = center || SERVICE_AREA_CENTER;
       const map = new ml.Map({
         container: containerRef.current,
-        style: getMapStyle("street"),
+        style: getMapStyle("street", streetTierRef.current),
         center: [initialCenter.lng, initialCenter.lat],
         zoom,
         maxZoom: MAP_CONFIG.maxZoom,
         pitchWithRotate: false,
       });
+
+      const promoteStreetFallback = () => {
+        if (mapStyleRef.current !== "street") return false;
+        if (streetTierRef.current === 0) {
+          streetTierRef.current = 1;
+          setStyleLoaded(false);
+          setTileError(false);
+          map.setStyle(getMapStyle("street", 1));
+          return true;
+        }
+        if (streetTierRef.current === 1) {
+          streetTierRef.current = 2;
+          setStyleLoaded(false);
+          setTileError(false);
+          map.setStyle(getMapStyle("street", 2));
+          return true;
+        }
+        return false;
+      };
 
       map.addControl(new ml.NavigationControl({ showCompass: false }), "bottom-right");
 
@@ -733,10 +764,21 @@ export function LiveMap({
         setTileError(false);
       });
 
-      map.on("error", (ev: { error?: { message?: string } }) => {
+      map.on("error", (ev: { error?: { message?: string; status?: number } }) => {
+        const status = ev?.error?.status;
         const msg = String(ev?.error?.message || "");
-        if (/tile|fetch|network|403|404|429/i.test(msg)) {
-          setTileError(true);
+        const isStyleOrTileFailure =
+          status === 401 ||
+          status === 403 ||
+          status === 404 ||
+          status === 429 ||
+          (typeof status === "number" && status >= 500) ||
+          /tile|style|fetch|network|ajax|401|403|404|429/i.test(msg);
+        if (isStyleOrTileFailure) {
+          const switched = promoteStreetFallback();
+          if (!switched) {
+            setTileError(true);
+          }
         }
       });
 
@@ -794,11 +836,13 @@ export function LiveMap({
   // Switch street / satellite style
   const prevStyleModeRef = useRef<"street" | "satellite">("street");
   useEffect(() => {
+    mapStyleRef.current = mapStyle;
     const map = mapRef.current;
     if (!map || prevStyleModeRef.current === mapStyle) return;
     prevStyleModeRef.current = mapStyle;
+    setStyleLoaded(false);
     setTileError(false);
-    map.setStyle(getMapStyle(mapStyle));
+    map.setStyle(getMapStyle(mapStyle, streetTierRef.current));
   }, [mapStyle]);
 
   // Update overlays when route or accuracy circle changes

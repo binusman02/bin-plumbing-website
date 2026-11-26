@@ -134,6 +134,7 @@ class QuotationData {
   final double otherCharges;
   final double totalAmount;
   final String approvalStatus;
+  final int revisionNumber;
   final String? notes;
   final String? createdAt;
   final List<QuotationLineItem> items;
@@ -147,6 +148,7 @@ class QuotationData {
     required this.otherCharges,
     required this.totalAmount,
     required this.approvalStatus,
+    this.revisionNumber = 1,
     this.notes,
     this.createdAt,
     this.items = const [],
@@ -201,6 +203,7 @@ class QuotationData {
       totalAmount: total,
       approvalStatus:
           (json["customer_approval_status"] ?? "pending").toString(),
+      revisionNumber: (json["revision_number"] as num?)?.toInt() ?? 1,
       notes: cleanNotes.isNotEmpty ? cleanNotes : null,
       createdAt: json["created_at"]?.toString(),
       items: parsedItems,

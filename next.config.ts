@@ -37,12 +37,6 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
-        source: "/:path*",
-        has: [{ type: "host", value: "flowguard.com.ng" }],
-        destination: "https://flowguard.com.ng/:path*",
-        permanent: true,
-      },
-      {
         source: "/guides",
         destination: "/en/blog",
         permanent: true,
