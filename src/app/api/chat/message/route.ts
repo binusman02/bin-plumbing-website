@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { triggerWorkforceOnCustomerTicketMessage } from "@/lib/ai-workforce/auto-triggers";
 import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
 import { dispatchFcmPush } from "@/lib/fcm-push";
@@ -157,6 +158,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, message: created, aiReply });
   } catch (err) {
+    void captureActionError("/api/chat/message:POST", err, { area: "chat" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to send message" },
       { status: 500 }
@@ -206,7 +208,8 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json({ success: true, message: updated });
-  } catch {
+  } catch (err) {
+    void captureActionError("/api/chat/message:PATCH", err, { area: "chat" });
     return NextResponse.json({ error: "Failed to edit message" }, { status: 500 });
   }
 }
@@ -256,7 +259,8 @@ export async function DELETE(request: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (err) {
+    void captureActionError("/api/chat/message:DELETE", err, { area: "chat" });
     return NextResponse.json({ error: "Failed to delete message" }, { status: 500 });
   }
 }

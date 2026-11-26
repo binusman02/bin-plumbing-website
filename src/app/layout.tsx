@@ -7,6 +7,7 @@ import { COMPANY } from "@/data/company";
 import { getMarketplaceSettings, getServiceCategories } from "@/lib/marketplace";
 import { SITE_NAME, SITE_URL } from "@/lib/seo";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
+import { ClientIncidentReporter } from "@/components/pwa/ClientIncidentReporter";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 
@@ -210,6 +211,7 @@ export default function RootLayout({
           <OrganizationJsonLd />
         </Suspense>
         <ServiceWorkerRegister />
+        <ClientIncidentReporter />
         {children}
         <SpeedInsights />
         <Analytics />

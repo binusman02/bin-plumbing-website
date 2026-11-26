@@ -4,6 +4,7 @@ import {
   parseViewerHint,
   resolveTrackingActor,
 } from "@/lib/tracking-api";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { resolveRouteEndpoints } from "@/lib/live-location-server";
 import { getRoadRoute } from "@/lib/routing";
 import { haversineMeters, isValidCoordinate } from "@/lib/live-location";
@@ -64,6 +65,7 @@ export async function GET(request: Request) {
     return noStoreJson(payload);
   } catch (err) {
     console.error("[api/tracking/route]", err instanceof Error ? err.message : err);
+    void captureActionError("/api/tracking/route:GET", err, { area: "tracking" });
     return noStoreJson({ ok: false, reason: "unavailable" } satisfies RoutePayload, 200);
   }
 }

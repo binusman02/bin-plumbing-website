@@ -4,6 +4,7 @@ import {
   handlePublicAminaTurn,
 } from "@/lib/ai-workforce/public-amina";
 import { checkRateLimit } from "@/lib/security";
+import { withIncidentMonitor } from "@/lib/ai-workforce/incident-monitor";
 
 export const maxDuration = 60;
 
@@ -67,7 +68,10 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
+export const POST = withIncidentMonitor(
+  "/api/public/amina/chat:POST",
+  "public",
+  async (request: Request) => {
   const rate = await checkRateLimit("public_amina_chat", 20, 10 * 60 * 1000);
   if (!rate.allowed) {
     return NextResponse.json(
@@ -138,4 +142,4 @@ export async function POST(request: Request) {
   });
 
   return res;
-}
+});

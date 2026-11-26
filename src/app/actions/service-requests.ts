@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { isValidCoordinate } from "@/lib/live-location";
 import { createUniversalServiceRequest } from "@/lib/marketplace";
 import { resolvePortalActor } from "@/lib/portal-auth";
@@ -136,6 +137,7 @@ export async function submitServiceRequest(data: ServiceRequestInput) {
     };
   } catch (err: unknown) {
     console.error("Server Action Exception (Service Request):", err);
+    void captureActionError("action:submitServiceRequestAction", err, { area: "public" });
     return { success: false, error: "An unexpected error occurred while saving your request." };
   }
 }

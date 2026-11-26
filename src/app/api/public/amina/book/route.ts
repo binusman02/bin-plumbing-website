@@ -5,6 +5,7 @@ import {
   sendBookingConfirmationEmail,
 } from "@/lib/ai-workforce/public-amina";
 import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
+import { withIncidentMonitor } from "@/lib/ai-workforce/incident-monitor";
 import { createUniversalServiceRequest } from "@/lib/marketplace";
 import { isValidCoordinate } from "@/lib/live-location";
 import { resolvePortalActor } from "@/lib/portal-auth";
@@ -30,7 +31,10 @@ function readToken(request: Request, bodyToken?: string): string | null {
   return null;
 }
 
-export async function POST(request: Request) {
+export const POST = withIncidentMonitor(
+  "/api/public/amina/book:POST",
+  "public",
+  async (request: Request) => {
   const rate = await checkRateLimit("public_amina_book", 5, 10 * 60 * 1000);
   if (!rate.allowed) {
     return NextResponse.json(
@@ -223,4 +227,4 @@ export async function POST(request: Request) {
     maxAge: 60 * 60 * 24 * 30,
   });
   return res;
-}
+});

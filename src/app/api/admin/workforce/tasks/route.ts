@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { defaultWorkforceOrchestrator } from "@/lib/ai-workforce/orchestrator";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import type { AgentId } from "@/lib/ai-workforce/types";
 import { requireAdminUser } from "@/lib/security";
 
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, task });
   } catch (err) {
+    void captureActionError("/api/admin/workforce/tasks:POST", err, { area: "ai-workforce" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to dispatch task." },
       { status: 400 }

@@ -37,9 +37,9 @@ const KICKOFF_BRIEFS: Array<{
   },
   {
     agentId: "engineering_ai",
-    title: "Bashir: Technical & Security Readiness Check",
+    title: "Bashir: Whole-System Technical & Security Health Check",
     instruction:
-      "Use eng_read_repo on package.json and summarize our Next.js/Supabase/Flutter architecture health, security posture, and top technical priorities.",
+      "Use eng_read_repo on package.json and summarize whole-system architecture health across Public Website, Customer Portal, Plumber Portal, Mobile APIs, Live Location/Tracking, Supabase, and Admin Dashboard — plus highlight any open incident alerts.",
   },
 ];
 

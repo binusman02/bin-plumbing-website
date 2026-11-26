@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { validateLocationInput } from "@/lib/live-location";
 import {
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
       confirmedAt: result.confirmedAtIso,
     });
   } catch (err) {
+    void captureActionError("/api/mobile/tracking/location:POST", err, { area: "mobile" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Location update failed" },
       { status: 500 }

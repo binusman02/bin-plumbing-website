@@ -5,6 +5,7 @@ import { resolvePortalActor } from "@/lib/portal-auth";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { appendAuditLog, updatePlumberProfileFields } from "@/lib/marketplace";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import {
   hashCustomerPassword as hashPassword,
   verifyCustomerPassword as verifyPassword,
@@ -47,6 +48,10 @@ export async function updateProfileAction(input: {
         })
         .eq("id", actor.id);
       if (error && !error.message.includes("updated_at")) {
+        void captureActionError("action:updateProfileAction:admin", error.message, {
+          area: "admin",
+          actorRole: "admin",
+        });
         return { success: false, error: error.message };
       }
       await appendAuditLog({
@@ -73,6 +78,10 @@ export async function updateProfileAction(input: {
       };
       const { error } = await supabase.from("customers").update(updates).eq("id", actor.id);
       if (error) {
+        void captureActionError("action:updateProfileAction:customer", error.message, {
+          area: "customer",
+          actorRole: "customer",
+        });
         return { success: false, error: error.message };
       }
       revalidatePath("/customer");
@@ -91,12 +100,18 @@ export async function updateProfileAction(input: {
       availability: input.availability?.trim() || undefined,
     });
     if (!plumberRes.success) {
+      void captureActionError(
+        "action:updateProfileAction:plumber",
+        plumberRes.error || "Failed to update plumber profile.",
+        { area: "plumber", actorRole: "plumber" }
+      );
       return { success: false, error: plumberRes.error || "Failed to update profile." };
     }
     revalidatePath("/plumber");
     revalidatePath("/admin/plumbers");
     return { success: true };
   } catch (err: any) {
+    void captureActionError("action:updateProfileAction", err, { area: input.role });
     return { success: false, error: err?.message || "Failed to update profile." };
   }
 }
@@ -206,6 +221,11 @@ export async function adminUpdatePlumberProfileAction(input: {
     });
 
     if (!updateRes.success) {
+      void captureActionError(
+        "action:adminUpdatePlumberProfileAction",
+        updateRes.error || "Failed to update plumber profile.",
+        { area: "admin", actorRole: "admin" }
+      );
       return { success: false, error: updateRes.error || "Failed to update plumber profile." };
     }
 
@@ -223,6 +243,10 @@ export async function adminUpdatePlumberProfileAction(input: {
     revalidatePath("/admin/communications");
     return { success: true };
   } catch (err: any) {
+    void captureActionError("action:adminUpdatePlumberProfileAction", err, {
+      area: "admin",
+      actorRole: "admin",
+    });
     return { success: false, error: err?.message || "Failed to update plumber profile." };
   }
 }

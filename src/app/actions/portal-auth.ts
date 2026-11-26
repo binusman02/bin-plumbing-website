@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getVerifiedAppRole } from "@/lib/auth-role";
 import { checkRateLimit } from "@/lib/security";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { findCustomerByIdentifier, findPlumberByIdentifier } from "@/lib/auth-lookup";
 import {
   claimUnlinkedCustomerRequests,
@@ -440,6 +441,10 @@ export async function registerCustomerWithPasswordAction(input: {
     };
   } catch (err) {
     console.error("[registerCustomerWithPasswordAction]", err);
+    void captureActionError("action:registerCustomerWithPasswordAction", err, {
+      area: "customer",
+      actorRole: "customer",
+    });
     return {
       success: false,
       error:

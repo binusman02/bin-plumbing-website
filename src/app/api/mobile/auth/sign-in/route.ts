@@ -6,6 +6,7 @@ import {
   normalizeNigerianDigits,
 } from "@/lib/auth-lookup";
 import { getVerifiedAppRole } from "@/lib/auth-role";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { checkRateLimit } from "@/lib/security";
 import {
   getRequiredAnonKey,
@@ -101,7 +102,8 @@ export async function POST(req: NextRequest) {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
     });
-  } catch {
+  } catch (err) {
+    void captureActionError("/api/mobile/auth/sign-in:POST", err, { area: "mobile" });
     return NextResponse.json({ error: "Sign-in failed." }, { status: 500 });
   }
 }

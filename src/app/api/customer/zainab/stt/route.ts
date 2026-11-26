@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAudioContentType } from "@/app/api/admin/workforce/stt/route";
+import { withIncidentMonitor } from "@/lib/ai-workforce/incident-monitor";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { checkRateLimit } from "@/lib/security";
 
@@ -8,7 +9,10 @@ export const maxDuration = 60;
 const MIN_AUDIO_BYTES = 250;
 const MAX_AUDIO_BYTES = 2_500_000;
 
-export async function POST(request: Request) {
+export const POST = withIncidentMonitor(
+  "/api/customer/zainab/stt:POST",
+  "customer",
+  async (request: Request) => {
   const actor = await resolvePortalActor("customer");
   if (!actor || actor.role !== "customer") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -104,4 +108,4 @@ export async function POST(request: Request) {
     { error: "Speech service is busy right now. Please type your message." },
     { status: 502 }
   );
-}
+});

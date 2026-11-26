@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { verifyTicketAccess } from "@/lib/chat-auth";
 import {
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, quotation });
   } catch (err) {
+    void captureActionError("/api/mobile/quotations:POST", err, { area: "mobile" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to submit quotation" },
       { status: 500 }
@@ -109,6 +111,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ success: true, quotation: updated });
   } catch (err) {
+    void captureActionError("/api/mobile/quotations:PATCH", err, { area: "mobile" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to update quotation" },
       { status: 500 }

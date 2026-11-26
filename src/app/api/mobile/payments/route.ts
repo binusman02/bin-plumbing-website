@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { verifyTicketAccess } from "@/lib/chat-auth";
 import {
@@ -71,6 +72,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ bankDetails, payments: [] });
   } catch (err) {
+    void captureActionError("/api/mobile/payments:GET", err, { area: "payments" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to load payments" },
       { status: 500 }
@@ -220,6 +222,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, payment });
   } catch (err) {
+    void captureActionError("/api/mobile/payments:POST", err, { area: "payments" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to record payment" },
       { status: 500 }

@@ -4,12 +4,13 @@ import {
   handleCustomerZainabTurn,
 } from "@/lib/ai-workforce/customer-zainab";
 import { defaultPublicAminaStore } from "@/lib/ai-workforce/public-amina";
+import { withIncidentMonitor } from "@/lib/ai-workforce/incident-monitor";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { checkRateLimit } from "@/lib/security";
 
 export const maxDuration = 60;
 
-export async function GET() {
+export const GET = withIncidentMonitor("/api/customer/zainab/chat:GET", "customer", async () => {
   const actor = await resolvePortalActor("customer");
   if (!actor || actor.role !== "customer") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,9 +23,12 @@ export async function GET() {
   }
   const messages = await defaultPublicAminaStore.listMessages(session.id, 40);
   return NextResponse.json({ ok: true, sessionToken: token, messages });
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withIncidentMonitor(
+  "/api/customer/zainab/chat:POST",
+  "customer",
+  async (request: Request) => {
   const actor = await resolvePortalActor("customer");
   if (!actor || actor.role !== "customer") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -62,4 +66,4 @@ export async function POST(request: Request) {
     reply: result.reply,
     messages: result.messages,
   });
-}
+});

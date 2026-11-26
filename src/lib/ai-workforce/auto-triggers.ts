@@ -5,6 +5,7 @@ import {
   getOwnerApprovalDeepLink,
 } from "@/lib/ai-workforce/admin-tools";
 import { reportToOwner } from "@/lib/ai-workforce/owner-report";
+import { reportSystemIncident } from "@/lib/ai-workforce/incident-monitor";
 import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
 import { computeDueAtFromPriority } from "@/lib/ai-workforce/work-orders";
 import { triageSupportMessage } from "@/lib/ai-workforce/specialists/support";
@@ -398,40 +399,26 @@ export async function triggerWorkforceOnComplaint(params: {
 
 /**
  * Event 5: Technical Error / Incident Detected
- * Bashir (Engineering AI) automatically logs an investigation task and notifies the Founder.
+ * Bashir (Engineering AI) automatically diagnoses, deduplicates, logs an investigation task, and notifies the Founder.
  */
 export async function triggerEngineeringIncidentWatch(params: {
   source: string;
   errorMessage: string;
+  area?: "admin" | "customer" | "plumber" | "public" | "mobile" | "tracking" | "payments" | "chat" | "ai-workforce" | "system";
+  routePath?: string;
+  stack?: string;
+  actorRole?: string;
+  context?: Record<string, unknown>;
 }): Promise<void> {
-  try {
-    const taskId = await recordAutoTask({
-      agentId: "engineering_ai",
-      title: `Incident Detected: ${params.source}`,
-      description: params.errorMessage.slice(0, 1000),
-      status: "completed",
-      priority: "high",
-      outputSummary: `Bashir logged technical incident from ${params.source} for root-cause review: ${params.errorMessage.slice(0, 240)}`,
-    });
-    if (taskId) {
-      await recordTeamNote({
-        fromAgent: "engineering_ai",
-        toAgent: "operations_manager",
-        taskId,
-        note: `Bashir logged technical incident in ${params.source}: ${params.errorMessage.slice(0, 140)}`,
-      }).catch(() => {});
-      await reportToOwner({
-        agentId: "engineering_ai",
-        status: "urgent",
-        urgent: true,
-        taskId,
-        summary: `Technical issue in ${params.source}: ${params.errorMessage.slice(0, 140)}`,
-        destination: "/admin/workforce?tab=tasks",
-      }).catch(() => {});
-    }
-  } catch {
-    // Non-blocking
-  }
+  await reportSystemIncident({
+    source: params.source,
+    errorMessage: params.errorMessage,
+    area: params.area,
+    routePath: params.routePath,
+    stack: params.stack,
+    actorRole: params.actorRole,
+    context: params.context,
+  }).catch(() => {});
 }
 
 const HUMAN_PAUSE_WINDOW_MS = 15 * 60 * 1000;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { verifyTicketAccess } from "@/lib/chat-auth";
 import {
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, request: created });
   } catch (err) {
+    void captureActionError("/api/mobile/requests:POST", err, { area: "mobile" });
     return NextResponse.json(
       {
         error:
@@ -151,6 +153,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ success: true, status: "cancelled" });
   } catch (err) {
+    void captureActionError("/api/mobile/requests:PATCH", err, { area: "mobile" });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to cancel request." },
       { status: 500 }

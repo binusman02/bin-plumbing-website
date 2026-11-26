@@ -4,6 +4,7 @@ import {
   parseViewerHint,
   resolveTrackingActor,
 } from "@/lib/tracking-api";
+import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { buildTrackingSnapshot } from "@/lib/live-location-server";
 
 /**
@@ -32,6 +33,7 @@ export async function GET(request: Request) {
     return noStoreJson(snapshot);
   } catch (err) {
     console.error("[api/tracking/snapshot]", err instanceof Error ? err.message : err);
+    void captureActionError("/api/tracking/snapshot:GET", err, { area: "tracking" });
     return noStoreJson({ error: "Tracking is temporarily unavailable." }, 500);
   }
 }
