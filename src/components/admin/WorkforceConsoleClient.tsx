@@ -19,7 +19,6 @@ import {
   Send,
   ShieldAlert,
   ShieldCheck,
-  Terminal,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -66,6 +65,142 @@ function formatShortTime(iso: string | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  assign_plumber_to_ticket: "Assign Plumber to Job",
+  verify_payment: "Confirm Customer Payment",
+  sales_send_email: "Send Follow-Up Email",
+  support_send_reply: "Send Support Reply",
+  support_draft_reply: "Prepare Support Reply Draft",
+  update_ticket_status: "Update Job Status",
+  send_ticket_message: "Send Ticket Message",
+  update_plumber_status: "Update Plumber Approval Status",
+  resolve_complaint: "Resolve Customer Complaint",
+  update_commission_settings: "Update Commission Rates",
+  find_best_plumbers_for_area: "Matched Available Plumbers",
+  get_live_operations_feed: "Checked Live Operations Board",
+  inspect_ticket: "Reviewed Job Ticket",
+  inspect_financial_summary: "Reviewed Payments & Earnings",
+  sales_read_enquiries: "Checked Customer Enquiries",
+  sales_draft_followup: "Drafted Lead Follow-Up",
+  support_read_verified_ticket: "Checked Customer Ticket",
+  support_triage_intake: "Assessed Urgency",
+  support_escalate_case: "Escalated Urgent Issue",
+  research_web_search: "Researched Local Market",
+  research_save_report: "Saved Research Brief",
+  eng_read_repo: "Checked System Files",
+  eng_run_checks: "Ran System Health Checks",
+  eng_prepare_pr: "Prepared Code Fix Proposal",
+  workforce_create_task: "Assigned Follow-Up Work",
+  workforce_read_tasks: "Checked Team Task Board",
+  workforce_read_agent_status: "Checked Team Workload",
+  workforce_request_specialist_run: "Asked Teammate to Handle Step",
+};
+
+function humanToolLabel(raw: string): string {
+  if (!raw) return "Team Action";
+  if (TOOL_LABELS[raw]) return TOOL_LABELS[raw];
+  return raw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Waiting for Your Okay",
+  waiting_approval: "Waiting for Your Okay",
+  approved: "Approved",
+  executed: "Approved & Done",
+  rejected: "Declined",
+  expired: "Expired",
+  failed: "Could Not Finish",
+  closed: "Completed",
+  completed: "Completed",
+  reported: "Reported",
+  running: "Working on It",
+  in_progress: "Working on It",
+  queued: "Queued",
+  new: "New Request",
+  contacted: "Contacted",
+  scheduled: "Scheduled",
+  inspection_required: "Needs Inspection",
+  work_completed: "Work Done",
+  awaiting_final_payment: "Awaiting Final Payment",
+  cancelled: "Cancelled",
+};
+
+function humanStatusLabel(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const key = raw.toLowerCase();
+  if (STATUS_LABELS[key]) return STATUS_LABELS[key];
+  return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  created: "Created",
+  routed: "Assigned",
+  started: "Started",
+  progress: "Update",
+  approval_requested: "Sent for Your Okay",
+  approved: "Approved by You",
+  rejected: "Declined by You",
+  completed: "Finished",
+  failed: "Stopped",
+  cancelled: "Cancelled",
+  status_changed: "Updated",
+  qa_review: "Quality Check",
+  rework: "Sent Back for Polish",
+  chased: "Followed Up",
+  reported: "Reported to You",
+  handoff: "Passed to Teammate",
+  closed: "Completed",
+};
+
+function humanEventLabel(raw: string): string {
+  return EVENT_LABELS[raw] || humanStatusLabel(raw);
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  ticketNumber: "Ticket Number",
+  plumberNameOrId: "Plumber Selected",
+  decision: "Decision",
+  replyBody: "Reply Message",
+  body: "Message Content",
+  message: "Message",
+  to: "Recipient",
+  subject: "Email Subject",
+  status: "New Status",
+  internalNote: "Internal Note",
+  amount: "Amount",
+  complaintIdOrTicket: "Complaint / Ticket",
+};
+
+function humanPayloadRows(payload: Record<string, unknown>): Array<{ label: string; value: string }> {
+  return Object.entries(payload || {})
+    .filter(([, val]) => val !== undefined && val !== null && String(val).trim() !== "")
+    .map(([key, val]) => {
+      const label =
+        FIELD_LABELS[key] ||
+        key.replace(/([A-Z])/g, " $1").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+      const value =
+        typeof val === "object"
+          ? JSON.stringify(val)
+          : key === "decision"
+            ? humanStatusLabel(String(val))
+            : String(val);
+      return { label, value };
+    });
+}
+
+function cleanEventSummary(raw: string): string {
+  return cleanHumanProse(raw)
+    .replace(/\bTransitioned\s+([a-z_]+)\s*->\s*([a-z_]+)/gi, (_, a, b) => {
+      return `Changed from ${humanStatusLabel(a)} to ${humanStatusLabel(b)}`;
+    })
+    .replace(/\((?:[0-9a-f-]{36}|Approval ID:\s*[0-9a-f-]{36})\)/gi, "")
+    .replace(/\bby\s+[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 interface AgentItem {
@@ -1250,16 +1385,12 @@ export function WorkforceConsoleClient() {
               </div>
               <div className="mt-4 space-y-1 border-t border-slate-100 pt-3 text-[11px] text-slate-500">
                 <p>
-                  <span className="font-semibold text-slate-700">Namespace:</span>{" "}
-                  <span className="font-mono">{agent.memoryNamespace}</span>
+                  <span className="font-semibold text-slate-700">Focus:</span>{" "}
+                  {agent.roleTitle}
                 </p>
                 <p>
-                  <span className="font-semibold text-slate-700">Tools Allowed:</span>{" "}
-                  {agent.allowedTools.length} scoped tools
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-700">Daily Cap:</span>{" "}
-                  {agent.dailyRunLimit} runs/day ({agent.modelRoute})
+                  <span className="font-semibold text-slate-700">Daily Limit:</span>{" "}
+                  Up to {agent.dailyRunLimit} tasks per day (Free model)
                 </p>
               </div>
             </div>
@@ -1296,7 +1427,7 @@ export function WorkforceConsoleClient() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-[#0B1F3A]">
-                      {task.status}
+                      {humanStatusLabel(task.status)}
                     </span>
                     {(task.status === "queued" || task.status === "running") && (
                       <button
@@ -1311,7 +1442,9 @@ export function WorkforceConsoleClient() {
                 </div>
                 {task.outputSummary && (
                   <p className="mt-2.5 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
-                    {cleanHumanProse(task.outputSummary, getAgentFirstName(task.assignedAgentId))}
+                    {cleanEventSummary(
+                      cleanHumanProse(task.outputSummary, getAgentFirstName(task.assignedAgentId))
+                    )}
                   </p>
                 )}
                 {task.errorMessage && (
@@ -1353,22 +1486,39 @@ export function WorkforceConsoleClient() {
                         </h3>
                       </div>
                       <p className="mt-0.5 text-[11px] text-slate-500">
-                        {agentMap[item.requestedByAgent]?.displayName || item.requestedByAgent} • Target:{" "}
-                        <span className="font-semibold">{item.targetResource}</span>
+                        From {getAgentFirstName(item.requestedByAgent)} • {humanToolLabel(item.toolName)} • For{" "}
+                        <span className="font-semibold text-[#0B1F3A]">{item.targetResource}</span>
                       </p>
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-900">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                      item.status === "pending"
+                        ? "bg-amber-100 text-amber-900"
+                        : item.status === "executed" || item.status === "approved"
+                          ? "bg-emerald-100 text-emerald-900"
+                          : item.status === "rejected"
+                            ? "bg-red-100 text-red-900"
+                            : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
                     <Clock className="h-3 w-3" />
-                    {item.status}
+                    {humanStatusLabel(item.status)}
                   </span>
                 </div>
-                <pre className="mt-2.5 overflow-x-auto rounded-xl bg-slate-900 p-3 text-[11px] text-slate-100">
-                  {JSON.stringify(item.payload, null, 2)}
-                </pre>
-                <p className="mt-2 font-mono text-[10px] text-slate-400">
-                  Payload Hash: {item.payloadHash}
-                </p>
+                {item.reason && (
+                  <p className="mt-2 text-xs text-slate-700">
+                    <span className="font-semibold text-[#0B1F3A]">Why:</span> {item.reason}
+                  </p>
+                )}
+                <div className="mt-2.5 grid gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2">
+                  {humanPayloadRows(item.payload).map((row) => (
+                    <div key={row.label}>
+                      <span className="text-slate-500">{row.label}:</span>{" "}
+                      <span className="font-semibold text-[#0B1F3A]">{row.value}</span>
+                    </div>
+                  ))}
+                </div>
                 {item.status === "pending" && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
@@ -1532,9 +1682,12 @@ export function WorkforceConsoleClient() {
                     key={String(log.id || i)}
                     className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs"
                   >
-                    <span className="font-bold text-[#0B1F3A]">{String(log.event_type)}</span>{" "}
-                    <span className="text-slate-500">
-                      by {String(log.actor_type)}:{String(log.actor_id)}
+                    <span className="font-bold text-[#0B1F3A]">
+                      {humanEventLabel(String(log.event_type))}
+                    </span>{" "}
+                    <span className="text-slate-600">
+                      by {getAgentFirstName(String(log.actor_id || log.actor_type || "Team"))}
+                      {log.target_resource ? ` on ${String(log.target_resource)}` : ""}
                     </span>
                   </div>
                 ))
@@ -1640,10 +1793,10 @@ export function WorkforceConsoleClient() {
                       <div className="mt-3 space-y-2 border-t border-slate-200/80 pt-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-bold text-[#0B1F3A]">
-                            Work Order: {noteDetail.task.title}
+                            Task: {noteDetail.task.title}
                           </span>
-                          <span className="rounded-full bg-[#0B1F3A]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-[#0B1F3A]">
-                            {noteDetail.task.status}
+                          <span className="rounded-full bg-[#0B1F3A]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#0B1F3A]">
+                            {humanStatusLabel(noteDetail.task.status)}
                           </span>
                         </div>
                         {noteDetail.task.description && (
@@ -1652,14 +1805,16 @@ export function WorkforceConsoleClient() {
                         {(noteDetail.task.deliverable || noteDetail.task.outputSummary) && (
                           <div className="rounded-lg bg-white p-3 text-slate-700 ring-1 ring-slate-200">
                             <p className="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-                              AI Deliverable &amp; Outcome
+                              What Was Done
                             </p>
                             <p className="leading-relaxed">
-                              {cleanHumanProse(
-                                noteDetail.task.deliverable ||
-                                  noteDetail.task.outputSummary ||
-                                  "",
-                                getAgentFirstName(noteDetail.task.assignedAgentId)
+                              {cleanEventSummary(
+                                cleanHumanProse(
+                                  noteDetail.task.deliverable ||
+                                    noteDetail.task.outputSummary ||
+                                    "",
+                                  getAgentFirstName(noteDetail.task.assignedAgentId)
+                                )
                               )}
                             </p>
                           </div>
@@ -1674,23 +1829,24 @@ export function WorkforceConsoleClient() {
                       <div className="flex items-center gap-1.5">
                         <ShieldAlert className="h-4 w-4 text-amber-600" />
                         <h4 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
-                          Owner Approvals Linked to This Activity
+                          Decisions Waiting for Your Approval
                         </h4>
                       </div>
                       <span className="text-[11px] font-semibold text-slate-500">
-                        {noteDetail.approvals.filter((a) => a.status === "pending").length} pending
+                        {noteDetail.approvals.filter((a) => a.status === "pending").length} waiting
                       </span>
                     </div>
 
                     {noteDetail.approvals.length === 0 ? (
                       <p className="text-slate-500">
-                        No approval gate was required for this step — it was completed autonomously within AI safety rules.
+                        This update did not need your sign-off — your team handled it automatically.
                       </p>
                     ) : (
                       <div className="space-y-3">
                         {noteDetail.approvals.map((ap) => {
                           const isPending = ap.status === "pending";
                           const isBusy = decidingApprovalId === ap.id;
+                          const payloadRows = humanPayloadRows(ap.payload);
                           return (
                             <div
                               key={ap.id}
@@ -1708,16 +1864,16 @@ export function WorkforceConsoleClient() {
                                     {ap.actionSummary}
                                   </p>
                                   <p className="mt-0.5 text-[11px] text-slate-600">
-                                    Requested by{" "}
+                                    Suggested by{" "}
                                     <span className="font-semibold">
                                       {getAgentFirstName(ap.requestedByAgent)}
                                     </span>{" "}
-                                    • Tool: <span className="font-mono">{ap.toolName}</span> • Target:{" "}
+                                    • Action: {humanToolLabel(ap.toolName)} • For{" "}
                                     <span className="font-semibold">{ap.targetResource}</span>
                                   </p>
                                 </div>
                                 <span
-                                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase ${
+                                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold ${
                                     isPending
                                       ? "bg-amber-200 text-amber-900"
                                       : ap.status === "executed" || ap.status === "approved"
@@ -1727,15 +1883,24 @@ export function WorkforceConsoleClient() {
                                           : "bg-slate-200 text-slate-700"
                                   }`}
                                 >
-                                  {ap.status}
+                                  {humanStatusLabel(ap.status)}
                                 </span>
                               </div>
                               <p className="mt-2 text-slate-700">
-                                <span className="font-semibold">Reason:</span> {ap.reason}
+                                <span className="font-semibold">Why:</span> {ap.reason}
                               </p>
-                              <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-2.5 text-[11px] text-slate-100">
-                                {JSON.stringify(ap.payload, null, 2)}
-                              </pre>
+                              {payloadRows.length > 0 && (
+                                <div className="mt-2 grid gap-1.5 rounded-lg border border-slate-200/80 bg-white p-2.5 text-xs sm:grid-cols-2">
+                                  {payloadRows.map((row) => (
+                                    <div key={row.label}>
+                                      <span className="text-slate-500">{row.label}:</span>{" "}
+                                      <span className="font-semibold text-[#0B1F3A]">
+                                        {row.value}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
 
                               {isPending ? (
                                 <div className="mt-3 space-y-2">
@@ -1785,10 +1950,9 @@ export function WorkforceConsoleClient() {
                                 </div>
                               ) : (
                                 <p className="mt-2 text-[11px] text-slate-600">
-                                  {ap.decisionNote || `Status: ${ap.status}`}
-                                  {ap.approverEmail ? ` • Decided by ${ap.approverEmail}` : ""}
+                                  {ap.decisionNote || humanStatusLabel(ap.status)}
                                   {ap.decidedAt
-                                    ? ` at ${new Date(ap.decidedAt).toLocaleString()}`
+                                    ? ` • ${new Date(ap.decidedAt).toLocaleString()}`
                                     : ""}
                                 </p>
                               )}
@@ -1828,8 +1992,8 @@ export function WorkforceConsoleClient() {
                         </div>
                         <div>
                           <span className="text-slate-400">Status:</span>{" "}
-                          <span className="font-bold uppercase text-[#0B1F3A]">
-                            {noteDetail.ticket.status}
+                          <span className="font-bold text-[#0B1F3A]">
+                            {humanStatusLabel(noteDetail.ticket.status)}
                           </span>
                         </div>
                         <div>
@@ -1852,8 +2016,7 @@ export function WorkforceConsoleClient() {
                             <div className="flex items-center gap-1 text-emerald-700 sm:col-span-2">
                               <MapPin className="h-3.5 w-3.5" />
                               <span className="font-semibold">
-                                Customer GPS coordinates synced ({noteDetail.ticket.customer_lat.toFixed(5)},{" "}
-                                {noteDetail.ticket.customer_lng.toFixed(5)})
+                                Customer map location is saved for live plumber navigation
                               </span>
                             </div>
                           )}
@@ -1869,7 +2032,9 @@ export function WorkforceConsoleClient() {
                               <span>
                                 {q.plumber_name} — ₦{Number(q.total_customer_cost || 0).toLocaleString()}
                               </span>
-                              <span className="font-bold uppercase text-[#0B1F3A]">{q.status}</span>
+                              <span className="font-bold text-[#0B1F3A]">
+                                {humanStatusLabel(q.status)}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -1914,13 +2079,13 @@ export function WorkforceConsoleClient() {
                     </div>
                   )}
 
-                  {/* 5. AI Tool Executions & Audit Events */}
+                  {/* 5. What the AI Did Step by Step */}
                   {(noteDetail.toolExecutions.length > 0 || noteDetail.taskEvents.length > 0) && (
                     <div className="rounded-xl border border-slate-200 bg-white p-4">
                       <div className="mb-2 flex items-center gap-1.5">
-                        <Terminal className="h-4 w-4 text-[#0B1F3A]" />
+                        <CheckCircle2 className="h-4 w-4 text-[#0B1F3A]" />
                         <h4 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
-                          AI Tool Executions &amp; Lifecycle Events
+                          What the AI Did Step by Step
                         </h4>
                       </div>
                       <div className="space-y-2">
@@ -1931,14 +2096,11 @@ export function WorkforceConsoleClient() {
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-mono font-bold text-[#0B1F3A]">
-                                  {ex.tool_name}
+                                <span className="font-bold text-[#0B1F3A]">
+                                  {getAgentFirstName(ex.agent_id)}: {humanToolLabel(ex.tool_name)}
                                 </span>
-                                <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-700">
-                                  {ex.tier}
-                                </span>
-                                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-800">
-                                  {ex.status}
+                                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+                                  {humanStatusLabel(ex.status)}
                                 </span>
                               </div>
                               <span className="text-[10px] text-slate-400">
@@ -1946,7 +2108,9 @@ export function WorkforceConsoleClient() {
                               </span>
                             </div>
                             {ex.result_summary && (
-                              <p className="mt-1 text-slate-600">{ex.result_summary}</p>
+                              <p className="mt-1 text-slate-600">
+                                {cleanEventSummary(ex.result_summary)}
+                              </p>
                             )}
                           </div>
                         ))}
@@ -1956,10 +2120,12 @@ export function WorkforceConsoleClient() {
                             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 text-[11px]"
                           >
                             <div>
-                              <span className="mr-1.5 font-mono font-bold text-[#0B1F3A]">
-                                [{ev.event_type}]
+                              <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-[#0B1F3A]">
+                                {humanEventLabel(ev.event_type)}
                               </span>
-                              <span className="text-slate-700">{ev.message}</span>
+                              <span className="text-slate-700">
+                                {cleanEventSummary(ev.message)}
+                              </span>
                             </div>
                             <span className="text-[10px] text-slate-400">
                               {new Date(ev.created_at).toLocaleString()}

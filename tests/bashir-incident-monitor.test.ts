@@ -36,15 +36,19 @@ describe("Bashir whole-system incident monitor", () => {
     assert.equal(inferIncidentArea("action:updateProfileAction:plumber", "/plumber"), "plumber");
   });
 
-  it("produces clear diagnosis hints for schema, RLS, timeout, auth, and storage errors", () => {
-    assert.ok(
-      diagnoseIncidentHint("Could not find the 'availability' column of 'plumbers' in the schema cache")
-        .toLowerCase()
-        .includes("schema mismatch")
-    );
-    assert.ok(diagnoseIncidentHint("new row violates row-level security policy").includes("RLS"));
-    assert.ok(diagnoseIncidentHint("Deepgram timeout ETIMEDOUT").toLowerCase().includes("timeout"));
-    assert.ok(diagnoseIncidentHint("Storage bucket upload rejected").toLowerCase().includes("storage"));
+  it("produces clear plain-English diagnosis hints without developer jargon", () => {
+    const schemaHint = diagnoseIncidentHint(
+      "Could not find the 'availability' column of 'plumbers' in the schema cache"
+    ).toLowerCase();
+    assert.ok(schemaHint.includes("missing") && schemaHint.includes("column"));
+    assert.ok(!schemaHint.includes("postgrest"));
+
+    const permHint = diagnoseIncidentHint("new row violates row-level security policy");
+    assert.ok(permHint.toLowerCase().includes("permissions"));
+    assert.ok(!permHint.includes("RLS"));
+
+    assert.ok(diagnoseIncidentHint("Deepgram timeout ETIMEDOUT").toLowerCase().includes("too long"));
+    assert.ok(diagnoseIncidentHint("Storage bucket upload rejected").toLowerCase().includes("upload"));
   });
 
   it("filters benign browser noise and deduplicates repeated incidents within 15 minutes", async () => {

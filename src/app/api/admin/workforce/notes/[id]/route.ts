@@ -60,11 +60,10 @@ export async function GET(
       .select("*")
       .ilike("title", `%${ticketNumber}%`)
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(8);
     const list = (matchingTasks || []) as Array<Record<string, unknown>>;
     taskRow =
       list.find((t) => String(t.assigned_agent_id || "") === String(noteRow.from_agent || "")) ??
-      list[0] ??
       null;
   }
 

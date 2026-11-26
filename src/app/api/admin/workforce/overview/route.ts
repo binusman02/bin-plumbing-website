@@ -94,7 +94,13 @@ export async function GET() {
       return false;
     });
     const pendingMatch = matchingApprovals.find((a) => a.status === "pending") ?? null;
-    const latestMatch = pendingMatch ?? matchingApprovals[0] ?? null;
+    const isNoteDirectlyAboutApproval =
+      Boolean(taskId && matchingApprovals.some((a) => a.taskId === taskId)) ||
+      /\b(queued approval|waiting for owner approval|payment verification|drafted follow-up|owner approved|owner rejected)\b/i.test(
+        String(n.note || "")
+      );
+    const latestMatch =
+      pendingMatch ?? (isNoteDirectlyAboutApproval ? matchingApprovals[0] ?? null : null);
     const linkedTask = taskId ? taskById.get(taskId) : undefined;
     return {
       ...n,

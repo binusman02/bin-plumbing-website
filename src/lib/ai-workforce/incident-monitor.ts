@@ -67,21 +67,87 @@ export function inferIncidentArea(source: string, routePath?: string): IncidentA
 export function diagnoseIncidentHint(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("schema cache") || (lower.includes("column") && lower.includes("does not exist"))) {
-    return "Database schema mismatch: code referenced a column missing from Postgres/PostgREST cache. Add fallback/metadata persistence or apply the matching SQL migration.";
+    return "A new field could not be saved because the database is missing that matching column yet.";
   }
   if (lower.includes("row-level security") || lower.includes("permission denied")) {
-    return "Database RLS or role authorization rejection; verify service-role vs user session query and policy permissions.";
+    return "Access check blocked an update — please check the account role or permissions for that page.";
   }
   if (lower.includes("timeout") || lower.includes("aborted") || lower.includes("etimedout") || lower.includes("504")) {
-    return "Upstream network or AI/STT provider timeout; check external API key/quota and fallback chain.";
+    return "The AI or voice service took too long to reply. Usually temporary — trying again should work.";
   }
   if (lower.includes("unauthorized") || lower.includes("jwt") || lower.includes("session")) {
-    return "Authentication or expired session error; verify Supabase auth token or portal cookie verification.";
+    return "A user's sign-in session expired or could not be verified. Signing out and back in should fix it.";
   }
   if (lower.includes("storage") || lower.includes("upload") || lower.includes("bucket")) {
-    return "File upload or Supabase Storage bucket failure; verify MIME type, file size, and bucket permissions.";
+    return "A file or photo could not finish uploading. Check file size or ask the user to upload again.";
   }
-  return "Unexpected runtime failure captured automatically; inspect the source endpoint/component and recent changes.";
+  return "Something unexpected failed while handling this request. Ask Bashir to inspect it for a quick fix.";
+}
+
+export function humanAreaLabel(area: IncidentArea): string {
+  const map: Record<IncidentArea, string> = {
+    admin: "Admin Dashboard",
+    customer: "Customer Portal",
+    plumber: "Plumber Portal",
+    public: "Website & Amina Chat",
+    mobile: "Mobile App",
+    tracking: "Live Map & Tracking",
+    payments: "Payments & Quotes",
+    chat: "Ticket Chat",
+    "ai-workforce": "AI Team Console",
+    system: "FlowGuard System",
+  };
+  return map[area] || "FlowGuard System";
+}
+
+export function humanSourceLabel(source: string): string {
+  const s = source.toLowerCase();
+  if (s.includes("adminupdateplumber")) return "Admin Plumbers Page";
+  if (s.includes("updateprofileaction")) return "Profile Settings Save";
+  if (s.includes("registercustomer")) return "Customer Sign-Up";
+  if (s.includes("submitservicerequest")) return "Service Booking Form";
+  if (s.includes("zainab/chat")) return "Zainab Support Chat";
+  if (s.includes("zainab/stt")) return "Zainab Voice Note";
+  if (s.includes("amina/book")) return "Amina Booking Flow";
+  if (s.includes("amina/chat")) return "Amina Website Chat";
+  if (s.includes("mobile/auth")) return "Mobile App Sign-In";
+  if (s.includes("mobile/tracking")) return "Plumber Live Location";
+  if (s.includes("mobile/payments")) return "Mobile Payment Submission";
+  if (s.includes("mobile/quotations")) return "Mobile Quotation";
+  if (s.includes("mobile/requests")) return "Mobile Booking";
+  if (s.includes("mobile/jobs")) return "Plumber Job Update";
+  if (s.includes("tracking/snapshot") || s.includes("tracking/route")) return "Live Tracking Map";
+  if (s.includes("chat/message")) return "Ticket Messaging";
+  if (s.includes("ai/admin")) return "Admin AI Assistant";
+  if (s.includes("workforce/tasks")) return "AI Team Task Runner";
+  if (s.includes("window_error") || s.includes("unhandled_rejection") || s.includes("error_boundary")) {
+    return "Web Page Screen";
+  }
+  return "System Service";
+}
+
+export function plainEnglishProblem(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("schema cache") || (lower.includes("column") && lower.includes("does not exist"))) {
+    return "a field could not be saved cleanly to the database";
+  }
+  if (lower.includes("row-level security") || lower.includes("permission denied")) {
+    return "the system blocked an action due to account permissions";
+  }
+  if (lower.includes("timeout") || lower.includes("etimedout") || lower.includes("504")) {
+    return "an external service took too long to respond";
+  }
+  if (lower.includes("unauthorized") || lower.includes("jwt") || lower.includes("session")) {
+    return "a user's sign-in session could not be verified";
+  }
+  if (lower.includes("storage") || lower.includes("upload") || lower.includes("bucket")) {
+    return "a photo or document failed to upload";
+  }
+  const stripped = message
+    .replace(/^HTTP \d{3} in [^:]+:\s*/i, "")
+    .replace(/\{[^}]*\}/g, "")
+    .trim();
+  return stripped.slice(0, 130) || "an unexpected issue stopped this step from finishing";
 }
 
 export function buildIncidentDedupeKey(source: string, message: string): string {
@@ -138,27 +204,23 @@ export async function reportSystemIncident(
   }
 
   const hint = diagnoseIncidentHint(cleanMessage);
-  const stackSnippet = input.stack ? sanitizeIncidentText(input.stack, 400) : "";
-  const contextLine = input.context
-    ? sanitizeIncidentText(JSON.stringify(input.context), 220)
-    : "";
+  const placeName = humanSourceLabel(source);
+  const areaName = humanAreaLabel(area);
+  const plainProblem = plainEnglishProblem(cleanMessage);
 
   const deliverable = [
-    `[Area: ${area.toUpperCase()}] Source: ${source}`,
-    `Error: ${cleanMessage}`,
-    `Bashir Diagnosis: ${hint}`,
-    input.routePath ? `Path: ${sanitizeIncidentText(input.routePath, 140)}` : "",
-    input.actorRole ? `Actor Role: ${sanitizeIncidentText(input.actorRole, 40)}` : "",
-    contextLine ? `Context: ${contextLine}` : "",
-    stackSnippet ? `Trace: ${stackSnippet}` : "",
+    `Where it happened: ${areaName} (${placeName})`,
+    `What went wrong: ${plainProblem}`,
+    `What Bashir recommends: ${hint}`,
+    input.routePath ? `Page visited: ${sanitizeIncidentText(input.routePath, 140)}` : "",
   ]
     .filter(Boolean)
-    .join(" | ");
+    .join(" — ");
 
   try {
     const supabase = getServiceSupabase();
     const cutoffIso = new Date(nowMs - DEDUPE_WINDOW_MS).toISOString();
-    const taskTitle = `Incident [${area.toUpperCase()}]: ${source}`.slice(0, 140);
+    const taskTitle = `${areaName}: Issue in ${placeName}`.slice(0, 140);
 
     // Cross-instance serverless deduplication via ai_tasks
     const { data: recentDb } = await supabase
@@ -173,7 +235,7 @@ export async function reportSystemIncident(
       (recentDb || []).some((r) =>
         String(r.output_summary || "")
           .toLowerCase()
-          .includes(cleanMessage.slice(0, 60).toLowerCase())
+          .includes(plainProblem.slice(0, 50).toLowerCase())
       )
     ) {
       return { recorded: false, skippedReason: "deduped_in_db", area };
@@ -195,7 +257,7 @@ export async function reportSystemIncident(
       due_at: computeDueAtFromPriority("high"),
       deliverable: deliverable.slice(0, 1000),
       qa_status: "approved",
-      lessons: [`[${area}] ${cleanMessage.slice(0, 110)}`.slice(0, 140)],
+      lessons: [`${areaName}: ${plainProblem}`.slice(0, 140)],
       output_summary: deliverable.slice(0, 500),
       completed_at: nowIso,
     });
@@ -205,7 +267,7 @@ export async function reportSystemIncident(
       task_id: taskId,
       agent_id: "engineering_ai",
       event_type: "reported",
-      message: `Bashir captured ${area} incident in ${source}: ${cleanMessage.slice(0, 180)}`,
+      message: `Bashir flagged an issue on ${placeName}: ${plainProblem}`,
     });
 
     await supabase
@@ -215,7 +277,7 @@ export async function reportSystemIncident(
           agent_id: "engineering_ai",
           namespace: "ns_engineering_ai",
           memory_key: `incident:${area}:${Date.now().toString(36)}`,
-          content: `[${area}] ${source}: ${cleanMessage.slice(0, 120)}`,
+          content: `${areaName} (${placeName}): ${plainProblem}`,
           source: "incident_monitor",
           approved_by_owner: true,
         },
@@ -230,7 +292,10 @@ export async function reportSystemIncident(
       fromAgent: "engineering_ai",
       toAgent: "operations_manager",
       taskId,
-      note: `Bashir detected [${area.toUpperCase()}] issue in ${source}: ${cleanMessage.slice(0, 130)} — ${hint.slice(0, 110)}`,
+      note: `Bashir noticed an issue on the ${placeName} (${areaName}): ${plainProblem}. ${hint}`.slice(
+        0,
+        360
+      ),
     }).catch(() => {});
 
     await reportToOwner({
@@ -238,8 +303,10 @@ export async function reportSystemIncident(
       status: "urgent",
       urgent: true,
       taskId,
-      summary: `[${area.toUpperCase()}] Issue in ${source}: ${cleanMessage.slice(0, 150)}`,
-      evidence: [hint.slice(0, 120)],
+      summary: `Heads up Boss, something went wrong in ${placeName} (${areaName}): ${plainProblem}. ${hint}`.slice(
+        0,
+        240
+      ),
       destination: "/admin/workforce?tab=tasks",
     }).catch(() => {});
 
