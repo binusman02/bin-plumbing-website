@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import { getServiceSupabase } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { appendAuditLog } from "@/lib/marketplace";
+import { appendAuditLog, updatePlumberProfileFields } from "@/lib/marketplace";
 import {
   hashCustomerPassword as hashPassword,
   verifyCustomerPassword as verifyPassword,
@@ -80,18 +80,18 @@ export async function updateProfileAction(input: {
     }
 
     // Plumber role — strictly disallow verification_status, rating, total_jobs changes
-    const plumberUpdates: Record<string, unknown> = {
+    const plumberRes = await updatePlumberProfileFields(actor.id, {
       full_name: cleanName,
       phone: input.phone?.trim() || actor.phone,
-      residential_location: input.residentialLocation?.trim() || undefined,
-      preferred_locations: Array.isArray(input.preferredLocations) ? input.preferredLocations : undefined,
+      residential_location: input.residentialLocation?.trim(),
+      preferred_locations: Array.isArray(input.preferredLocations)
+        ? input.preferredLocations
+        : undefined,
       skills: Array.isArray(input.skills) ? input.skills : undefined,
       availability: input.availability?.trim() || undefined,
-      updated_at: nowIso,
-    };
-    const { error } = await supabase.from("plumbers").update(plumberUpdates).eq("id", actor.id);
-    if (error) {
-      return { success: false, error: error.message };
+    });
+    if (!plumberRes.success) {
+      return { success: false, error: plumberRes.error || "Failed to update profile." };
     }
     revalidatePath("/plumber");
     revalidatePath("/admin/plumbers");
@@ -193,23 +193,20 @@ export async function adminUpdatePlumberProfileAction(input: {
       return { success: false, error: "Phone number is required." };
     }
 
-    const supabase = getServiceSupabase();
-    const { error } = await supabase
-      .from("plumbers")
-      .update({
-        full_name: cleanName,
-        phone: cleanPhone,
-        email: input.email?.trim() || null,
-        residential_location: input.residentialLocation?.trim() || "",
-        preferred_locations: Array.isArray(input.preferredLocations) ? input.preferredLocations : [],
-        skills: Array.isArray(input.skills) ? input.skills : [],
-        availability: input.availability?.trim() || "Standard",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", input.plumberId);
+    const updateRes = await updatePlumberProfileFields(input.plumberId, {
+      full_name: cleanName,
+      phone: cleanPhone,
+      email: input.email?.trim() || null,
+      residential_location: input.residentialLocation?.trim() || "",
+      preferred_locations: Array.isArray(input.preferredLocations)
+        ? input.preferredLocations
+        : [],
+      skills: Array.isArray(input.skills) ? input.skills : [],
+      availability: input.availability?.trim() || "Standard",
+    });
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (!updateRes.success) {
+      return { success: false, error: updateRes.error || "Failed to update plumber profile." };
     }
 
     await appendAuditLog({

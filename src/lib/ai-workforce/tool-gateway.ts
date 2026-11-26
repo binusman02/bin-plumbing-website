@@ -6,6 +6,7 @@ import {
   type ApproverIdentity,
 } from "@/lib/ai-workforce/approvals";
 import { getAgentDefinition } from "@/lib/ai-workforce/registry";
+import { syncWorkforceAfterApprovalDecision } from "@/lib/ai-workforce/workforce-sync";
 import type {
   AgentId,
   ApprovalRecord,
@@ -291,7 +292,7 @@ export class ToolGateway {
     decisionNote?: string;
     expectedPayloadHash?: string;
   }): Promise<ApprovalDecisionResult> {
-    return this.approvals.decideAndExecute({
+    const outcome = await this.approvals.decideAndExecute({
       ...params,
       executor: async (record: ApprovalRecord) => {
         const spec = this.tools.get(record.toolName);
@@ -326,5 +327,19 @@ export class ToolGateway {
         return { ok: true, result };
       },
     });
+
+    if (this.logger instanceof SupabaseToolExecutionLogger && outcome.approval) {
+      const s = outcome.approval.status;
+      if (s === "executed" || s === "rejected" || s === "failed" || s === "expired") {
+        await syncWorkforceAfterApprovalDecision({
+          record: outcome.approval,
+          outcome: s,
+          actorEmail: params.approver.email,
+          note: outcome.error,
+        });
+      }
+    }
+
+    return outcome;
   }
 }

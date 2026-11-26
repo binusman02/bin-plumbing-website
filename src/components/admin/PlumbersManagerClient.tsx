@@ -241,14 +241,19 @@ export default function PlumbersManagerClient({
     }
     setFeedback(null);
     startTransition(async () => {
-      if (rejectionReason.trim()) {
-        await updatePlumberOnboardingAction({
-          plumberId: selected.id,
-          rejectionReason,
-          onboardingNotes,
-          agreementUrl,
-        });
-      }
+      const now = new Date().toISOString();
+      const checklist: NonNullable<PlumberProfile["verification_checklist"]> = {
+        id_checked: { checked: idChecked, date: idChecked ? now : undefined },
+        references_checked: { checked: referencesChecked, date: referencesChecked ? now : undefined },
+        agreement_signed: { checked: agreementSigned, date: agreementSigned ? now : undefined },
+      };
+      await updatePlumberOnboardingAction({
+        plumberId: selected.id,
+        checklist,
+        rejectionReason,
+        onboardingNotes,
+        agreementUrl,
+      });
       const res = await updatePlumberStatusAction(
         selected.id,
         nextStatus,
@@ -258,6 +263,8 @@ export default function PlumbersManagerClient({
         const updated: PlumberProfile = {
           ...selected,
           verification_status: nextStatus,
+          verification_checklist: checklist,
+          agreement_url: agreementUrl,
           rejection_reason: nextStatus === "rejected" ? rejectionReason : selected.rejection_reason,
           onboarding_notes: onboardingNotes,
         };
@@ -267,6 +274,7 @@ export default function PlumbersManagerClient({
           type: "success",
           text: `Plumber status updated to ${getStatusMeta(nextStatus).label}.`,
         });
+        router.refresh();
       } else {
         setFeedback({ type: "error", text: res.error || "Status update failed." });
       }

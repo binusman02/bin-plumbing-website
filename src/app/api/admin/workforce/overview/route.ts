@@ -9,8 +9,15 @@ import { defaultReportStore } from "@/lib/ai-workforce/owner-report";
 import { listAgentDefinitions } from "@/lib/ai-workforce/registry";
 import { computeAgentScorecards } from "@/lib/ai-workforce/scorecard";
 import { defaultTeamMemoryStore } from "@/lib/ai-workforce/team-memory";
+import { reconcileStaleWorkforceState } from "@/lib/ai-workforce/workforce-sync";
 import { requireAdminUser } from "@/lib/security";
 import { getServiceSupabase } from "@/lib/supabase/admin";
+
+function extractTicketNumber(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const m = text.match(/\bBP-\d{6}-\d{4}\b/i);
+  return m ? m[0].toUpperCase() : null;
+}
 
 export async function GET() {
   const admin = await requireAdminUser();
@@ -18,10 +25,12 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  await reconcileStaleWorkforceState().catch(() => {});
+
   const [agents, tasks, approvals, aiReports, playbookRules] = await Promise.all([
     Promise.resolve(listAgentDefinitions()),
     defaultWorkforceOrchestrator.listTasks(100).catch(() => []),
-    defaultApprovalService.listApprovals(30).catch(() => []),
+    defaultApprovalService.listApprovals(50).catch(() => []),
     defaultReportStore.listReports(40).catch(() => []),
     defaultTeamMemoryStore.listPlaybookRules().catch(() => []),
   ]);
@@ -31,7 +40,7 @@ export async function GET() {
   let usageRows: Array<Record<string, unknown>> = [];
   let auditRows: Array<Record<string, unknown>> = [];
   let ownerReports: Array<Record<string, unknown>> = [];
-  let teamNotes: Array<Record<string, unknown>> = [];
+  let rawTeamNotes: Array<Record<string, unknown>> = [];
   try {
     const supabase = getServiceSupabase();
     const [uRes, aRes, nRes, notesRes] = await Promise.all([
@@ -61,17 +70,67 @@ export async function GET() {
         .limit(15),
       supabase
         .from("ai_team_notes")
-        .select("id, from_agent, to_agent, ticket_number, note, created_at")
+        .select("id, from_agent, to_agent, task_id, ticket_number, note, created_at")
         .order("created_at", { ascending: false })
-        .limit(15),
+        .limit(25),
     ]);
     usageRows = (uRes.data || []) as Array<Record<string, unknown>>;
     auditRows = (aRes.data || []) as Array<Record<string, unknown>>;
     ownerReports = (nRes.data || []) as Array<Record<string, unknown>>;
-    teamNotes = (notesRes.data || []) as Array<Record<string, unknown>>;
+    rawTeamNotes = (notesRes.data || []) as Array<Record<string, unknown>>;
   } catch {
     // Migration may not be applied in local dev yet
   }
+
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const teamNotes = rawTeamNotes.map((n) => {
+    const taskId = n.task_id ? String(n.task_id) : null;
+    const tn =
+      (n.ticket_number ? String(n.ticket_number).trim().toUpperCase() : null) ||
+      extractTicketNumber(n.note);
+    const matchingApprovals = approvals.filter((a) => {
+      if (taskId && a.taskId === taskId) return true;
+      if (tn && String(a.targetResource || "").toUpperCase() === tn) return true;
+      return false;
+    });
+    const pendingMatch = matchingApprovals.find((a) => a.status === "pending") ?? null;
+    const latestMatch = pendingMatch ?? matchingApprovals[0] ?? null;
+    const linkedTask = taskId ? taskById.get(taskId) : undefined;
+    return {
+      ...n,
+      task_id: taskId,
+      ticket_number: tn,
+      pendingApprovalCount: matchingApprovals.filter((a) => a.status === "pending").length,
+      primaryApprovalId: latestMatch?.id ?? null,
+      latestApprovalStatus: latestMatch?.status ?? null,
+      taskStatus: linkedTask?.status ?? null,
+    };
+  });
+
+  const enrichedReports = aiReports.map((r) => {
+    const tn = extractTicketNumber(r.message);
+    const linkedTask = r.taskId ? taskById.get(r.taskId) : undefined;
+    const matchingApprovals = approvals.filter((a) => {
+      if (r.taskId && a.taskId === r.taskId) return true;
+      if (tn && String(a.targetResource || "").toUpperCase() === tn) return true;
+      return false;
+    });
+    const pendingMatch = matchingApprovals.find((a) => a.status === "pending") ?? null;
+    const latestMatch = pendingMatch ?? matchingApprovals[0] ?? null;
+    const matchingNote = rawTeamNotes.find(
+      (n) =>
+        (r.taskId && n.task_id && String(n.task_id) === r.taskId) ||
+        (tn && n.ticket_number && String(n.ticket_number).toUpperCase() === tn)
+    );
+    return {
+      ...r,
+      ticketNumber: tn,
+      taskStatus: linkedTask?.status ?? null,
+      pendingApprovalCount: matchingApprovals.filter((a) => a.status === "pending").length,
+      latestApprovalStatus: latestMatch?.status ?? null,
+      linkedNoteId: matchingNote?.id ? String(matchingNote.id) : null,
+    };
+  });
 
   const unreadReportCount = ownerReports.filter((r) => !r.read_at).length;
 
@@ -80,7 +139,7 @@ export async function GET() {
     tasks,
     approvals,
     ownerReports,
-    aiReports,
+    aiReports: enrichedReports,
     playbookRules,
     scorecards,
     unreadReportCount,

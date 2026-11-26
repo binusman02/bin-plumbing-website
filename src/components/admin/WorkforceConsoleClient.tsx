@@ -1,21 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   BarChart3,
   Bell,
   BookOpen,
   Bot,
   CheckCircle2,
+  ChevronRight,
   Clock,
+  ExternalLink,
+  FileText,
+  Loader2,
+  MapPin,
   Pencil,
   RefreshCw,
   Send,
   ShieldAlert,
   ShieldCheck,
+  Terminal,
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  Wrench,
+  X,
   XCircle,
 } from "lucide-react";
 import { TeamMeetingPanel } from "@/components/admin/TeamMeetingPanel";
@@ -94,6 +103,10 @@ interface ApprovalItem {
   payloadHash: string;
   reason: string;
   status: string;
+  approverEmail?: string | null;
+  decisionNote?: string | null;
+  decidedAt?: string | null;
+  executedAt?: string | null;
   expiresAt: string;
   createdAt: string;
 }
@@ -112,9 +125,14 @@ interface TeamNoteItem {
   id: string;
   from_agent: string;
   to_agent: string | null;
+  task_id?: string | null;
   ticket_number: string | null;
   note: string;
   created_at: string;
+  pendingApprovalCount?: number;
+  primaryApprovalId?: string | null;
+  latestApprovalStatus?: string | null;
+  taskStatus?: string | null;
 }
 
 interface StoredReportItem {
@@ -126,6 +144,105 @@ interface StoredReportItem {
   feedback?: "up" | "down" | null;
   feedbackNote?: string | null;
   deliveredAt: string;
+  ticketNumber?: string | null;
+  taskStatus?: string | null;
+  pendingApprovalCount?: number;
+  latestApprovalStatus?: string | null;
+  linkedNoteId?: string | null;
+}
+
+interface TeamNoteDetailPayload {
+  note: TeamNoteItem;
+  ticketNumber: string | null;
+  task: {
+    id: string;
+    title: string;
+    description: string;
+    assignedAgentId: string;
+    priority: string;
+    status: string;
+    deliverable: string | null;
+    outputSummary: string | null;
+    evidence: unknown[];
+    lessons: string[];
+    qaStatus: string | null;
+    qaNotes: string | null;
+    errorMessage: string | null;
+    createdAt: string;
+    completedAt: string | null;
+  } | null;
+  relatedTasks: Array<{
+    id: string;
+    title: string;
+    assignedAgentId: string;
+    status: string;
+    priority: string;
+    outputSummary: string | null;
+    createdAt: string;
+  }>;
+  taskEvents: Array<{
+    id: string;
+    task_id: string;
+    agent_id: string;
+    event_type: string;
+    message: string;
+    created_at: string;
+  }>;
+  toolExecutions: Array<{
+    id: string;
+    task_id: string | null;
+    approval_id: string | null;
+    agent_id: string;
+    tool_name: string;
+    tier: string;
+    validated_scope: string;
+    redacted_args: Record<string, unknown>;
+    status: string;
+    result_summary: string | null;
+    created_at: string;
+  }>;
+  approvals: ApprovalItem[];
+  relatedNotes: TeamNoteItem[];
+  relatedReports: Array<{
+    id: string;
+    agent_id: string;
+    message: string;
+    urgency: string;
+    delivered_at: string;
+  }>;
+  ticket: {
+    ticket_number: string;
+    customer_name: string;
+    customer_phone: string;
+    customer_email?: string | null;
+    problem_category?: string | null;
+    problem_type?: string | null;
+    issue_description?: string | null;
+    city_lga?: string | null;
+    address?: string | null;
+    urgency?: string | null;
+    status: string;
+    assigned_plumber_id?: string | null;
+    assigned_technician?: string | null;
+    quoted_amount?: number | null;
+    payment_status?: string | null;
+    customer_lat?: number | null;
+    customer_lng?: number | null;
+  } | null;
+  quotations: Array<{
+    id: string;
+    plumber_name: string;
+    total_customer_cost: number;
+    status: string;
+    created_at: string;
+  }>;
+  payments: Array<{
+    id: string;
+    amount: number;
+    status: string;
+    payment_method?: string | null;
+    created_at: string;
+  }>;
 }
 
 interface PlaybookRuleItem {
@@ -185,13 +302,19 @@ export function WorkforceConsoleClient() {
   const [instruction, setInstruction] = useState("");
   const [targetAgent, setTargetAgent] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [showFeed, setShowFeed] = useState(false);
+  const [showFeed, setShowFeed] = useState(true);
   const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
-  const [pbAgentId, setPbAgentId] = useState("sadiq");
+  const [pbAgentId, setPbAgentId] = useState("operations_manager");
   const [pbRuleText, setPbRuleText] = useState("");
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [editingRuleContent, setEditingRuleContent] = useState("");
   const [banner, setBanner] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [noteDetail, setNoteDetail] = useState<TeamNoteDetailPayload | null>(null);
+  const [noteDetailLoading, setNoteDetailLoading] = useState(false);
+  const [noteDetailError, setNoteDetailError] = useState<string | null>(null);
+  const [approvalDecisionNote, setApprovalDecisionNote] = useState("");
+  const [decidingApprovalId, setDecidingApprovalId] = useState<string | null>(null);
 
   const loadOverview = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -297,11 +420,36 @@ export function WorkforceConsoleClient() {
     }
   }
 
+  const openTeamNoteDetail = useCallback(async (noteId: string) => {
+    setSelectedNoteId(noteId);
+    setNoteDetailLoading(true);
+    setNoteDetailError(null);
+    setApprovalDecisionNote("");
+    try {
+      const res = await fetch(`/api/admin/workforce/notes/${encodeURIComponent(noteId)}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || "Could not load team note details.");
+      }
+      setNoteDetail(json as TeamNoteDetailPayload);
+    } catch (err) {
+      setNoteDetailError(
+        err instanceof Error ? err.message : "Could not load team note details."
+      );
+    } finally {
+      setNoteDetailLoading(false);
+    }
+  }, []);
+
   async function handleApprovalDecision(
-    approval: ApprovalItem,
-    decision: "approve" | "reject"
+    approval: Pick<ApprovalItem, "id" | "actionSummary" | "payloadHash">,
+    decision: "approve" | "reject",
+    decisionNote?: string
   ) {
     setBanner(null);
+    setDecidingApprovalId(approval.id);
     try {
       const res = await fetch(`/api/admin/workforce/approvals/${approval.id}`, {
         method: "POST",
@@ -309,6 +457,7 @@ export function WorkforceConsoleClient() {
         body: JSON.stringify({
           decision,
           expectedPayloadHash: approval.payloadHash,
+          ...(decisionNote?.trim() ? { decisionNote: decisionNote.trim() } : {}),
         }),
       });
       const json = await res.json();
@@ -320,12 +469,20 @@ export function WorkforceConsoleClient() {
             ? `Approved and executed "${approval.actionSummary}".`
             : `Rejected "${approval.actionSummary}".`,
       });
+      setApprovalDecisionNote("");
+      window.dispatchEvent(new Event("notifications-refresh"));
+      window.dispatchEvent(new Event("admin-signals-refresh"));
       await loadOverview();
+      if (selectedNoteId) {
+        await openTeamNoteDetail(selectedNoteId);
+      }
     } catch (err) {
       setBanner({
         type: "err",
         text: err instanceof Error ? err.message : "Decision failed.",
       });
+    } finally {
+      setDecidingApprovalId(null);
     }
   }
 
@@ -601,20 +758,35 @@ export function WorkforceConsoleClient() {
               <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
                 Live Owner Reports &amp; Feedback
               </h2>
-              <div className="max-h-72 space-y-2 overflow-y-auto">
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
                 {(data?.aiReports || []).length > 0 ? (
                   (data?.aiReports || []).map((r) => {
                     const senderName = getAgentFirstName(r.agentId);
                     const avatar = agentMap[r.agentId]?.avatarUrl || "/images/ai/sadiq.jpg";
+                    const isPendingApproval = (r.pendingApprovalCount ?? 0) > 0;
+                    const isResolved =
+                      !isPendingApproval &&
+                      (r.latestApprovalStatus === "executed" ||
+                        r.latestApprovalStatus === "approved" ||
+                        r.latestApprovalStatus === "rejected" ||
+                        r.taskStatus === "closed");
+                    const displayMessage = isResolved
+                      ? cleanHumanProse(r.message, senderName).replace(
+                          /(?:\s*[—-]\s*)?Waiting for your okay\.?/gi,
+                          ""
+                        ).trim()
+                      : cleanHumanProse(r.message, senderName);
                     return (
                       <div
                         key={r.id}
                         className={`rounded-xl border p-3 text-xs ${
-                          r.urgency === "urgent"
-                            ? "border-red-200 bg-red-50/70"
-                            : r.urgency === "high"
-                              ? "border-amber-200 bg-amber-50/60"
-                              : "border-slate-200/80 bg-slate-50/70"
+                          isPendingApproval
+                            ? "border-amber-200 bg-amber-50/70"
+                            : r.urgency === "urgent" && !isResolved
+                              ? "border-red-200 bg-red-50/70"
+                              : r.urgency === "high" && !isResolved
+                                ? "border-amber-200 bg-amber-50/60"
+                                : "border-slate-200/80 bg-slate-50/70"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -631,15 +803,44 @@ export function WorkforceConsoleClient() {
                                 <span className="text-[11px] font-medium text-slate-400">
                                   {formatShortTime(r.deliveredAt)}
                                 </span>
-                                {r.urgency === "urgent" && (
+                                {r.urgency === "urgent" && !isResolved && (
                                   <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
                                     Urgent
                                   </span>
                                 )}
+                                {isPendingApproval && (
+                                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                                    Needs Approval
+                                  </span>
+                                )}
+                                {isResolved && (
+                                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                    {r.latestApprovalStatus === "rejected"
+                                      ? "Rejected"
+                                      : r.latestApprovalStatus === "executed" ||
+                                          r.latestApprovalStatus === "approved"
+                                        ? "Approved & Executed"
+                                        : "Resolved"}
+                                  </span>
+                                )}
                               </div>
                               <p className="mt-1 leading-relaxed text-slate-700">
-                                {cleanHumanProse(r.message, senderName)}
+                                {displayMessage}
                               </p>
+                              {r.linkedNoteId && (
+                                <button
+                                  type="button"
+                                  onClick={() => void openTeamNoteDetail(r.linkedNoteId!)}
+                                  className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-[#0B1F3A] hover:underline"
+                                >
+                                  <span>
+                                    {isPendingApproval
+                                      ? "Inspect AI work & approve"
+                                      : "View full AI activity"}
+                                  </span>
+                                  <ChevronRight className="h-3 w-3" />
+                                </button>
+                              )}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
@@ -719,10 +920,15 @@ export function WorkforceConsoleClient() {
               </div>
             </div>
             <div>
-              <h2 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
-                Shared Team Board Notes
-              </h2>
-              <div className="max-h-72 space-y-2 overflow-y-auto">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                  Shared Team Board Notes
+                </h2>
+                <span className="text-[11px] font-medium text-slate-500">
+                  Click any note to inspect &amp; approve
+                </span>
+              </div>
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
                 {(data?.teamNotes || []).length === 0 ? (
                   <p className="text-xs text-slate-500">No team notes yet.</p>
                 ) : (
@@ -730,10 +936,29 @@ export function WorkforceConsoleClient() {
                     const fromName = getAgentFirstName(n.from_agent);
                     const toName = n.to_agent ? getAgentFirstName(n.to_agent) : "Team";
                     const avatar = agentMap[n.from_agent]?.avatarUrl || "/images/ai/sadiq.jpg";
+                    const hasPending = (n.pendingApprovalCount ?? 0) > 0;
+                    const statusBadge = hasPending
+                      ? { label: "Needs Approval", cls: "bg-amber-100 text-amber-800" }
+                      : n.latestApprovalStatus === "executed" || n.latestApprovalStatus === "approved"
+                        ? { label: "Approved & Executed", cls: "bg-emerald-100 text-emerald-800" }
+                        : n.latestApprovalStatus === "rejected"
+                          ? { label: "Rejected", cls: "bg-red-100 text-red-700" }
+                          : n.latestApprovalStatus === "expired"
+                            ? { label: "Expired", cls: "bg-slate-200 text-slate-700" }
+                            : n.taskStatus === "closed" || n.taskStatus === "completed"
+                              ? { label: "Completed", cls: "bg-emerald-50 text-emerald-700" }
+                              : null;
+
                     return (
-                      <div
+                      <button
                         key={n.id}
-                        className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3 text-xs"
+                        type="button"
+                        onClick={() => void openTeamNoteDetail(n.id)}
+                        className={`w-full cursor-pointer rounded-xl border p-3 text-left text-xs transition hover:border-[#0B1F3A] hover:bg-white ${
+                          hasPending
+                            ? "border-amber-300 bg-amber-50/50"
+                            : "border-slate-200/80 bg-slate-50/70"
+                        }`}
                       >
                         <div className="flex items-start gap-2.5">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -743,25 +968,40 @@ export function WorkforceConsoleClient() {
                             className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-[#F5B301] object-cover"
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="font-extrabold text-[#0B1F3A]">
-                                {fromName} to {toName}
-                              </span>
-                              {n.ticket_number && (
-                                <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600">
-                                  {n.ticket_number}
+                            <div className="flex flex-wrap items-center justify-between gap-1.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-extrabold text-[#0B1F3A]">
+                                  {fromName} to {toName}
+                                </span>
+                                {n.ticket_number && (
+                                  <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                                    {n.ticket_number}
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-slate-400">
+                                  {formatShortTime(n.created_at)}
+                                </span>
+                              </div>
+                              {statusBadge && (
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge.cls}`}
+                                >
+                                  {statusBadge.label}
                                 </span>
                               )}
-                              <span className="text-[11px] text-slate-400">
-                                {formatShortTime(n.created_at)}
-                              </span>
                             </div>
                             <p className="mt-1 leading-relaxed text-slate-700">
                               {cleanHumanProse(n.note, fromName)}
                             </p>
+                            <div className="mt-1.5 flex items-center justify-end gap-1 text-[11px] font-bold text-[#0B1F3A]">
+                              <span>
+                                {hasPending ? "Review details & approve" : "View full AI details"}
+                              </span>
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      </button>
                     );
                   })
                 )}
@@ -1299,6 +1539,438 @@ export function WorkforceConsoleClient() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clickable Shared Team Note Detail & Approval Modal */}
+      {selectedNoteId && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-0 backdrop-blur-xs sm:items-center sm:p-4"
+          onClick={() => {
+            setSelectedNoteId(null);
+            setNoteDetail(null);
+            setNoteDetailError(null);
+          }}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#0B1F3A] px-5 py-4 text-white">
+              <div className="flex min-w-0 items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={
+                    (noteDetail &&
+                      agentMap[noteDetail.note.from_agent]?.avatarUrl) ||
+                    "/images/ai/sadiq.jpg"
+                  }
+                  alt="AI Agent"
+                  className="h-10 w-10 shrink-0 rounded-full border-2 border-[#F5B301] object-cover"
+                />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-extrabold">
+                      {noteDetail
+                        ? `${getAgentFirstName(noteDetail.note.from_agent)} to ${
+                            noteDetail.note.to_agent
+                              ? getAgentFirstName(noteDetail.note.to_agent)
+                              : "Team"
+                          }`
+                        : "AI Activity & Approval Details"}
+                    </h3>
+                    {noteDetail?.ticketNumber && (
+                      <span className="rounded bg-white/15 px-2 py-0.5 font-mono text-[11px] font-bold text-[#F5B301]">
+                        {noteDetail.ticketNumber}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    Complete summary of what the AI did, live ticket status, and approval controls
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedNoteId(null);
+                  setNoteDetail(null);
+                  setNoteDetailError(null);
+                }}
+                aria-label="Close AI details"
+                className="rounded-lg bg-white/10 p-1.5 text-white hover:bg-white/20"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 space-y-4 overflow-y-auto p-5 text-xs">
+              {noteDetailLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-12 text-slate-500">
+                  <Loader2 className="h-6 w-6 animate-spin text-[#0B1F3A]" />
+                  <span>Loading full AI activity, ticket context, and approvals...</span>
+                </div>
+              ) : noteDetailError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
+                  {noteDetailError}
+                </div>
+              ) : noteDetail ? (
+                <>
+                  {/* 1. Primary Note & Work Order Deliverable */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                        Shared Note Summary
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {new Date(noteDetail.note.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-sm font-semibold leading-relaxed text-[#0B1F3A]">
+                      {cleanHumanProse(
+                        noteDetail.note.note,
+                        getAgentFirstName(noteDetail.note.from_agent)
+                      )}
+                    </p>
+                    {noteDetail.task && (
+                      <div className="mt-3 space-y-2 border-t border-slate-200/80 pt-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-bold text-[#0B1F3A]">
+                            Work Order: {noteDetail.task.title}
+                          </span>
+                          <span className="rounded-full bg-[#0B1F3A]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-[#0B1F3A]">
+                            {noteDetail.task.status}
+                          </span>
+                        </div>
+                        {noteDetail.task.description && (
+                          <p className="text-slate-600">{noteDetail.task.description}</p>
+                        )}
+                        {(noteDetail.task.deliverable || noteDetail.task.outputSummary) && (
+                          <div className="rounded-lg bg-white p-3 text-slate-700 ring-1 ring-slate-200">
+                            <p className="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                              AI Deliverable &amp; Outcome
+                            </p>
+                            <p className="leading-relaxed">
+                              {cleanHumanProse(
+                                noteDetail.task.deliverable ||
+                                  noteDetail.task.outputSummary ||
+                                  "",
+                                getAgentFirstName(noteDetail.task.assignedAgentId)
+                              )}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. Approvals Right Inside Modal */}
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <ShieldAlert className="h-4 w-4 text-amber-600" />
+                        <h4 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                          Owner Approvals Linked to This Activity
+                        </h4>
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        {noteDetail.approvals.filter((a) => a.status === "pending").length} pending
+                      </span>
+                    </div>
+
+                    {noteDetail.approvals.length === 0 ? (
+                      <p className="text-slate-500">
+                        No approval gate was required for this step — it was completed autonomously within AI safety rules.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {noteDetail.approvals.map((ap) => {
+                          const isPending = ap.status === "pending";
+                          const isBusy = decidingApprovalId === ap.id;
+                          return (
+                            <div
+                              key={ap.id}
+                              className={`rounded-xl border p-3.5 ${
+                                isPending
+                                  ? "border-amber-300 bg-amber-50/60"
+                                  : ap.status === "executed" || ap.status === "approved"
+                                    ? "border-emerald-200 bg-emerald-50/50"
+                                    : "border-slate-200 bg-slate-50"
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-extrabold text-[#0B1F3A]">
+                                    {ap.actionSummary}
+                                  </p>
+                                  <p className="mt-0.5 text-[11px] text-slate-600">
+                                    Requested by{" "}
+                                    <span className="font-semibold">
+                                      {getAgentFirstName(ap.requestedByAgent)}
+                                    </span>{" "}
+                                    • Tool: <span className="font-mono">{ap.toolName}</span> • Target:{" "}
+                                    <span className="font-semibold">{ap.targetResource}</span>
+                                  </p>
+                                </div>
+                                <span
+                                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase ${
+                                    isPending
+                                      ? "bg-amber-200 text-amber-900"
+                                      : ap.status === "executed" || ap.status === "approved"
+                                        ? "bg-emerald-200 text-emerald-900"
+                                        : ap.status === "rejected"
+                                          ? "bg-red-200 text-red-900"
+                                          : "bg-slate-200 text-slate-700"
+                                  }`}
+                                >
+                                  {ap.status}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-slate-700">
+                                <span className="font-semibold">Reason:</span> {ap.reason}
+                              </p>
+                              <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-2.5 text-[11px] text-slate-100">
+                                {JSON.stringify(ap.payload, null, 2)}
+                              </pre>
+
+                              {isPending ? (
+                                <div className="mt-3 space-y-2">
+                                  <input
+                                    type="text"
+                                    value={approvalDecisionNote}
+                                    onChange={(e) => setApprovalDecisionNote(e.target.value)}
+                                    placeholder="Optional decision note (saved to audit log)..."
+                                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-[#0B1F3A]"
+                                  />
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() =>
+                                        void handleApprovalDecision(
+                                          ap,
+                                          "approve",
+                                          approvalDecisionNote
+                                        )
+                                      }
+                                      className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                    >
+                                      {isBusy ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      )}
+                                      Approve &amp; Execute
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() =>
+                                        void handleApprovalDecision(
+                                          ap,
+                                          "reject",
+                                          approvalDecisionNote
+                                        )
+                                      }
+                                      className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-red-200 bg-white px-4 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      <XCircle className="h-4 w-4" />
+                                      Reject
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-[11px] text-slate-600">
+                                  {ap.decisionNote || `Status: ${ap.status}`}
+                                  {ap.approverEmail ? ` • Decided by ${ap.approverEmail}` : ""}
+                                  {ap.decidedAt
+                                    ? ` at ${new Date(ap.decidedAt).toLocaleString()}`
+                                    : ""}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Live Ticket Context */}
+                  {noteDetail.ticket && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <Wrench className="h-4 w-4 text-[#0B1F3A]" />
+                          <h4 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                            Live Ticket Snapshot ({noteDetail.ticket.ticket_number})
+                          </h4>
+                        </div>
+                        <Link
+                          href={`/admin/requests?ticket=${encodeURIComponent(
+                            noteDetail.ticket.ticket_number
+                          )}`}
+                          className="inline-flex items-center gap-1 rounded-lg bg-[#0B1F3A] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#132f57]"
+                        >
+                          <span>Open in Requests</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
+                        <div>
+                          <span className="text-slate-400">Customer:</span>{" "}
+                          <span className="font-bold text-[#0B1F3A]">
+                            {noteDetail.ticket.customer_name} ({noteDetail.ticket.customer_phone})
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Status:</span>{" "}
+                          <span className="font-bold uppercase text-[#0B1F3A]">
+                            {noteDetail.ticket.status}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Issue &amp; Area:</span>{" "}
+                          <span className="font-semibold text-slate-700">
+                            {noteDetail.ticket.problem_type ||
+                              noteDetail.ticket.problem_category ||
+                              "Plumbing"}{" "}
+                            • {noteDetail.ticket.city_lga || "Kano"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Assigned Plumber:</span>{" "}
+                          <span className="font-bold text-[#0B1F3A]">
+                            {noteDetail.ticket.assigned_technician || "Unassigned"}
+                          </span>
+                        </div>
+                        {noteDetail.ticket.customer_lat != null &&
+                          noteDetail.ticket.customer_lng != null && (
+                            <div className="flex items-center gap-1 text-emerald-700 sm:col-span-2">
+                              <MapPin className="h-3.5 w-3.5" />
+                              <span className="font-semibold">
+                                Customer GPS coordinates synced ({noteDetail.ticket.customer_lat.toFixed(5)},{" "}
+                                {noteDetail.ticket.customer_lng.toFixed(5)})
+                              </span>
+                            </div>
+                          )}
+                      </div>
+                      {noteDetail.quotations.length > 0 && (
+                        <div className="mt-2.5 space-y-1">
+                          <p className="text-[11px] font-bold text-slate-500">Latest Quotations:</p>
+                          {noteDetail.quotations.map((q) => (
+                            <div
+                              key={q.id}
+                              className="flex items-center justify-between rounded bg-slate-50 px-2.5 py-1.5 text-[11px]"
+                            >
+                              <span>
+                                {q.plumber_name} — ₦{Number(q.total_customer_cost || 0).toLocaleString()}
+                              </span>
+                              <span className="font-bold uppercase text-[#0B1F3A]">{q.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 4. Related Team Notes & Handoffs */}
+                  {noteDetail.relatedNotes.length > 0 && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="mb-2 flex items-center gap-1.5">
+                        <FileText className="h-4 w-4 text-[#0B1F3A]" />
+                        <h4 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                          Full Team Handoff Timeline ({noteDetail.relatedNotes.length})
+                        </h4>
+                      </div>
+                      <div className="space-y-2">
+                        {noteDetail.relatedNotes.map((rn) => (
+                          <div
+                            key={rn.id}
+                            className={`rounded-lg border px-3 py-2 ${
+                              rn.id === noteDetail.note.id
+                                ? "border-[#0B1F3A] bg-[#0B1F3A]/5"
+                                : "border-slate-100 bg-slate-50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-[#0B1F3A]">
+                                {getAgentFirstName(rn.from_agent)} to{" "}
+                                {rn.to_agent ? getAgentFirstName(rn.to_agent) : "Team"}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(rn.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-slate-700">
+                              {cleanHumanProse(rn.note, getAgentFirstName(rn.from_agent))}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. AI Tool Executions & Audit Events */}
+                  {(noteDetail.toolExecutions.length > 0 || noteDetail.taskEvents.length > 0) && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="mb-2 flex items-center gap-1.5">
+                        <Terminal className="h-4 w-4 text-[#0B1F3A]" />
+                        <h4 className="text-xs font-extrabold uppercase tracking-wide text-[#0B1F3A]">
+                          AI Tool Executions &amp; Lifecycle Events
+                        </h4>
+                      </div>
+                      <div className="space-y-2">
+                        {noteDetail.toolExecutions.map((ex) => (
+                          <div
+                            key={ex.id}
+                            className="rounded-lg border border-slate-100 bg-slate-50 p-2.5"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-bold text-[#0B1F3A]">
+                                  {ex.tool_name}
+                                </span>
+                                <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-700">
+                                  {ex.tier}
+                                </span>
+                                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-800">
+                                  {ex.status}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(ex.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            {ex.result_summary && (
+                              <p className="mt-1 text-slate-600">{ex.result_summary}</p>
+                            )}
+                          </div>
+                        ))}
+                        {noteDetail.taskEvents.map((ev) => (
+                          <div
+                            key={ev.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 text-[11px]"
+                          >
+                            <div>
+                              <span className="mr-1.5 font-mono font-bold text-[#0B1F3A]">
+                                [{ev.event_type}]
+                              </span>
+                              <span className="text-slate-700">{ev.message}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400">
+                              {new Date(ev.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : null}
             </div>
           </div>
         </div>

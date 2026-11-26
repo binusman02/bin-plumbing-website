@@ -4,6 +4,7 @@ import path from "path";
 import { revalidatePath, updateTag } from "next/cache";
 import { triggerWorkforceOnCustomerTicketMessage } from "@/lib/ai-workforce/auto-triggers";
 import { notifyCustomerOnPlumberAssigned } from "@/lib/ai-workforce/public-amina";
+import { reconcileStaleWorkforceState } from "@/lib/ai-workforce/workforce-sync";
 import { validateJobTransition, type JobAction } from "@/lib/job-lifecycle";
 import { PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 import {
@@ -368,6 +369,8 @@ export async function assignPlumberToRequestAction(params: {
       plumberName: params.plumberName,
     });
 
+    await reconcileStaleWorkforceState().catch(() => {});
+
     revalidatePath("/admin/requests");
     revalidatePath("/admin/plumbers");
     revalidatePath("/admin");
@@ -593,6 +596,8 @@ export async function customerQuotationDecisionAction(
     revalidatePath("/customer");
     revalidatePath("/admin");
     revalidatePath("/admin/requests");
+    await reconcileStaleWorkforceState().catch(() => {});
+
     revalidatePath("/admin/financials");
     revalidatePath("/admin/communications");
     revalidatePath("/plumber");
@@ -1023,6 +1028,8 @@ export async function recordPaymentReconciliationAction(params: {
         dedupeKey: `payment_recorded:customer:${pay.id}`,
       });
     }
+
+    await reconcileStaleWorkforceState().catch(() => {});
 
     revalidatePath("/admin/financials");
     revalidatePath("/admin/requests");
@@ -1732,6 +1739,8 @@ export async function verifyPaymentAction(
         });
       }
     }
+
+    await reconcileStaleWorkforceState().catch(() => {});
 
     revalidatePath("/admin/financials");
     revalidatePath("/admin");
@@ -2534,6 +2543,8 @@ export async function updatePaymentRecordAction(input: {
       entity_id: String(data.ticket_number || input.paymentId),
       new_value: `${input.totalPayment} (${input.verificationStatus})`,
     });
+
+    await reconcileStaleWorkforceState().catch(() => {});
 
     revalidatePath("/admin/financials");
     revalidatePath("/admin/requests");

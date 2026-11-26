@@ -646,11 +646,100 @@ export function mapRequestRow(
 
 export const mapServiceRequestRow = mapRequestRow;
 
+export interface PlumberOnboardingMeta {
+  availability?: string;
+  onboardingNotes?: string;
+  agreementUrl?: string;
+  rejectionReason?: string;
+  checklist?: PlumberProfile["verification_checklist"];
+}
+
+/** Extract structured availability and onboarding metadata safely stored in plumbers.notes. */
+export function parsePlumberMetaFromNotes(notes: unknown): PlumberOnboardingMeta {
+  const raw = typeof notes === "string" ? notes : "";
+  const out: PlumberOnboardingMeta = {};
+
+  const availTag = raw.match(/\[AVAILABILITY:([^\]]+)\]/);
+  if (availTag?.[1]) {
+    out.availability = availTag[1].trim();
+  } else {
+    const legacyAvail = raw.match(/^Availability:\s*([^\n\[]+)/im);
+    if (legacyAvail?.[1]) {
+      out.availability = legacyAvail[1].trim();
+    }
+  }
+
+  const onboardMatch = raw.match(/\[ONBOARDING_JSON:([^\n]*?)\]/);
+  if (onboardMatch?.[1]) {
+    try {
+      const parsed = JSON.parse(onboardMatch[1]) as Record<string, unknown>;
+      if (typeof parsed.onboardingNotes === "string") {
+        out.onboardingNotes = parsed.onboardingNotes;
+      }
+      if (typeof parsed.agreementUrl === "string") {
+        out.agreementUrl = parsed.agreementUrl;
+      }
+      if (typeof parsed.rejectionReason === "string") {
+        out.rejectionReason = parsed.rejectionReason;
+      }
+      if (parsed.checklist && typeof parsed.checklist === "object") {
+        out.checklist = parsed.checklist as PlumberProfile["verification_checklist"];
+      }
+    } catch {
+      // Ignore malformed legacy metadata
+    }
+  }
+  return out;
+}
+
+/** Merge availability and onboarding metadata into plumbers.notes without disturbing [BANK_JSON:...]. */
+export function embedPlumberMetaInNotes(
+  existingNotes: unknown,
+  patch: PlumberOnboardingMeta
+): string {
+  const current = parsePlumberMetaFromNotes(existingNotes);
+  let clean = (typeof existingNotes === "string" ? existingNotes : "")
+    .replace(/\s*\[AVAILABILITY:[^\]]*\]/g, "")
+    .replace(/\s*\[ONBOARDING_JSON:[^\n]*?\]/g, "")
+    .trim();
+
+  const nextAvailability = patch.availability !== undefined ? patch.availability.trim() : current.availability;
+  if (nextAvailability) {
+    clean = clean.replace(/^Availability:\s*[^\n\[]+\s*/im, "").trim();
+  }
+
+  const mergedOnboarding: PlumberOnboardingMeta = {
+    onboardingNotes:
+      patch.onboardingNotes !== undefined ? patch.onboardingNotes : current.onboardingNotes,
+    agreementUrl:
+      patch.agreementUrl !== undefined ? patch.agreementUrl : current.agreementUrl,
+    rejectionReason:
+      patch.rejectionReason !== undefined ? patch.rejectionReason : current.rejectionReason,
+    checklist: patch.checklist !== undefined ? patch.checklist : current.checklist,
+  };
+
+  const tags: string[] = [];
+  if (nextAvailability) {
+    tags.push(`[AVAILABILITY:${nextAvailability.replace(/[\[\]]/g, "")}]`);
+  }
+  if (
+    mergedOnboarding.onboardingNotes ||
+    mergedOnboarding.agreementUrl ||
+    mergedOnboarding.rejectionReason ||
+    mergedOnboarding.checklist
+  ) {
+    tags.push(`[ONBOARDING_JSON:${JSON.stringify(mergedOnboarding)}]`);
+  }
+
+  return [clean, ...tags].filter(Boolean).join(" ").trim();
+}
+
 export function mapPlumberRow(
   row: Record<string, unknown>,
   docs: Record<string, unknown>[] = []
 ): PlumberProfile {
   const plumberDocs = docs.filter((d) => d.plumber_id === row.id);
+  const meta = parsePlumberMetaFromNotes(row.notes);
 
   const toDocObj = (d: Record<string, unknown>): PlumberDocument => ({
     name: String(d.file_name || "document"),
@@ -660,6 +749,14 @@ export function mapPlumberRow(
     url: `/api/admin/plumber-file?path=${encodeURIComponent(String(d.storage_path || ""))}`,
     uploaded_at: d.created_at ? String(d.created_at) : undefined,
   });
+
+  const cleanVisibleNotes = row.notes
+    ? String(row.notes)
+        .replace(/\s*\[BANK_JSON:[^\n]*?\]/g, "")
+        .replace(/\s*\[AVAILABILITY:[^\]]*\]/g, "")
+        .replace(/\s*\[ONBOARDING_JSON:[^\n]*?\]/g, "")
+        .trim()
+    : "";
 
   return {
     id: String(row.id),
@@ -676,16 +773,28 @@ export function mapPlumberRow(
     experience_years: Number(row.experience_years || 1),
     experience_details: row.experience_details ? String(row.experience_details) : undefined,
     references_info: row.references_info ? String(row.references_info) : undefined,
+    availability: row.availability ? String(row.availability) : meta.availability || "Standard",
     verification_status: (row.verification_status as PlumberVerificationStatus) || "submitted",
     is_available: row.is_available !== false,
     is_online: Boolean(row.is_online),
     rating: Number(row.rating || 5.0),
     total_jobs: Number(row.total_jobs || 0),
-    notes: row.notes ? String(row.notes) : undefined,
+    notes: cleanVisibleNotes || undefined,
     avatar_url: row.avatar_url ? String(row.avatar_url) : undefined,
     current_lat: row.current_lat != null ? Number(row.current_lat) : undefined,
     current_lng: row.current_lng != null ? Number(row.current_lng) : undefined,
     location_updated_at: row.location_updated_at ? String(row.location_updated_at) : undefined,
+    onboarding_notes: row.onboarding_notes
+      ? String(row.onboarding_notes)
+      : meta.onboardingNotes || undefined,
+    agreement_url: row.agreement_url ? String(row.agreement_url) : meta.agreementUrl || undefined,
+    rejection_reason: row.rejection_reason
+      ? String(row.rejection_reason)
+      : meta.rejectionReason || undefined,
+    verification_checklist:
+      row.verification_checklist && typeof row.verification_checklist === "object"
+        ? (row.verification_checklist as PlumberProfile["verification_checklist"])
+        : meta.checklist,
     documents: plumberDocs.map(toDocObj),
     created_at: String(row.created_at),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
@@ -1659,7 +1768,25 @@ export async function updatePlumberVerification(
     verification_status: status,
     updated_at: new Date().toISOString(),
   };
-  if (notes !== undefined) updatePayload.notes = notes;
+  if (notes !== undefined) {
+    const { data: existing } = await supabase
+      .from("plumbers")
+      .select("notes")
+      .eq("id", id)
+      .maybeSingle();
+    const existingRaw = typeof existing?.notes === "string" ? existing.notes : "";
+    const bankTag = existingRaw.match(/\[BANK_JSON:[^\n]*?\]/)?.[0] || "";
+    const meta = parsePlumberMetaFromNotes(existingRaw);
+    const cleanedNote = notes.trim();
+    const mergedMeta = embedPlumberMetaInNotes(cleanedNote, {
+      availability: meta.availability,
+      onboardingNotes: cleanedNote || meta.onboardingNotes,
+      agreementUrl: meta.agreementUrl,
+      rejectionReason: status === "rejected" && cleanedNote ? cleanedNote : meta.rejectionReason,
+      checklist: meta.checklist,
+    });
+    updatePayload.notes = [mergedMeta, bankTag].filter(Boolean).join(" ").trim() || null;
+  }
   const { error } = await supabase.from("plumbers").update(updatePayload).eq("id", id);
   return !error;
 }
@@ -1679,6 +1806,71 @@ export async function updatePlumberAvailability(
   return !error;
 }
 
+function isMissingPlumberColumnError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("schema cache") ||
+    lower.includes("could not find the") ||
+    (lower.includes("column") && lower.includes("does not exist"))
+  );
+}
+
+/** Update plumber profile fields while safely persisting availability even if the DB lacks that column yet. */
+export async function updatePlumberProfileFields(
+  plumberId: string,
+  fields: {
+    full_name: string;
+    phone: string;
+    email?: string | null;
+    residential_location?: string;
+    preferred_locations?: string[];
+    skills?: string[];
+    availability?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = getServiceSupabase();
+  const { data: current } = await supabase
+    .from("plumbers")
+    .select("notes")
+    .eq("id", plumberId)
+    .maybeSingle();
+
+  const basePayload: Record<string, unknown> = {
+    full_name: fields.full_name,
+    phone: fields.phone,
+    updated_at: new Date().toISOString(),
+  };
+  if (fields.email !== undefined) basePayload.email = fields.email;
+  if (fields.residential_location !== undefined) {
+    basePayload.residential_location = fields.residential_location;
+  }
+  if (fields.preferred_locations !== undefined) {
+    basePayload.preferred_locations = fields.preferred_locations;
+  }
+  if (fields.skills !== undefined) basePayload.skills = fields.skills;
+  if (fields.availability !== undefined) {
+    basePayload.notes = embedPlumberMetaInNotes(current?.notes, {
+      availability: fields.availability,
+    });
+  }
+
+  const withOptionalCol =
+    fields.availability !== undefined
+      ? { ...basePayload, availability: fields.availability }
+      : basePayload;
+
+  const { error } = await supabase.from("plumbers").update(withOptionalCol).eq("id", plumberId);
+  if (!error) return { success: true };
+
+  if (fields.availability !== undefined && isMissingPlumberColumnError(error.message)) {
+    const retry = await supabase.from("plumbers").update(basePayload).eq("id", plumberId);
+    if (!retry.error) return { success: true };
+    return { success: false, error: retry.error.message };
+  }
+
+  return { success: false, error: error.message };
+}
+
 export async function updatePlumberChecklistAndNotes(params: {
   id?: string;
   plumberId?: string;
@@ -1692,14 +1884,47 @@ export async function updatePlumberChecklistAndNotes(params: {
   const targetId = params.id || params.plumberId;
   if (!targetId) return false;
   const supabase = getServiceSupabase();
-  const { error } = await supabase
+  const { data: current } = await supabase
     .from("plumbers")
-    .update({
-      notes: params.adminNotes ?? params.onboardingNotes ?? undefined,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", targetId);
-  return !error;
+    .select("notes")
+    .eq("id", targetId)
+    .maybeSingle();
+
+  const mergedNotes = embedPlumberMetaInNotes(
+    params.adminNotes ?? current?.notes ?? "",
+    {
+      checklist:
+        params.checklist && typeof params.checklist === "object"
+          ? (params.checklist as PlumberProfile["verification_checklist"])
+          : undefined,
+      onboardingNotes: params.onboardingNotes,
+      agreementUrl: params.agreementUrl,
+      rejectionReason: params.rejectionReason,
+    }
+  );
+
+  const nowIso = new Date().toISOString();
+  const fullPayload: Record<string, unknown> = {
+    notes: mergedNotes || null,
+    updated_at: nowIso,
+  };
+  if (params.onboardingNotes !== undefined) fullPayload.onboarding_notes = params.onboardingNotes;
+  if (params.agreementUrl !== undefined) fullPayload.agreement_url = params.agreementUrl;
+  if (params.rejectionReason !== undefined) fullPayload.rejection_reason = params.rejectionReason;
+  if (params.checklist !== undefined) fullPayload.verification_checklist = params.checklist;
+
+  const { error } = await supabase.from("plumbers").update(fullPayload).eq("id", targetId);
+  if (!error) return true;
+
+  if (isMissingPlumberColumnError(error.message)) {
+    const fallback = await supabase
+      .from("plumbers")
+      .update({ notes: mergedNotes || null, updated_at: nowIso })
+      .eq("id", targetId);
+    return !fallback.error;
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------

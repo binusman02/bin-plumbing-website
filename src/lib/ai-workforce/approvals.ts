@@ -153,12 +153,30 @@ export class SupabaseApprovalStore implements ApprovalStore {
 
   async list(limit = 50): Promise<ApprovalRecord[]> {
     const supabase = getServiceSupabase();
-    const { data } = await supabase
-      .from("ai_approvals")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    return (data || []).map((row) => mapDbRow(row as Record<string, unknown>));
+    const [{ data: pendingRows }, { data: recentRows }] = await Promise.all([
+      supabase
+        .from("ai_approvals")
+        .select("*")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(Math.max(limit, 50)),
+      supabase
+        .from("ai_approvals")
+        .select("*")
+        .neq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(limit),
+    ]);
+    const combined = [...(pendingRows || []), ...(recentRows || [])];
+    const seen = new Set<string>();
+    const deduped: Record<string, unknown>[] = [];
+    for (const row of combined) {
+      const id = String((row as Record<string, unknown>).id || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      deduped.push(row as Record<string, unknown>);
+    }
+    return deduped.map((row) => mapDbRow(row));
   }
 
   async insert(record: ApprovalRecord): Promise<ApprovalRecord> {

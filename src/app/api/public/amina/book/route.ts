@@ -161,9 +161,35 @@ export async function POST(request: Request) {
     source: "text",
   });
 
+  const bookTaskId = crypto.randomUUID();
+  const bookSummary = `Amina booked ${problemType} in ${cityOrLga} (${urgency}) for ${fullName} (${phone}) under ticket ${created.ticket_number}.${hasValidGps ? " Customer GPS coordinates synced for plumber navigation." : ""}`;
+  await getServiceSupabase()
+    .from("ai_tasks")
+    .insert({
+      id: bookTaskId,
+      title: `Website Concierge Booking: ${created.ticket_number}`,
+      description: `${problemType} in ${cityOrLga} • Customer: ${fullName} (${phone}) • Details: ${issueSummary}`,
+      requester_id: "public_website",
+      assigned_agent_id: "sales_ai",
+      owner_agent: "sales_ai",
+      created_by: "sales_ai",
+      priority: urgency === "urgent" ? "urgent" : "normal",
+      status: "closed",
+      deliverable: bookSummary,
+      qa_status: "approved",
+      lessons: [bookSummary.slice(0, 140)],
+      output_summary: bookSummary,
+      completed_at: new Date().toISOString(),
+    })
+    .then(
+      () => {},
+      () => {}
+    );
+
   await recordTeamNote({
     fromAgent: "sales_ai",
     toAgent: "operations_manager",
+    taskId: bookTaskId,
     ticketNumber: created.ticket_number,
     note: `Amina booked website request ${created.ticket_number} (${problemType} in ${cityOrLga}, ${urgency}) for ${fullName}.`,
   }).catch(() => {});
@@ -172,9 +198,11 @@ export async function POST(request: Request) {
     agentId: "sales_ai",
     status: urgency === "urgent" ? "urgent" : "reported",
     urgent: urgency === "urgent",
+    taskId: bookTaskId,
     ticketNumber: created.ticket_number,
-    summary: `Booked new website request ${created.ticket_number} for ${fullName} (${problemType} in ${cityOrLga}). Waiting for plumber approval.`,
+    summary: `Booked new website request ${created.ticket_number} for ${fullName} (${problemType} in ${cityOrLga}). Handed off to Sadiq for plumber dispatch.`,
     forceStoreReport: true,
+    destination: `/admin/requests?ticket=${encodeURIComponent(created.ticket_number)}`,
   }).catch(() => {});
 
   const storedMessages = await defaultPublicAminaStore.listMessages(session.id, 40);

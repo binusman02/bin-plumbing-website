@@ -12,6 +12,7 @@ import { getAgentDefinition } from "@/lib/ai-workforce/registry";
 import { runWithFreeFirstModel } from "@/lib/ai-workforce/model-adapter";
 
 async function recordAutoTask(params: {
+  id?: string;
   agentId: "operations_manager" | "sales_ai" | "customer_support_ai" | "engineering_ai";
   title: string;
   description: string;
@@ -20,7 +21,7 @@ async function recordAutoTask(params: {
   priority?: "normal" | "high" | "urgent";
 }): Promise<string | null> {
   try {
-    const id = randomUUID();
+    const id = params.id || randomUUID();
     const nowIso = new Date().toISOString();
     const priority = params.priority ?? "normal";
     const woStatus = params.status === "completed" ? "closed" : params.status;
@@ -138,12 +139,22 @@ export async function triggerWorkforceOnServiceRequest(params: {
       return;
     }
 
+    const preAssignTaskId = await recordAutoTask({
+      agentId: "operations_manager",
+      title: `Approval Ready: Assign ${best.full_name} to ${params.ticketNumber}`,
+      description: `${params.customerName} • ${params.problemCategory} (${params.cityLga})`,
+      status: "waiting_approval",
+      priority: triage.escalateToOwner ? "urgent" : "normal",
+      outputSummary: `Sadiq is preparing plumber assignment for ${best.full_name}.`,
+    });
+
     const gateway = getAdminToolGateway();
     const res = await gateway.invoke({
       ctx: {
         agentId: "operations_manager",
         actorUserId: "system_auto_trigger",
         actorEmail: "sadiq@flowguard.com.ng",
+        taskId: preAssignTaskId,
       },
       toolName: "assign_plumber_to_ticket",
       rawInput: {
@@ -157,19 +168,20 @@ export async function triggerWorkforceOnServiceRequest(params: {
     });
 
     if (res.approvalId) {
-      const assignTaskId = await recordAutoTask({
-        agentId: "operations_manager",
-        title: `Approval Ready: Assign ${best.full_name} to ${params.ticketNumber}`,
-        description: `${params.customerName} • ${params.problemCategory} (${params.cityLga})`,
-        status: "waiting_approval",
-        priority: triage.escalateToOwner ? "urgent" : "normal",
-        outputSummary: `Sadiq prepared plumber assignment for ${best.full_name} (Approval ID: ${res.approvalId}).`,
-      });
+      if (preAssignTaskId) {
+        await supabase
+          .from("ai_tasks")
+          .update({
+            output_summary: `Sadiq prepared plumber assignment for ${best.full_name} (Approval ID: ${res.approvalId}).`,
+            deliverable: `Sadiq prepared plumber assignment for ${best.full_name} (Approval ID: ${res.approvalId}).`,
+          })
+          .eq("id", preAssignTaskId);
+      }
 
       await recordTeamNote({
         fromAgent: "operations_manager",
         toAgent: null,
-        taskId: assignTaskId,
+        taskId: preAssignTaskId,
         ticketNumber: params.ticketNumber,
         note: `Sadiq queued approval to assign ${best.full_name} to ${params.ticketNumber} (${params.cityLga}).`,
       }).catch(() => {});
@@ -178,7 +190,7 @@ export async function triggerWorkforceOnServiceRequest(params: {
         agentId: "operations_manager",
         status: "waiting_approval",
         urgent: triage.escalateToOwner,
-        taskId: assignTaskId,
+        taskId: preAssignTaskId,
         approvalId: res.approvalId,
         ticketNumber: params.ticketNumber,
         summary: `Assign ${best.full_name} to ${params.customerName}'s ${params.problemCategory} in ${params.cityLga} (${params.ticketNumber}). Waiting for your okay.`,
@@ -206,11 +218,19 @@ export async function triggerWorkforceOnEnquiry(params: {
   try {
     const draftBody = `Hello ${params.fullName}, thanks for getting in touch with FlowGuard Plumbing Enterprises regarding ${params.serviceType} in ${params.location}. Would you like us to schedule a verified technician inspection?`;
     if (params.email?.trim()) {
+      const salesTaskId = await recordAutoTask({
+        agentId: "sales_ai",
+        title: `Lead Follow-up Approval: ${params.fullName}`,
+        description: params.message,
+        status: "waiting_approval",
+        outputSummary: `Amina drafted follow-up email for ${params.fullName}.`,
+      });
       const res = await getAdminToolGateway().invoke({
         ctx: {
           agentId: "sales_ai",
           actorUserId: "system_auto_trigger",
           actorEmail: "amina@flowguard.com.ng",
+          taskId: salesTaskId,
         },
         toolName: "sales_send_email",
         rawInput: {
@@ -225,13 +245,16 @@ export async function triggerWorkforceOnEnquiry(params: {
       });
 
       if (res.approvalId) {
-        const salesTaskId = await recordAutoTask({
-          agentId: "sales_ai",
-          title: `Lead Follow-up Approval: ${params.fullName}`,
-          description: params.message,
-          status: "waiting_approval",
-          outputSummary: `Amina drafted follow-up email for ${params.fullName} (Approval ID: ${res.approvalId}).`,
-        });
+        if (salesTaskId) {
+          const supabase = getServiceSupabase();
+          await supabase
+            .from("ai_tasks")
+            .update({
+              output_summary: `Amina drafted follow-up email for ${params.fullName} (Approval ID: ${res.approvalId}).`,
+              deliverable: `Amina drafted follow-up email for ${params.fullName} (Approval ID: ${res.approvalId}).`,
+            })
+            .eq("id", salesTaskId);
+        }
         await recordTeamNote({
           fromAgent: "sales_ai",
           toAgent: "operations_manager",
@@ -272,11 +295,19 @@ export async function triggerWorkforceOnPaymentSubmitted(params: {
   amount: number;
 }): Promise<void> {
   try {
+    const payTaskId = await recordAutoTask({
+      agentId: "operations_manager",
+      title: `Payment Verification Ready: ${params.ticketNumber}`,
+      description: `₦${params.amount.toLocaleString()} from ${params.customerName}`,
+      status: "waiting_approval",
+      outputSummary: `Sadiq is preparing payment verification for ${params.ticketNumber}.`,
+    });
     const res = await getAdminToolGateway().invoke({
       ctx: {
         agentId: "operations_manager",
         actorUserId: "system_auto_trigger",
         actorEmail: "sadiq@flowguard.com.ng",
+        taskId: payTaskId,
       },
       toolName: "verify_payment",
       rawInput: {
@@ -290,13 +321,16 @@ export async function triggerWorkforceOnPaymentSubmitted(params: {
     });
 
     if (res.approvalId) {
-      const payTaskId = await recordAutoTask({
-        agentId: "operations_manager",
-        title: `Payment Verification Ready: ${params.ticketNumber}`,
-        description: `₦${params.amount.toLocaleString()} from ${params.customerName}`,
-        status: "waiting_approval",
-        outputSummary: `Sadiq queued payment verification (Approval ID: ${res.approvalId}).`,
-      });
+      if (payTaskId) {
+        const supabase = getServiceSupabase();
+        await supabase
+          .from("ai_tasks")
+          .update({
+            output_summary: `Sadiq queued payment verification (Approval ID: ${res.approvalId}).`,
+            deliverable: `Sadiq queued payment verification (Approval ID: ${res.approvalId}).`,
+          })
+          .eq("id", payTaskId);
+      }
       await recordTeamNote({
         fromAgent: "operations_manager",
         toAgent: null,
@@ -513,11 +547,21 @@ export async function triggerWorkforceOnCustomerTicketMessage(params: {
         (modelRes.ok && modelRes.text) ||
         `Hello ${params.customerName}, I'm sorry you're experiencing this. I've escalated your message on ${params.ticketNumber} to our management team so we can review it and get back to you right away.`;
 
+      const supportTaskId = await recordAutoTask({
+        agentId: "customer_support_ai",
+        title: `Needs Approval: ${params.ticketNumber}`,
+        description: clean,
+        status: "waiting_approval",
+        priority: "urgent",
+        outputSummary: `Zainab flagged "${assessment.reasons.join(", ")}" and is queuing a reply draft.`,
+      });
+
       const res = await getAdminToolGateway().invoke({
         ctx: {
           agentId: "customer_support_ai",
           actorUserId: "system_auto_trigger",
           actorEmail: "zainab@flowguard.com.ng",
+          taskId: supportTaskId,
         },
         toolName: "support_send_reply",
         rawInput: {
@@ -531,14 +575,15 @@ export async function triggerWorkforceOnCustomerTicketMessage(params: {
       });
 
       if (res.approvalId) {
-        const supportTaskId = await recordAutoTask({
-          agentId: "customer_support_ai",
-          title: `Needs Approval: ${params.ticketNumber}`,
-          description: clean,
-          status: "waiting_approval",
-          priority: "urgent",
-          outputSummary: `Zainab flagged "${assessment.reasons.join(", ")}" and queued reply draft (${res.approvalId}).`,
-        });
+        if (supportTaskId) {
+          await supabase
+            .from("ai_tasks")
+            .update({
+              output_summary: `Zainab flagged "${assessment.reasons.join(", ")}" and queued reply draft (${res.approvalId}).`,
+              deliverable: `Zainab flagged "${assessment.reasons.join(", ")}" and queued reply draft (${res.approvalId}).`,
+            })
+            .eq("id", supportTaskId);
+        }
         await recordTeamNote({
           fromAgent: "customer_support_ai",
           toAgent: "operations_manager",
