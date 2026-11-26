@@ -5,6 +5,7 @@ import { getServiceSupabase } from "@/lib/supabase/admin";
 import { getVerifiedAppRole } from "@/lib/auth-role";
 import { resolvePortalActor } from "@/lib/portal-auth";
 import {
+  claimUnlinkedCustomerRequests,
   getMarketplaceSettings,
   getServiceCategories,
   getMessagesForAuthorizedTicket,
@@ -84,6 +85,13 @@ export default async function CustomerPortalPage({
           .eq("id", actor.id)
           .then(() => {}, () => {});
       }
+
+      // Link any prior guest service requests booked with this customer's email or phone
+      await claimUnlinkedCustomerRequests({
+        customerId: actor.id,
+        email: targetCustomer.email || user?.email || null,
+        phone: targetCustomer.phone || null,
+      });
 
       // Query all service requests belonging to this customer (including any linked rows for same auth_user_id)
       let customerIds = [actor.id];

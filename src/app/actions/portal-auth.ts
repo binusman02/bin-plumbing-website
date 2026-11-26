@@ -9,6 +9,7 @@ import { getVerifiedAppRole } from "@/lib/auth-role";
 import { checkRateLimit } from "@/lib/security";
 import { findCustomerByIdentifier, findPlumberByIdentifier } from "@/lib/auth-lookup";
 import {
+  claimUnlinkedCustomerRequests,
   getAllPlumberAccounts,
   registerCustomer,
   registerPlumberAccount,
@@ -193,8 +194,9 @@ export async function loginCustomerWithPasswordAction(
     // Ensure local customer profile exists and is linked to auth_user_id
     const meta = data.user.user_metadata || {};
     const phoneFromMeta = (meta.phone as string) || (!rawId.includes("@") ? rawId : "");
+    let resolvedCustomerId: string | null = null;
     if (phoneFromMeta) {
-      await registerCustomer({
+      const saved = await registerCustomer({
         fullName: (meta.full_name as string) || data.user.email || "Customer",
         phone: phoneFromMeta,
         email: data.user.email || undefined,
@@ -203,10 +205,28 @@ export async function loginCustomerWithPasswordAction(
         cityLga: (meta.city_lga as string) || undefined,
         neighbourhood: (meta.neighbourhood as string) || undefined,
         propertyType: (meta.property_type as string) || undefined,
+      }).catch(() => null);
+      resolvedCustomerId = saved?.id || null;
+    }
+
+    if (!resolvedCustomerId) {
+      const matched = await findCustomerByIdentifier(data.user.email || rawId);
+      resolvedCustomerId = matched?.id || null;
+    }
+
+    if (resolvedCustomerId) {
+      await claimUnlinkedCustomerRequests({
+        customerId: resolvedCustomerId,
+        email: data.user.email || (rawId.includes("@") ? rawId : undefined),
+        phone: phoneFromMeta || (!rawId.includes("@") ? rawId : undefined),
       });
     }
 
-    revalidatePath("/customer");
+    try {
+      revalidatePath("/customer");
+    } catch {
+      // Non-fatal
+    }
     return { success: true };
   } catch {
     return { success: false, error: "Invalid sign-in details." };
@@ -292,7 +312,10 @@ export async function registerCustomerWithPasswordAction(input: {
     const authEmail =
       email.toLowerCase() || `c_${normalizedDigits}@customer.binplumbing.local`;
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.NEXT_PUBLIC_SITE_UR ||
+      "https://flowguard-ng.vercel.app";
     const supabase = await createClient();
     const { data, error } = await supabase.auth.signUp({
       email: authEmail,
@@ -311,18 +334,53 @@ export async function registerCustomerWithPasswordAction(input: {
       },
     });
 
-    const isRateLimited =
+    const errMsgLower = (error?.message || "").toLowerCase();
+    const isAlreadyRegistered =
+      errMsgLower.includes("already registered") || errMsgLower.includes("already exists");
+    const isRateLimitedOrMailIssue =
       Boolean(error) &&
-      (error?.status === 429 || (error?.message || "").toLowerCase().includes("rate limit"));
+      !isAlreadyRegistered &&
+      (error?.status === 429 ||
+        errMsgLower.includes("rate limit") ||
+        errMsgLower.includes("security purposes") ||
+        errMsgLower.includes("confirmation email") ||
+        errMsgLower.includes("smtp") ||
+        errMsgLower.includes("sending"));
 
-    if (error && !isRateLimited) {
-      const msg = (error.message || "").toLowerCase();
-      if (msg.includes("already registered") || msg.includes("already exists")) {
-        return {
-          success: false,
-          error: "An account with this email already exists. Please sign in instead.",
-        };
+    if (error && isAlreadyRegistered) {
+      return {
+        success: false,
+        error: "An account with this email already exists. Please sign in instead.",
+      };
+    }
+
+    let authUserId = data?.user?.id;
+    let hasAuthSession = Boolean(data?.session);
+
+    if (error && isRateLimitedOrMailIssue) {
+      // Fallback: create confirmed Supabase Auth user via Admin API so registration never stalls
+      try {
+        const adminSb = getServiceSupabase();
+        const { data: createdAdminUser } = await adminSb.auth.admin.createUser({
+          email: authEmail,
+          password: input.password,
+          email_confirm: true,
+          app_metadata: { role: "customer" },
+          user_metadata: {
+            full_name: fullName,
+            phone,
+            address,
+            state,
+            city_lga: cityLga,
+          },
+        });
+        if (createdAdminUser?.user?.id) {
+          authUserId = createdAdminUser.user.id;
+        }
+      } catch {
+        // Local customer + signed session cookie below still grants portal access cleanly
       }
+    } else if (error) {
       return {
         success: false,
         error:
@@ -331,8 +389,16 @@ export async function registerCustomerWithPasswordAction(input: {
       };
     }
 
-    if (data?.user?.id) {
-      await setServerAppRole(data.user.id, "customer");
+    if (authUserId) {
+      await setServerAppRole(authUserId, "customer");
+      if (!hasAuthSession) {
+        const signInAfter = await supabase.auth
+          .signInWithPassword({ email: authEmail, password: input.password })
+          .catch(() => null);
+        if (signInAfter?.data?.session) {
+          hasAuthSession = true;
+        }
+      }
     }
 
     const passwordHash = hashCustomerPassword(input.password);
@@ -341,32 +407,45 @@ export async function registerCustomerWithPasswordAction(input: {
       phone,
       email: email || undefined,
       passwordHash,
-      authUserId: data?.user?.id,
+      authUserId,
       address,
       cityLga: `${cityLga}, ${state}`,
       neighbourhood: input.neighbourhood?.trim() || undefined,
       propertyType: input.propertyType || "Residential / Villa",
     });
 
+    await claimUnlinkedCustomerRequests({
+      customerId: savedCustomer.id,
+      email,
+      phone,
+    });
+
     await clearPlumberSessionCookie();
 
-    // If Supabase rate-limited signup email or requires email verification without a session,
-    // sign the customer in immediately using the signed httpOnly session cookie + scrypt password hash.
-    if (isRateLimited || !data?.session) {
+    // Always issue signed httpOnly customer session cookie when Supabase Auth session isn't active yet
+    if (!hasAuthSession) {
       await setCustomerSessionCookie(savedCustomer.id);
     }
 
-    revalidatePath("/customer");
+    try {
+      revalidatePath("/customer");
+    } catch {
+      // Non-fatal
+    }
 
     return {
       success: true,
       requiresEmailVerification: false,
       message: "Account created successfully.",
     };
-  } catch {
+  } catch (err) {
+    console.error("[registerCustomerWithPasswordAction]", err);
     return {
       success: false,
-      error: "An unexpected error occurred while creating your account.",
+      error:
+        err instanceof Error && err.message
+          ? err.message
+          : "An unexpected error occurred while creating your account.",
     };
   }
 }

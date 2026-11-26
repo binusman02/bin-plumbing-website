@@ -77,7 +77,9 @@ export function CustomerAuthView({
         setAuthLoading(false);
         return;
       }
-      window.location.assign(window.location.pathname + window.location.search);
+      const sp = new URLSearchParams(window.location.search);
+      const t = sp.get("ticket");
+      window.location.assign(t ? `/customer?ticket=${encodeURIComponent(t)}` : "/customer");
     } catch {
       setAuthError("Sign-in failed. Please try again.");
       setAuthLoading(false);
@@ -137,7 +139,9 @@ export function CustomerAuthView({
         );
         return;
       }
-      window.location.assign(window.location.pathname + window.location.search);
+      const sp = new URLSearchParams(window.location.search);
+      const t = sp.get("ticket");
+      window.location.assign(t ? `/customer?ticket=${encodeURIComponent(t)}` : "/customer");
     } catch {
       setAuthError("Registration failed. Please try again.");
       setAuthLoading(false);

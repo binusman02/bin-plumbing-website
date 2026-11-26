@@ -1814,6 +1814,56 @@ export async function registerPlumberAccount(data: {
   };
 }
 
+export async function claimUnlinkedCustomerRequests(params: {
+  customerId: string;
+  email?: string | null;
+  phone?: string | null;
+}): Promise<number> {
+  const cleanEmail = params.email?.trim().toLowerCase() || "";
+  const normalizedPhone = normalizePhoneDigits(params.phone || "");
+  if (!cleanEmail && normalizedPhone.length < 7) return 0;
+
+  try {
+    const supabase = getServiceSupabase();
+    const { data: unlinkedRows } = await supabase
+      .from("service_requests")
+      .select("id, customer_email, customer_phone")
+      .is("customer_id", null)
+      .is("deleted_at", null)
+      .limit(100);
+
+    const matchedIds: string[] = [];
+    for (const row of unlinkedRows || []) {
+      const rowEmail = row.customer_email ? String(row.customer_email).trim().toLowerCase() : "";
+      const rowDigits = normalizePhoneDigits(String(row.customer_phone || ""));
+      const emailMatches = Boolean(cleanEmail && rowEmail && rowEmail === cleanEmail);
+      const phoneMatches = Boolean(
+        normalizedPhone.length >= 7 &&
+          rowDigits.length >= 7 &&
+          (rowDigits === normalizedPhone ||
+            rowDigits.endsWith(normalizedPhone.slice(-10)) ||
+            normalizedPhone.endsWith(rowDigits.slice(-10)))
+      );
+      if (emailMatches || phoneMatches) {
+        matchedIds.push(String(row.id));
+      }
+    }
+
+    if (matchedIds.length > 0) {
+      await supabase
+        .from("service_requests")
+        .update({
+          customer_id: params.customerId,
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", matchedIds);
+    }
+    return matchedIds.length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function registerCustomer(data: {
   fullName: string;
   phone: string;
@@ -1827,7 +1877,10 @@ export async function registerCustomer(data: {
 }): Promise<CustomerProfile> {
   const supabase = getServiceSupabase();
   const cleanPhone = data.phone.trim();
-  const existing = await getCustomerByPhoneOrId(cleanPhone);
+  const cleanEmail = data.email?.trim() || "";
+  const existing =
+    (await getCustomerByPhoneOrId(cleanPhone)) ||
+    (cleanEmail ? await getCustomerByPhoneOrId(cleanEmail) : null);
   const nowIso = new Date().toISOString();
 
   if (existing) {

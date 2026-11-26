@@ -41,6 +41,7 @@ import {
 } from "@/app/actions/marketplace-actions";
 import { logoutCustomerAction } from "@/app/actions/portal-auth";
 import { CustomerAuthView } from "@/components/customer/CustomerAuthView";
+import { ZainabConciergeWidget } from "@/components/customer/ZainabConciergeWidget";
 import {
   type BankDetailsInfo,
   CustomerNewRequestModal,
@@ -155,7 +156,7 @@ export default function CustomerPortalClient({
         param === "profile"
       ) {
         setActiveTabState(param);
-      } else if (messageParam || ticketParam) {
+      } else if (messageParam) {
         setActiveTabState("messages");
       } else {
         setActiveTabState("home");
@@ -226,6 +227,7 @@ export default function CustomerPortalClient({
 
   // Overview Live Map state
   const [overviewMapRequestId, setOverviewMapRequestId] = useState<string>("");
+  const [zainabOpen, setZainabOpen] = useState(false);
   const [focusMarkerId, setFocusMarkerId] = useState<string | null>(null);
   const [focusSeq, setFocusSeq] = useState(0);
   const [locatingProperty, setLocatingProperty] = useState(false);
@@ -906,13 +908,114 @@ export default function CustomerPortalClient({
             </div>
           )}
 
-          <CustomerServiceDiscovery
-            categories={serviceCategories}
-            onSelectCategory={(categoryTitle) => {
-              setNewCategory(categoryTitle);
-              setShowNewRequestModal(true);
-            }}
-          />
+          {/* Mobile-First Summary Cards & Recent Activity First */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <button
+              type="button"
+              onClick={() => setActiveTab("requests")}
+              className="rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-[#F5B301] sm:rounded-xl sm:p-4"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
+                Active Jobs
+              </p>
+              <p className="mt-1 text-lg font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
+                {activeTrackingRequests.length}
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("requests")}
+              className="rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-[#F5B301] sm:rounded-xl sm:p-4"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
+                Quotes Waiting
+              </p>
+              <p className="mt-1 text-lg font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
+                {pendingQuotations.length}
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("requests")}
+              className="rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-[#F5B301] sm:rounded-xl sm:p-4"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
+                Completed
+              </p>
+              <p className="mt-1 text-lg font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
+                {myRequests.filter((r) => r.status === "completed").length}
+              </p>
+            </button>
+          </div>
+
+          {myRequests.length > 0 && (
+            <section className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
+                    Recent Activity &amp; Requests
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Tap any request to view quotes, live status, and updates
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setZainabOpen(true)}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#F5B301] bg-amber-50 px-2.5 text-xs font-bold text-[#0B1F3A] hover:bg-amber-100"
+                  >
+                    Ask Zainab
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("requests")}
+                    className="text-xs font-bold text-[#0B1F3A] hover:underline"
+                  >
+                    View All ({myRequests.length})
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                {myRequests.slice(0, 3).map((req) => {
+                  const statusMeta = getStatusMeta(req.status);
+                  const latestHistory = req.history[req.history.length - 1];
+                  return (
+                    <button
+                      key={req.id}
+                      type="button"
+                      onClick={() => openRequestDetail(req)}
+                      className="flex flex-col justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-sm transition hover:border-[#F5B301] active:scale-[0.99]"
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="font-mono text-xs font-bold text-[#0B1F3A]">
+                          {req.ticket_number}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusMeta.className}`}
+                        >
+                          {statusMeta.label}
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="line-clamp-1 text-xs font-bold text-[#0B1F3A]">
+                          {req.problem_category || req.property_type}
+                        </p>
+                        <p className="line-clamp-1 text-[11px] text-slate-500">
+                          {latestHistory ? `${latestHistory.action}: ${latestHistory.details}` : req.address_in_kano}
+                        </p>
+                      </div>
+                      <p className="text-[11px] font-medium text-slate-500">
+                        {req.assigned_technician
+                          ? `Plumber: ${req.assigned_technician}`
+                          : "Technician assignment pending"}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           {activeMapRequest && (
             <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-xl sm:p-5">
@@ -1302,91 +1405,13 @@ export default function CustomerPortalClient({
           </section>
           )}
 
-          {myRequests.length > 0 && (
-            <section className="space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-bold text-[#0B1F3A] sm:text-base">
-                    Recent Requests
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Tap any request to view full details, quotes, and progress
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("requests")}
-                  className="text-xs font-bold text-[#0B1F3A] hover:underline"
-                >
-                  View All ({myRequests.length})
-                </button>
-              </div>
-              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
-                {myRequests.slice(0, 3).map((req) => {
-                  const statusMeta = getStatusMeta(req.status);
-                  return (
-                    <button
-                      key={req.id}
-                      type="button"
-                      onClick={() => setSelectedRequest(req)}
-                      className="flex flex-col justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-sm transition hover:border-[#F5B301] active:scale-[0.99]"
-                    >
-                      <div className="flex w-full items-center justify-between gap-2">
-                        <span className="font-mono text-xs font-bold text-[#0B1F3A]">
-                          {req.ticket_number}
-                        </span>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusMeta.className}`}
-                        >
-                          {statusMeta.label}
-                        </span>
-                      </div>
-                      <div className="space-y-0.5">
-                        <p className="line-clamp-1 text-xs font-bold text-[#0B1F3A]">
-                          {req.problem_category || req.property_type}
-                        </p>
-                        <p className="line-clamp-1 text-[11px] text-slate-500">
-                          {req.address_in_kano}
-                        </p>
-                      </div>
-                      <p className="text-[11px] font-medium text-slate-500">
-                        {req.assigned_technician
-                          ? `Plumber: ${req.assigned_technician}`
-                          : "Technician assignment pending"}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-xl sm:p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
-                Active Requests
-              </p>
-              <p className="mt-1.5 text-xl font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
-                {activeTrackingRequests.length}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-xl sm:p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
-                Quotes Awaiting
-              </p>
-              <p className="mt-1.5 text-xl font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
-                {pendingQuotations.length}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-xl sm:p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
-                Completed Jobs
-              </p>
-              <p className="mt-1.5 text-xl font-bold text-[#0B1F3A] sm:mt-2 sm:text-2xl">
-                {myRequests.filter((r) => r.status === "completed").length}
-              </p>
-            </div>
-          </div>
+          <CustomerServiceDiscovery
+            categories={serviceCategories}
+            onSelectCategory={(categoryTitle) => {
+              setNewCategory(categoryTitle);
+              setShowNewRequestModal(true);
+            }}
+          />
 
           {awaitingPaymentRequests.length > 0 && (
             <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/70 p-5">
@@ -2218,6 +2243,12 @@ export default function CustomerPortalClient({
           </div>
         );
       })()}
+      <ZainabConciergeWidget
+        customerId={currentCustomer.id}
+        customerName={currentCustomer.full_name}
+        open={zainabOpen}
+        onOpenChange={setZainabOpen}
+      />
     </PortalShell>
   );
 }
