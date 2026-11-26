@@ -90,8 +90,9 @@ export function usePortalRealtimeChat({
       setPresence((prev) => ({
         ...prev,
         adminOnline: p.adminOnline,
-        plumberOnline: role === "plumber" ? p.plumberOnline || prev.plumberOnline : p.plumberOnline,
-        customerOnline: role === "customer" ? p.customerOnline || prev.customerOnline : p.customerOnline,
+        plumberOnline: p.plumberOnline,
+        customerOnline: p.customerOnline,
+        onlineAdminIds: p.onlineAdminIds,
         onlinePlumberIds: p.onlinePlumberIds,
         onlineCustomerIds: p.onlineCustomerIds,
       }));

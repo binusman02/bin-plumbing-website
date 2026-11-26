@@ -607,7 +607,7 @@ class FlowGuardApiClient {
     return null;
   }
 
-  static Future<void> sendChatMessage({
+  static Future<Map<String, dynamic>> sendChatMessage({
     required String ticketNumber,
     required String message,
     required String actorRole,
@@ -636,6 +636,10 @@ class FlowGuardApiClient {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_extractError(res.body, "Could not send message."));
     }
+    final decoded = jsonDecode(res.body);
+    return decoded is Map<String, dynamic>
+        ? decoded
+        : <String, dynamic>{};
   }
 
   static Future<void> sendPresenceHeartbeat({required String role}) async {

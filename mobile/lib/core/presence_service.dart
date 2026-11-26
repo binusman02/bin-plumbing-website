@@ -1,25 +1,52 @@
+import "dart:async";
 import "package:flutter/widgets.dart";
 import "package:supabase_flutter/supabase_flutter.dart";
 import "package:flowguard_plumbing/core/api_client.dart";
 import "package:flowguard_plumbing/core/supabase_config.dart";
 
-/// Sub-second WhatsApp-style online presence via Supabase Realtime Presence
-/// + immediate backend persistence for delivery ticks (`delivered_at`).
+/// Sub-second WhatsApp-style online presence via unified Supabase Realtime channel
+/// ("bin-plumbing-live") + 25s backend heartbeat (70s TTL) + live broadcast signals.
 class PresenceService with WidgetsBindingObserver {
   PresenceService._();
   static final PresenceService instance = PresenceService._();
 
+  static const String sharedChannelName = "bin-plumbing-live";
+
   final ValueNotifier<Set<String>> onlineRoles = ValueNotifier<Set<String>>({});
   final ValueNotifier<Set<String>> onlineKeys = ValueNotifier<Set<String>>({});
+  final ValueNotifier<Set<String>> onlineAdminIds = ValueNotifier<Set<String>>({});
+  final ValueNotifier<Set<String>> onlinePlumberIds = ValueNotifier<Set<String>>({});
+  final ValueNotifier<Set<String>> onlineCustomerIds = ValueNotifier<Set<String>>({});
+  final ValueNotifier<int> stateVersion = ValueNotifier<int>(0);
 
   RealtimeChannel? _channel;
+  Timer? _heartbeatTimer;
   String? _role;
   String? _actorId;
   bool _started = false;
+  bool _subscribed = false;
 
   bool isRoleOnline(String role) => onlineRoles.value.contains(role);
 
+  bool get isAdminOnline =>
+      onlineRoles.value.contains("admin") || onlineAdminIds.value.isNotEmpty;
+
+  bool isPlumberOnline(String? plumberId) {
+    if (plumberId == null || plumberId.isEmpty) return false;
+    return onlinePlumberIds.value.contains(plumberId) ||
+        onlineKeys.value.contains("plumber:$plumberId");
+  }
+
+  bool isCustomerOnline(String? customerId) {
+    if (customerId == null || customerId.isEmpty) return false;
+    return onlineCustomerIds.value.contains(customerId) ||
+        onlineKeys.value.contains("customer:$customerId");
+  }
+
   bool isActorOnline(String role, String? id) {
+    if (role == "admin") return isAdminOnline;
+    if (role == "plumber") return isPlumberOnline(id);
+    if (role == "customer") return isCustomerOnline(id);
     if (id != null && id.isNotEmpty && onlineKeys.value.contains("$role:$id")) {
       return true;
     }
@@ -32,11 +59,12 @@ class PresenceService with WidgetsBindingObserver {
     _role = role;
     _actorId = actorId;
     _started = true;
+    _subscribed = false;
     WidgetsBinding.instance.addObserver(this);
 
     try {
       final ch = SupabaseConfig.client.channel(
-        "flowguard-presence",
+        sharedChannelName,
         opts: RealtimeChannelConfig(key: "$role:$actorId"),
       );
       _channel = ch
@@ -44,13 +72,34 @@ class PresenceService with WidgetsBindingObserver {
         ..onPresenceJoin((_) => _syncState())
         ..onPresenceLeave((_) => _syncState())
         ..subscribe((status, [_]) {
-          if (status == RealtimeSubscribeStatus.subscribed) {
+          final isSub = status == RealtimeSubscribeStatus.subscribed;
+          _subscribed = isSub;
+          if (isSub) {
             _trackOnline();
           }
         });
     } catch (_) {}
 
     FlowGuardApiClient.sendPresenceHeartbeat(role: role).catchError((_) {});
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 25), (_) {
+      final r = _role;
+      if (_started && r != null) {
+        FlowGuardApiClient.sendPresenceHeartbeat(role: r).catchError((_) {});
+        _trackOnline();
+      }
+    });
+  }
+
+  Future<void> broadcastEvent(
+    String event,
+    Map<String, dynamic> payload,
+  ) async {
+    final ch = _channel;
+    if (ch == null || !_subscribed) return;
+    try {
+      await ch.sendBroadcastMessage(event: event, payload: payload);
+    } catch (_) {}
   }
 
   void _syncState() {
@@ -60,21 +109,32 @@ class PresenceService with WidgetsBindingObserver {
       final states = ch.presenceState();
       final roles = <String>{};
       final keys = <String>{};
+      final admins = <String>{};
+      final plumbers = <String>{};
+      final customers = <String>{};
+
       for (final s in states) {
         if (s.key.isNotEmpty) keys.add(s.key);
         for (final p in s.presences) {
           final r = p.payload["role"]?.toString();
-          final id = p.payload["id"]?.toString();
+          final id = (p.payload["userId"] ?? p.payload["id"])?.toString();
           if (r != null && r.isNotEmpty) {
             roles.add(r);
             if (id != null && id.isNotEmpty) {
               keys.add("$r:$id");
+              if (r == "admin") admins.add(id);
+              if (r == "plumber") plumbers.add(id);
+              if (r == "customer") customers.add(id);
             }
           }
         }
       }
       onlineRoles.value = roles;
       onlineKeys.value = keys;
+      onlineAdminIds.value = admins;
+      onlinePlumberIds.value = plumbers;
+      onlineCustomerIds.value = customers;
+      stateVersion.value += 1;
     } catch (_) {}
   }
 
@@ -86,6 +146,7 @@ class PresenceService with WidgetsBindingObserver {
     try {
       await ch.track({
         "role": r,
+        "userId": id,
         "id": id,
         "online_at": DateTime.now().toUtc().toIso8601String(),
       });
@@ -118,6 +179,9 @@ class PresenceService with WidgetsBindingObserver {
   Future<void> stop() async {
     if (!_started) return;
     _started = false;
+    _subscribed = false;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     WidgetsBinding.instance.removeObserver(this);
     final r = _role;
     await _untrackOffline();
@@ -132,5 +196,9 @@ class PresenceService with WidgetsBindingObserver {
     _actorId = null;
     onlineRoles.value = {};
     onlineKeys.value = {};
+    onlineAdminIds.value = {};
+    onlinePlumberIds.value = {};
+    onlineCustomerIds.value = {};
+    stateVersion.value += 1;
   }
 }

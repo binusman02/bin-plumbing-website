@@ -20,7 +20,13 @@ class ConversationSummary {
   final String problemCategory;
   final String peerName;
   final String peerRole;
+  final String? peerId;
   final String? peerAvatarUrl;
+  final String? customerId;
+  final String? assignedPlumberId;
+  final bool adminOnline;
+  final bool plumberOnline;
+  final bool customerOnline;
   final String ownerName;
   final String status;
   final String lastMessage;
@@ -37,7 +43,13 @@ class ConversationSummary {
     required this.problemCategory,
     required this.peerName,
     required this.peerRole,
+    this.peerId,
     this.peerAvatarUrl,
+    this.customerId,
+    this.assignedPlumberId,
+    this.adminOnline = false,
+    this.plumberOnline = false,
+    this.customerOnline = false,
     required this.ownerName,
     required this.status,
     required this.lastMessage,
@@ -56,7 +68,13 @@ class ConversationSummary {
       problemCategory: (json["problemCategory"] ?? "Plumbing").toString(),
       peerName: (json["peerName"] ?? "FlowGuard Support").toString(),
       peerRole: (json["peerRole"] ?? "admin").toString(),
+      peerId: json["peerId"]?.toString(),
       peerAvatarUrl: json["peerAvatarUrl"]?.toString(),
+      customerId: json["customerId"]?.toString(),
+      assignedPlumberId: json["assignedPlumberId"]?.toString(),
+      adminOnline: json["adminOnline"] == true,
+      plumberOnline: json["plumberOnline"] == true,
+      customerOnline: json["customerOnline"] == true,
       ownerName: (json["ownerName"] ?? "FlowGuard Support").toString(),
       status: (json["status"] ?? "open").toString(),
       lastMessage: (json["lastMessage"] ?? "").toString(),
@@ -67,6 +85,66 @@ class ConversationSummary {
       online: json["online"] == true,
     );
   }
+}
+
+({bool isOnline, String label}) resolveMobileThreadPresence({
+  required ConversationSummary item,
+  required String viewerRole,
+  bool? serverAdminOnline,
+  bool? serverPlumberOnline,
+  bool? serverCustomerOnline,
+}) {
+  final svc = PresenceService.instance;
+  final adminOn = svc.isAdminOnline || (serverAdminOnline ?? item.adminOnline);
+  final plumberOn = (item.assignedPlumberId != null &&
+          item.assignedPlumberId!.isNotEmpty)
+      ? (svc.isPlumberOnline(item.assignedPlumberId) ||
+          (serverPlumberOnline ?? item.plumberOnline))
+      : (serverPlumberOnline ?? item.plumberOnline);
+  final customerOn = (item.customerId != null && item.customerId!.isNotEmpty)
+      ? (svc.isCustomerOnline(item.customerId) ||
+          (serverCustomerOnline ?? item.customerOnline))
+      : (serverCustomerOnline ?? item.customerOnline);
+
+  if (viewerRole == "customer") {
+    if (item.assignedPlumberId != null && item.assignedPlumberId!.isNotEmpty) {
+      if (adminOn && plumberOn) {
+        return (isOnline: true, label: "Admin & Plumber online");
+      }
+      if (adminOn) {
+        return (isOnline: true, label: "Admin online");
+      }
+      if (plumberOn) {
+        return (isOnline: true, label: "Plumber online");
+      }
+      return (isOnline: false, label: "Offline");
+    }
+    return (isOnline: adminOn, label: adminOn ? "Admin online" : "Offline");
+  }
+
+  if (viewerRole == "plumber") {
+    if (adminOn && customerOn) {
+      return (isOnline: true, label: "Admin & Customer online");
+    }
+    if (adminOn) {
+      return (isOnline: true, label: "Admin online");
+    }
+    if (customerOn) {
+      return (isOnline: true, label: "Customer online");
+    }
+    return (isOnline: false, label: "Offline");
+  }
+
+  if (customerOn && plumberOn) {
+    return (isOnline: true, label: "Customer & Plumber online");
+  }
+  if (customerOn) {
+    return (isOnline: true, label: "Customer online");
+  }
+  if (plumberOn) {
+    return (isOnline: true, label: "Plumber online");
+  }
+  return (isOnline: false, label: "Offline");
 }
 
 /// Dedicated WhatsApp-style Messages tab backed by owned conversations & Supabase Realtime.
@@ -94,12 +172,17 @@ class _TicketChatViewState extends State<TicketChatView> {
   bool _loading = true;
   String? _error;
   RealtimeChannel? _rtChannel;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _loadConversations();
     _subscribeRealtime();
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _loadConversations(quiet: true),
+    );
   }
 
   @override
@@ -112,6 +195,7 @@ class _TicketChatViewState extends State<TicketChatView> {
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _rtChannel?.unsubscribe();
     super.dispose();
   }
@@ -363,17 +447,19 @@ class _TicketChatViewState extends State<TicketChatView> {
                                       Positioned(
                                       bottom: 0,
                                       right: 0,
-                                      child: ValueListenableBuilder<Set<String>>(
+                                      child: ValueListenableBuilder<int>(
                                         valueListenable:
-                                            PresenceService.instance.onlineRoles,
-                                        builder: (_, roles, __) {
-                                          final liveOnline = item.online ||
-                                              roles.contains(item.peerRole);
+                                            PresenceService.instance.stateVersion,
+                                        builder: (_, __, ___) {
+                                          final live = resolveMobileThreadPresence(
+                                            item: item,
+                                            viewerRole: widget.senderRole,
+                                          );
                                           return Container(
                                             width: 13,
                                             height: 13,
                                             decoration: BoxDecoration(
-                                              color: liveOnline
+                                              color: live.isOnline
                                                   ? const Color(0xFF22C55E)
                                                   : const Color(0xFF94A3B8),
                                               shape: BoxShape.circle,
@@ -425,15 +511,27 @@ class _TicketChatViewState extends State<TicketChatView> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        "${item.ticketNumber} • ${item.problemCategory}",
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: FlowGuardTheme.navy,
-                                        ),
+                                      ValueListenableBuilder<int>(
+                                        valueListenable:
+                                            PresenceService.instance.stateVersion,
+                                        builder: (_, __, ___) {
+                                          final pres = resolveMobileThreadPresence(
+                                            item: item,
+                                            viewerRole: widget.senderRole,
+                                          );
+                                          return Text(
+                                            "${item.ticketNumber} • ${pres.isOnline ? pres.label : item.problemCategory}",
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: pres.isOnline
+                                                  ? const Color(0xFF059669)
+                                                  : FlowGuardTheme.navy,
+                                            ),
+                                          );
+                                        },
                                       ),
                                       const SizedBox(height: 2),
                                       Row(
@@ -441,18 +539,19 @@ class _TicketChatViewState extends State<TicketChatView> {
                                           if (isMe &&
                                               item.lastReceiptStatus !=
                                                   null) ...[
-                                            ValueListenableBuilder<Set<String>>(
+                                            ValueListenableBuilder<int>(
                                               valueListenable: PresenceService
-                                                  .instance.onlineRoles,
-                                              builder: (_, roles, __) {
-                                                final liveOnline = item.online ||
-                                                    roles.contains(
-                                                      item.peerRole,
-                                                    );
+                                                  .instance.stateVersion,
+                                              builder: (_, __, ___) {
+                                                final pres =
+                                                    resolveMobileThreadPresence(
+                                                  item: item,
+                                                  viewerRole: widget.senderRole,
+                                                );
                                                 final showSingle =
                                                     item.lastReceiptStatus ==
                                                             "sent" &&
-                                                        !liveOnline;
+                                                        !pres.isOnline;
                                                 return Icon(
                                                   showSingle
                                                       ? Icons.done_rounded
@@ -544,7 +643,10 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   List<Map<String, dynamic>> _messages = [];
   bool _loading = true;
   bool _sending = false;
-  late bool _peerOnline;
+  late bool _serverAdminOnline;
+  late bool _serverPlumberOnline;
+  late bool _serverCustomerOnline;
+  bool _showJumpToBottom = false;
   bool _hasText = false;
   bool _recordingVoice = false;
   int _recordSeconds = 0;
@@ -554,6 +656,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   RealtimeChannel? _rtChannel;
   Timer? _recordTimer;
   Timer? _rtDebounce;
+  Timer? _pollTimer;
   String? _threadError;
   Map<String, dynamic>? _replyToMsg;
   bool _isInternal = false;
@@ -591,8 +694,10 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     }
     final idx = _messages.indexWhere((m) => m["id"]?.toString() == targetId);
     if (idx >= 0 && _scrollController.hasClients) {
+      // ListView uses reverse: true (newest is offset 0)
+      final reversedPos = _messages.length - 1 - idx;
       final ratio =
-          _messages.length <= 1 ? 0.0 : idx / (_messages.length - 1);
+          _messages.length <= 1 ? 0.0 : reversedPos / (_messages.length - 1);
       final targetOffset =
           _scrollController.position.maxScrollExtent * ratio.clamp(0.0, 1.0);
       _scrollController.animateTo(
@@ -606,19 +711,33 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   @override
   void initState() {
     super.initState();
-    _peerOnline = widget.conversation.online;
+    _serverAdminOnline = widget.conversation.adminOnline;
+    _serverPlumberOnline = widget.conversation.plumberOnline;
+    _serverCustomerOnline = widget.conversation.customerOnline;
     _inputController.addListener(() {
       final next = _inputController.text.trim().isNotEmpty;
       if (next != _hasText && mounted) {
         setState(() => _hasText = next);
       }
     });
+    _scrollController.addListener(() {
+      if (!_scrollController.hasClients || !mounted) return;
+      final farFromBottom = _scrollController.offset > 120;
+      if (farFromBottom != _showJumpToBottom) {
+        setState(() => _showJumpToBottom = farFromBottom);
+      }
+    });
     _loadMessages();
     _subscribeRealtime();
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _loadMessages(quiet: true),
+    );
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _rtDebounce?.cancel();
     _rtChannel?.unsubscribe();
     _recordTimer?.cancel();
@@ -717,28 +836,63 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       final serverList = _filterForConversation(
         rawMsgs.whereType<Map<String, dynamic>>().toList(),
       );
-      final failedLocals = _messages
-          .where((m) => m["_localState"] == "failed")
-          .toList();
+      final serverIds = serverList
+          .map((m) => m["id"]?.toString() ?? "")
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final pendingLocals = _messages.where((m) {
+        final st = m["_localState"]?.toString();
+        if (st != "sending" && st != "failed" && st != "sent_pending_sync") {
+          return false;
+        }
+        final cid =
+            m["_confirmedId"]?.toString() ?? m["id"]?.toString() ?? "";
+        if (cid.isNotEmpty && serverIds.contains(cid)) return false;
+        if (st == "sent_pending_sync") {
+          final localText = (m["message"] ?? "").toString();
+          final localSender =
+              (m["senderRole"] ?? m["sender_role"] ?? "").toString();
+          final matched = serverList.any((s) =>
+              (s["message"] ?? "").toString() == localText &&
+              (s["senderRole"] ?? s["sender_role"] ?? "").toString() ==
+                  localSender);
+          if (matched) return false;
+        }
+        return true;
+      }).toList();
 
       final presence = data["presence"] as Map<String, dynamic>? ?? {};
-      final otherOnline = widget.conversation.peerRole == "admin"
-          ? (presence["adminOnline"] == true)
-          : widget.senderRole == "customer"
-              ? (presence["plumberOnline"] == true)
-              : (presence["customerOnline"] == true);
+      final participants =
+          data["ticketParticipants"] as Map<String, dynamic>? ?? {};
+      final onlinePlumbers = (presence["onlinePlumberIds"] as List? ?? [])
+          .map((e) => e.toString())
+          .toSet();
+      final onlineCustomers = (presence["onlineCustomerIds"] as List? ?? [])
+          .map((e) => e.toString())
+          .toSet();
+
+      final nextAdminOnline =
+          participants["adminOnline"] == true || presence["adminOnline"] == true;
+      final plumberId = widget.conversation.assignedPlumberId;
+      final nextPlumberOnline = participants["assignedPlumberOnline"] == true ||
+          (plumberId != null &&
+              plumberId.isNotEmpty &&
+              onlinePlumbers.contains(plumberId));
+      final customerId = widget.conversation.customerId;
+      final nextCustomerOnline = participants["customerOnline"] == true ||
+          (customerId != null &&
+              customerId.isNotEmpty &&
+              onlineCustomers.contains(customerId));
 
       if (mounted) {
-        final hadNone = _messages.isEmpty;
         setState(() {
-          _messages = [...serverList, ...failedLocals];
-          _peerOnline = otherOnline;
+          _messages = [...serverList, ...pendingLocals];
+          _serverAdminOnline = nextAdminOnline;
+          _serverPlumberOnline = nextPlumberOnline;
+          _serverCustomerOnline = nextCustomerOnline;
           _loading = false;
           _threadError = null;
         });
-        if (hadNone && serverList.isNotEmpty) {
-          WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-        }
       }
       final hasUnreadFromOther = serverList.any((m) {
         final sender = (m["senderRole"] ?? m["sender_role"] ?? "").toString();
@@ -805,7 +959,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     _scrollToBottom();
 
     try {
-      await FlowGuardApiClient.sendChatMessage(
+      final resp = await FlowGuardApiClient.sendChatMessage(
         ticketNumber: widget.conversation.ticketNumber,
         message: text,
         actorRole: widget.senderRole,
@@ -813,12 +967,57 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         isInternal: sendInternal,
         replyToId: replyId,
       );
+      final rawConfirmed = resp["message"];
+      final rawAiReply = resp["aiReply"];
+      Map<String, dynamic>? confirmedMap =
+          rawConfirmed is Map ? Map<String, dynamic>.from(rawConfirmed) : null;
+
       if (mounted) {
         setState(() {
-          _messages = _messages.where((m) => m["_localId"] != localId).toList();
+          if (confirmedMap != null) {
+            final cid = confirmedMap["id"]?.toString();
+            final alreadyHas = cid != null &&
+                cid.isNotEmpty &&
+                _messages.any((m) => m["id"]?.toString() == cid);
+            if (alreadyHas) {
+              _messages =
+                  _messages.where((m) => m["_localId"] != localId).toList();
+            } else {
+              _messages = _messages
+                  .map((m) => m["_localId"] == localId ? confirmedMap : m)
+                  .toList();
+            }
+          } else {
+            _messages = _messages
+                .map((m) => m["_localId"] == localId
+                    ? {
+                        ...m,
+                        "_localState": "sent_pending_sync",
+                        "receipt_status": "sent",
+                      }
+                    : m)
+                .toList();
+          }
+
+          if (rawAiReply is Map) {
+            final aiMap = Map<String, dynamic>.from(rawAiReply);
+            final aiId = aiMap["id"]?.toString();
+            final canInclude =
+                _filterForConversation([aiMap]).isNotEmpty &&
+                    (aiId == null ||
+                        !_messages.any((m) => m["id"]?.toString() == aiId));
+            if (canInclude) {
+              _messages = [..._messages, aiMap];
+            }
+          }
         });
       }
-      await _loadMessages(quiet: true);
+      unawaited(
+        PresenceService.instance.broadcastEvent("new_message", {
+          "ticketNumber": widget.conversation.ticketNumber,
+          if (!sendInternal && confirmedMap != null) "message": confirmedMap,
+        }),
+      );
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -848,7 +1047,30 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
     if (picked == null) return;
 
-    setState(() => _sending = true);
+    final sendInternal =
+        _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
+    final replyId = _replyToMsg?["id"]?.toString();
+    final localId = "temp-photo-${DateTime.now().millisecondsSinceEpoch}";
+    setState(() {
+      _sending = true;
+      _replyToMsg = null;
+      _messages = [
+        ..._messages,
+        {
+          "_localId": localId,
+          "_localState": "sending",
+          "senderRole": widget.senderRole,
+          "senderName": widget.senderName,
+          "message": "Sending photo...",
+          "is_internal": sendInternal,
+          if (replyId != null && replyId.isNotEmpty) "reply_to_id": replyId,
+          "createdAt": DateTime.now().toUtc().toIso8601String(),
+          "receipt_status": "sending",
+        },
+      ];
+    });
+    _scrollToBottom();
+
     try {
       final bytes = await picked.readAsBytes();
       final attachment = await FlowGuardApiClient.uploadChatAttachment(
@@ -857,10 +1079,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
-      final sendInternal =
-          _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
-      final replyId = _replyToMsg?["id"]?.toString();
-      await FlowGuardApiClient.sendChatMessage(
+      final resp = await FlowGuardApiClient.sendChatMessage(
         ticketNumber: widget.conversation.ticketNumber,
         message: "Photo",
         actorRole: widget.senderRole,
@@ -869,11 +1088,33 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         isInternal: sendInternal,
         replyToId: replyId,
       );
-      if (mounted) setState(() => _replyToMsg = null);
-      await _loadMessages(quiet: true);
+      final rawConfirmed = resp["message"];
+      final confirmedMap =
+          rawConfirmed is Map ? Map<String, dynamic>.from(rawConfirmed) : null;
+      if (mounted && confirmedMap != null) {
+        final cid = confirmedMap["id"]?.toString();
+        setState(() {
+          _messages = (cid != null &&
+                  _messages.any((m) => m["id"]?.toString() == cid))
+              ? _messages.where((m) => m["_localId"] != localId).toList()
+              : _messages
+                  .map((m) => m["_localId"] == localId ? confirmedMap : m)
+                  .toList();
+        });
+      }
+      unawaited(
+        PresenceService.instance.broadcastEvent("new_message", {
+          "ticketNumber": widget.conversation.ticketNumber,
+          if (!sendInternal && confirmedMap != null) "message": confirmedMap,
+        }),
+      );
       _scrollToBottom();
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _messages =
+              _messages.where((m) => m["_localId"] != localId).toList();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Photo upload failed: $e")),
         );
@@ -926,10 +1167,35 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   Future<void> _finishAndSendVoiceNote() async {
     _recordTimer?.cancel();
     final path = await _voiceRecorder.stop();
+    final durationSec = _recordSeconds;
     if (mounted) setState(() => _recordingVoice = false);
     if (path == null) return;
 
-    setState(() => _sending = true);
+    final sendInternal =
+        _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
+    final replyId = _replyToMsg?["id"]?.toString();
+    final localId = "temp-voice-${DateTime.now().millisecondsSinceEpoch}";
+
+    setState(() {
+      _sending = true;
+      _replyToMsg = null;
+      _messages = [
+        ..._messages,
+        {
+          "_localId": localId,
+          "_localState": "sending",
+          "senderRole": widget.senderRole,
+          "senderName": widget.senderName,
+          "message": "Voice Note (${durationSec}s)",
+          "is_internal": sendInternal,
+          if (replyId != null && replyId.isNotEmpty) "reply_to_id": replyId,
+          "createdAt": DateTime.now().toUtc().toIso8601String(),
+          "receipt_status": "sending",
+        },
+      ];
+    });
+    _scrollToBottom();
+
     try {
       final bytes = await File(path).readAsBytes();
       final filename = "voice_${DateTime.now().millisecondsSinceEpoch}.m4a";
@@ -939,23 +1205,42 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         ticketNumber: widget.conversation.ticketNumber,
         role: widget.senderRole,
       );
-      final sendInternal =
-          _canUsePrivateToggle && (_isInternal || _replyIsPrivate);
-      final replyId = _replyToMsg?["id"]?.toString();
-      await FlowGuardApiClient.sendChatMessage(
+      final resp = await FlowGuardApiClient.sendChatMessage(
         ticketNumber: widget.conversation.ticketNumber,
-        message: "Voice Note (${_recordSeconds}s)",
+        message: "Voice Note (${durationSec}s)",
         actorRole: widget.senderRole,
         recipientRole: _effectiveRecipientRole(sendInternal),
         attachment: attachment,
         isInternal: sendInternal,
         replyToId: replyId,
       );
-      if (mounted) setState(() => _replyToMsg = null);
-      await _loadMessages(quiet: true);
+      final rawConfirmed = resp["message"];
+      final confirmedMap =
+          rawConfirmed is Map ? Map<String, dynamic>.from(rawConfirmed) : null;
+      if (mounted && confirmedMap != null) {
+        final cid = confirmedMap["id"]?.toString();
+        setState(() {
+          _messages = (cid != null &&
+                  _messages.any((m) => m["id"]?.toString() == cid))
+              ? _messages.where((m) => m["_localId"] != localId).toList()
+              : _messages
+                  .map((m) => m["_localId"] == localId ? confirmedMap : m)
+                  .toList();
+        });
+      }
+      unawaited(
+        PresenceService.instance.broadcastEvent("new_message", {
+          "ticketNumber": widget.conversation.ticketNumber,
+          if (!sendInternal && confirmedMap != null) "message": confirmedMap,
+        }),
+      );
       _scrollToBottom();
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _messages =
+              _messages.where((m) => m["_localId"] != localId).toList();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Voice note failed: $e")),
         );
@@ -966,13 +1251,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   }
 
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent + 120,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   String _formatTime(String? iso) {
@@ -1031,19 +1318,46 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  ValueListenableBuilder<Set<String>>(
-                    valueListenable: PresenceService.instance.onlineRoles,
-                    builder: (_, roles, __) {
-                      final liveOnline = _peerOnline ||
-                          roles.contains(widget.conversation.peerRole);
-                      return Text(
-                        "${liveOnline ? "Online" : "Offline"} • ${widget.conversation.ticketNumber} • Owner: ${widget.conversation.ownerName}",
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFFCBD5E1),
-                          fontSize: 11,
-                        ),
+                  ValueListenableBuilder<int>(
+                    valueListenable: PresenceService.instance.stateVersion,
+                    builder: (_, __, ___) {
+                      final live = resolveMobileThreadPresence(
+                        item: widget.conversation,
+                        viewerRole: widget.senderRole,
+                        serverAdminOnline: _serverAdminOnline,
+                        serverPlumberOnline: _serverPlumberOnline,
+                        serverCustomerOnline: _serverCustomerOnline,
+                      );
+                      return Row(
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            margin: const EdgeInsets.only(right: 5),
+                            decoration: BoxDecoration(
+                              color: live.isOnline
+                                  ? const Color(0xFF22C55E)
+                                  : const Color(0xFF94A3B8),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              "${live.label} • ${widget.conversation.ticketNumber}",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: live.isOnline
+                                    ? const Color(0xFF86EFAC)
+                                    : const Color(0xFFCBD5E1),
+                                fontSize: 11,
+                                fontWeight: live.isOnline
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
                       );
                     },
                   ),
@@ -1096,20 +1410,24 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                             style: TextStyle(color: FlowGuardTheme.mutedText),
                           ),
                         )
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(12),
-                          itemCount: _messages.length,
-                          itemBuilder: (_, idx) {
-                            final msg = _messages[idx];
-                            final msgId = (msg["id"] ??
-                                    msg["_localId"] ??
-                                    "idx-$idx")
-                                .toString();
-                            final itemKey = _msgKeys.putIfAbsent(
-                              msgId,
-                              () => GlobalKey(),
-                            );
+                      : Stack(
+                          children: [
+                            ListView.builder(
+                              controller: _scrollController,
+                              reverse: true,
+                              padding: const EdgeInsets.all(12),
+                              itemCount: _messages.length,
+                              itemBuilder: (_, idx) {
+                                final reversedIdx = _messages.length - 1 - idx;
+                                final msg = _messages[reversedIdx];
+                                final msgId = (msg["id"] ??
+                                        msg["_localId"] ??
+                                        "idx-$reversedIdx")
+                                    .toString();
+                                final itemKey = _msgKeys.putIfAbsent(
+                                  msgId,
+                                  () => GlobalKey(),
+                                );
                             final isMe =
                                 msg["senderRole"] == widget.senderRole ||
                                     msg["sender_role"] == widget.senderRole;
@@ -1388,18 +1706,24 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                                               color: Color(0xFF667781),
                                             )
                                           else
-                                            ValueListenableBuilder<Set<String>>(
+                                            ValueListenableBuilder<int>(
                                               valueListenable: PresenceService
-                                                  .instance.onlineRoles,
-                                              builder: (_, roles, __) {
-                                                final liveOnline = _peerOnline ||
-                                                    roles.contains(
-                                                      widget
-                                                          .conversation.peerRole,
-                                                    );
+                                                  .instance.stateVersion,
+                                              builder: (_, __, ___) {
+                                                final live =
+                                                    resolveMobileThreadPresence(
+                                                  item: widget.conversation,
+                                                  viewerRole: widget.senderRole,
+                                                  serverAdminOnline:
+                                                      _serverAdminOnline,
+                                                  serverPlumberOnline:
+                                                      _serverPlumberOnline,
+                                                  serverCustomerOnline:
+                                                      _serverCustomerOnline,
+                                                );
                                                 return Icon(
                                                   (status == "sent" &&
-                                                          !liveOnline)
+                                                          !live.isOnline)
                                                       ? Icons.done_rounded
                                                       : Icons.done_all_rounded,
                                                   size: 14,
@@ -1418,6 +1742,22 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                             ),
                             );
                           },
+                        ),
+                            if (_showJumpToBottom)
+                              Positioned(
+                                right: 14,
+                                bottom: 14,
+                                child: FloatingActionButton.small(
+                                  heroTag: null,
+                                  backgroundColor: FlowGuardTheme.navy,
+                                  foregroundColor: Colors.white,
+                                  onPressed: _scrollToBottom,
+                                  child: const Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
             ),
           ),

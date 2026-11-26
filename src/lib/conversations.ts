@@ -16,7 +16,13 @@ export interface OwnedConversationSummary {
   requestStatus: string;
   peerName: string;
   peerRole: "customer" | "plumber" | "admin";
+  peerId: string | null;
   peerAvatarUrl: string | null;
+  customerId: string | null;
+  assignedPlumberId: string | null;
+  adminOnline: boolean;
+  plumberOnline: boolean;
+  customerOnline: boolean;
   ownerRole: "admin" | "plumber";
   ownerId: string;
   ownerName: string;
@@ -271,10 +277,15 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         (last.read_at != null ||
           (Array.isArray(last.read_by) &&
             last.read_by.some((r) => String(r) !== lastSender)));
+      const exactPlumberOnline =
+        presence.onlinePlumberIds.includes(pid) || pRow?.is_online === true;
+      const exactCustomerOnline = cid
+        ? presence.onlineCustomerIds.includes(cid)
+        : false;
       const directPeerOnline =
         actor.role === "customer"
-          ? presence.plumberOnline || pRow?.is_online === true
-          : presence.customerOnline;
+          ? exactPlumberOnline
+          : exactCustomerOnline;
       const receipt: "sent" | "delivered" | "read" | null = last
         ? otherRead
           ? "read"
@@ -292,10 +303,16 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         requestStatus: String(req.status || "new"),
         peerName: actor.role === "customer" ? plumberName : customerName,
         peerRole: actor.role === "customer" ? "plumber" : "customer",
+        peerId: actor.role === "customer" ? pid : cid || null,
         peerAvatarUrl:
           actor.role === "customer"
             ? (pRow?.avatar_url ? String(pRow.avatar_url) : null)
             : (cRow?.avatar_url ? String(cRow.avatar_url) : null),
+        customerId: cid || null,
+        assignedPlumberId: pid,
+        adminOnline: presence.adminOnline,
+        plumberOnline: exactPlumberOnline,
+        customerOnline: exactCustomerOnline,
         ownerRole: "plumber",
         ownerId: pid,
         ownerName: plumberName,
@@ -309,10 +326,7 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
         lastSenderRole: lastSender,
         lastReceiptStatus: receipt,
         unreadCount: unread,
-        online:
-          actor.role === "customer"
-            ? presence.plumberOnline || pRow?.is_online === true
-            : presence.customerOnline,
+        online: directPeerOnline,
       });
     }
 
@@ -385,6 +399,21 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
             : "sent"
         : null;
 
+      const assignedPlumberId = req.assigned_plumber_id
+        ? String(req.assigned_plumber_id)
+        : null;
+      const cid = req.customer_id ? String(req.customer_id) : null;
+      const assignedPlumberRow = assignedPlumberId
+        ? plumberMap.get(assignedPlumberId)
+        : undefined;
+      const exactPlumberOnline = assignedPlumberId
+        ? presence.onlinePlumberIds.includes(assignedPlumberId) ||
+          assignedPlumberRow?.is_online === true
+        : false;
+      const exactCustomerOnline = cid
+        ? presence.onlineCustomerIds.includes(cid)
+        : false;
+
       summaries.push({
         conversationId: dbConv ? String(dbConv.id) : convId,
         conversationType: supportType,
@@ -397,7 +426,13 @@ export async function listOwnedConversationsForActor(actor: PortalActor): Promis
             ? `${supportOwner.name} (Operations)`
             : `${supportOwner.name} (Dispatch)`,
         peerRole: "admin",
+        peerId: "admin",
         peerAvatarUrl: null,
+        customerId: cid,
+        assignedPlumberId,
+        adminOnline: presence.adminOnline,
+        plumberOnline: exactPlumberOnline,
+        customerOnline: exactCustomerOnline,
         ownerRole: "admin",
         ownerId: dbConv ? String(dbConv.owner_id) : supportOwner.id,
         ownerName: dbConv ? String(dbConv.owner_name) : supportOwner.name,

@@ -8,6 +8,7 @@ export interface ChatPresenceState {
   adminOnline: boolean;
   plumberOnline: boolean;
   customerOnline: boolean;
+  onlineAdminIds?: string[];
   onlinePlumberIds: string[];
   onlineCustomerIds: string[];
   lastSeenMap?: Record<string, string>;

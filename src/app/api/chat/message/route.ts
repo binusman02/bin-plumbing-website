@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { captureActionError } from "@/lib/ai-workforce/incident-monitor";
 import { triggerWorkforceOnCustomerTicketMessage } from "@/lib/ai-workforce/auto-triggers";
-import { resolveChatActor, verifyTicketAccess } from "@/lib/chat-auth";
+import {
+  getAuthorizedRecipients,
+  resolveChatActor,
+  verifyTicketAccess,
+} from "@/lib/chat-auth";
 import { dispatchFcmPush } from "@/lib/fcm-push";
 import {
   deleteJobMessageById,
@@ -91,6 +95,17 @@ export async function POST(request: Request) {
           ? ctx.assignedPlumberId
           : null;
 
+    const authorizedRecipients = getAuthorizedRecipients(ctx, actor.role, isInternal);
+    const recipients =
+      authorizedRecipients.length > 0
+        ? authorizedRecipients
+        : [
+            {
+              recipientId: recipientId || "admin",
+              recipientRole,
+            },
+          ];
+
     const created = await postJobMessage({
       requestId: ctx.requestId,
       ticketNumber: ctx.ticketNumber,
@@ -99,12 +114,7 @@ export async function POST(request: Request) {
       senderId: actor.id,
       recipientRole,
       recipientId,
-      recipients: [
-        {
-          recipientId: recipientId || "admin",
-          recipientRole,
-        },
-      ],
+      recipients,
       message,
       attachment: body?.attachment,
       isInternal,

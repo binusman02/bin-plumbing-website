@@ -2630,27 +2630,29 @@ export function countUnrepliedMessagesForAdmin(messages: JobMessage[]): number {
   return total;
 }
 
+function presenceActorKey(role: "admin" | "plumber" | "customer", id?: string): string {
+  const cleanId = (id || role).trim() || role;
+  return `chat_presence:${role}:${cleanId}`;
+}
+
 export async function updateChatPresence(
   role: "admin" | "plumber" | "customer",
   id?: string
 ): Promise<void> {
   const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "chat_presence")
-    .maybeSingle();
-
-  const current = (data?.value as Record<string, string>) || {};
   const nowIso = new Date().toISOString();
-  current[role] = nowIso;
-  if (id) current[`${role}:${id}`] = nowIso;
+  const actorKey = presenceActorKey(role, id);
 
   await supabase.from("settings").upsert(
     {
-      key: "chat_presence",
-      value: current,
-      description: "Live chat presence heartbeats",
+      key: actorKey,
+      value: {
+        role,
+        id: id || null,
+        online: true,
+        last_seen: nowIso,
+      },
+      description: "Live chat presence heartbeat",
       updated_at: nowIso,
     },
     { onConflict: "key" }
@@ -2661,6 +2663,7 @@ export async function getChatPresenceStatus(): Promise<{
   adminOnline: boolean;
   plumberOnline: boolean;
   customerOnline: boolean;
+  onlineAdminIds: string[];
   onlinePlumberIds: string[];
   onlineCustomerIds: string[];
   lastSeenMap?: Record<string, string>;
@@ -2670,44 +2673,99 @@ export async function getChatPresenceStatus(): Promise<{
       adminOnline: false,
       plumberOnline: false,
       customerOnline: false,
+      onlineAdminIds: [],
       onlinePlumberIds: [],
       onlineCustomerIds: [],
       lastSeenMap: {},
     };
   }
   const supabase = getServiceSupabase();
-  const { data } = await supabase
+  const { data: rows } = await supabase
     .from("settings")
-    .select("value")
-    .eq("key", "chat_presence")
-    .maybeSingle();
+    .select("key, value")
+    .or("key.eq.chat_presence,key.like.chat_presence:%");
 
-  const presence = (data?.value as Record<string, string>) || {};
   const now = Date.now();
   const isFresh = (iso?: string) => {
     if (!iso) return false;
     const t = new Date(iso).getTime();
-    return Number.isFinite(t) && now - t < 45_000;
+    return Number.isFinite(t) && now - t < 70_000;
   };
 
-  const onlinePlumberIds: string[] = [];
-  const onlineCustomerIds: string[] = [];
-  for (const [k, v] of Object.entries(presence)) {
-    if (k.startsWith("plumber:") && isFresh(v)) {
-      onlinePlumberIds.push(k.replace("plumber:", ""));
+  let adminOnline = false;
+  let legacyPlumberOnline = false;
+  let legacyCustomerOnline = false;
+  const onlineAdminSet = new Set<string>();
+  const onlinePlumberSet = new Set<string>();
+  const onlineCustomerSet = new Set<string>();
+  const lastSeenMap: Record<string, string> = {};
+
+  for (const row of rows || []) {
+    const key = String(row.key || "");
+    const val = row.value as Record<string, unknown> | null;
+    if (!val) continue;
+
+    if (key === "chat_presence") {
+      const legacy = val as Record<string, string>;
+      for (const [k, v] of Object.entries(legacy)) {
+        if (typeof v !== "string") continue;
+        lastSeenMap[k] = v;
+        if (k === "admin" && isFresh(v)) adminOnline = true;
+        else if (k === "plumber" && isFresh(v)) legacyPlumberOnline = true;
+        else if (k === "customer" && isFresh(v)) legacyCustomerOnline = true;
+        else if (k.startsWith("admin:") && isFresh(v)) {
+          onlineAdminSet.add(k.slice("admin:".length));
+          adminOnline = true;
+        } else if (k.startsWith("plumber:") && isFresh(v)) {
+          onlinePlumberSet.add(k.slice("plumber:".length));
+        } else if (k.startsWith("customer:") && isFresh(v)) {
+          onlineCustomerSet.add(k.slice("customer:".length));
+        }
+      }
+      continue;
     }
-    if (k.startsWith("customer:") && isFresh(v)) {
-      onlineCustomerIds.push(k.replace("customer:", ""));
+
+    if (key.startsWith("chat_presence:")) {
+      const rest = key.slice("chat_presence:".length);
+      const colonIdx = rest.indexOf(":");
+      const parsedRole = (val.role as string | undefined) || (colonIdx > 0 ? rest.slice(0, colonIdx) : rest);
+      const parsedId =
+        (val.id as string | undefined) ||
+        (colonIdx > 0 ? rest.slice(colonIdx + 1) : "");
+      const lastSeen = typeof val.last_seen === "string" ? val.last_seen : undefined;
+      if (lastSeen) {
+        if (parsedId) {
+          lastSeenMap[parsedId] = lastSeen;
+          lastSeenMap[`${parsedRole}:${parsedId}`] = lastSeen;
+        } else {
+          lastSeenMap[parsedRole] = lastSeen;
+        }
+      }
+      if (val.online !== false && isFresh(lastSeen)) {
+        if (parsedRole === "admin") {
+          adminOnline = true;
+          if (parsedId) onlineAdminSet.add(parsedId);
+        } else if (parsedRole === "plumber") {
+          if (parsedId) onlinePlumberSet.add(parsedId);
+        } else if (parsedRole === "customer") {
+          if (parsedId) onlineCustomerSet.add(parsedId);
+        }
+      }
     }
   }
 
+  const onlineAdminIds = Array.from(onlineAdminSet);
+  const onlinePlumberIds = Array.from(onlinePlumberSet);
+  const onlineCustomerIds = Array.from(onlineCustomerSet);
+
   return {
-    adminOnline: isFresh(presence.admin),
-    plumberOnline: isFresh(presence.plumber) || onlinePlumberIds.length > 0,
-    customerOnline: isFresh(presence.customer) || onlineCustomerIds.length > 0,
+    adminOnline: adminOnline || onlineAdminIds.length > 0,
+    plumberOnline: legacyPlumberOnline || onlinePlumberIds.length > 0,
+    customerOnline: legacyCustomerOnline || onlineCustomerIds.length > 0,
+    onlineAdminIds,
     onlinePlumberIds,
     onlineCustomerIds,
-    lastSeenMap: presence,
+    lastSeenMap,
   };
 }
 
@@ -2716,21 +2774,18 @@ export async function clearChatPresence(
   id?: string
 ): Promise<void> {
   const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "chat_presence")
-    .maybeSingle();
-
-  const current = (data?.value as Record<string, string>) || {};
   const expiredIso = new Date(Date.now() - 120_000).toISOString();
-  current[role] = expiredIso;
-  if (id) current[`${role}:${id}`] = expiredIso;
+  const actorKey = presenceActorKey(role, id);
 
   await supabase.from("settings").upsert(
     {
-      key: "chat_presence",
-      value: current,
+      key: actorKey,
+      value: {
+        role,
+        id: id || null,
+        online: false,
+        last_seen: expiredIso,
+      },
       updated_at: new Date().toISOString(),
     },
     { onConflict: "key" }

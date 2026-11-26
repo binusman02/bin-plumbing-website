@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import {
   editCommunicationMessageAction,
-  postCommunicationMessageAction,
 } from "@/app/actions/marketplace-actions";
 import {
   ChatAttachmentBubble,
@@ -36,6 +35,10 @@ import {
   NOTIFICATION_NAV_EVENT,
   type NotificationNavigationRequest,
 } from "@/lib/notification-navigation";
+import {
+  mergePresenceSnapshots,
+  resolveThreadPresenceStatus,
+} from "@/lib/presence-display";
 import { broadcastRealtimeEvent, useRealtimeHub } from "@/lib/realtime-hub";
 import { getStatusMeta } from "@/lib/status-styles";
 import type { ChatAttachment, JobMessage, ServiceRequestRecord } from "@/lib/marketplace";
@@ -143,17 +146,25 @@ export function WhatsAppChatWorkspace({
   const [typingInfo, setTypingInfo] = useState<{ ticket: string; name: string } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const [presence, setPresence] = useState<ChatPresenceState>({
-    adminOnline: actorRole === "admin",
-    plumberOnline: actorRole === "plumber",
-    customerOnline: actorRole === "customer",
+  const emptyPresence: ChatPresenceState = {
+    adminOnline: false,
+    plumberOnline: false,
+    customerOnline: false,
+    onlineAdminIds: [],
     onlinePlumberIds: [],
     onlineCustomerIds: [],
     lastSeenMap: {},
-  });
+  };
+  const rtPresenceRef = useRef<ChatPresenceState>({ ...emptyPresence });
+  const serverPresenceRef = useRef<ChatPresenceState>({ ...emptyPresence });
+  const [presence, setPresence] = useState<ChatPresenceState>({ ...emptyPresence });
+  const [unseenBelowCount, setUnseenBelowCount] = useState(0);
 
   const endRef = useRef<HTMLDivElement | null>(null);
   const messagesFeedRef = useRef<HTMLDivElement | null>(null);
+  const isNearBottomRef = useRef<boolean>(true);
+  const lastThreadMsgIdRef = useRef<string | null>(null);
+  const lastScrolledTicketRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -402,13 +413,21 @@ export function WhatsAppChatWorkspace({
         if (!res.ok) return;
         const data = await res.json();
         if (data?.presence) {
-          setPresence(data.presence);
+          serverPresenceRef.current = data.presence;
+          setPresence(mergePresenceSnapshots(rtPresenceRef.current, serverPresenceRef.current));
         }
         if (Array.isArray(data?.messages)) {
           const fetched: JobMessage[] = data.messages;
           setMessages((prev) => {
             const byId = new Map<string, JobMessage>();
-            for (const m of prev) byId.set(m.id, m);
+            for (const m of prev) {
+              // Keep in-flight optimistic messages so UI never flickers while sending
+              if (m.id.startsWith("optimistic-")) {
+                byId.set(m.id, m);
+              } else {
+                byId.set(m.id, m);
+              }
+            }
             for (const m of fetched) byId.set(m.id, m);
             return Array.from(byId.values()).sort((a, b) =>
               a.created_at.localeCompare(b.created_at)
@@ -438,13 +457,16 @@ export function WhatsAppChatWorkspace({
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (active && data?.presence) setPresence(data.presence);
+          if (active && data?.presence) {
+            serverPresenceRef.current = data.presence;
+            setPresence(mergePresenceSnapshots(rtPresenceRef.current, serverPresenceRef.current));
+          }
         })
         .catch(() => {});
     };
 
     pingPresence();
-    const timer = setInterval(pingPresence, 45000);
+    const timer = setInterval(pingPresence, 25000);
 
     const handlePageHide = () => {
       const payload = JSON.stringify({ role: actorRole, action: "offline" });
@@ -471,9 +493,9 @@ export function WhatsAppChatWorkspace({
     }
     const syncTimer = setInterval(() => {
       if (document.visibilityState === "visible" && selectedTicket) {
-        void syncTicketMessages(selectedTicket);
+        void syncTicketMessages(selectedTicket, true);
       }
-    }, 45000);
+    }, 20000);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -556,13 +578,15 @@ export function WhatsAppChatWorkspace({
       }
     },
     onPresenceSync: (p) => {
-      setPresence((prev) => ({
-        adminOnline: p.adminOnline || prev.adminOnline,
-        plumberOnline: p.plumberOnline || prev.plumberOnline,
-        customerOnline: p.customerOnline || prev.customerOnline,
-        onlinePlumberIds: Array.from(new Set([...prev.onlinePlumberIds, ...p.onlinePlumberIds])),
-        onlineCustomerIds: Array.from(new Set([...prev.onlineCustomerIds, ...p.onlineCustomerIds])),
-      }));
+      rtPresenceRef.current = {
+        adminOnline: p.adminOnline,
+        plumberOnline: p.plumberOnline,
+        customerOnline: p.customerOnline,
+        onlineAdminIds: p.onlineAdminIds,
+        onlinePlumberIds: p.onlinePlumberIds,
+        onlineCustomerIds: p.onlineCustomerIds,
+      };
+      setPresence(mergePresenceSnapshots(rtPresenceRef.current, serverPresenceRef.current));
     },
   });
 
@@ -590,6 +614,7 @@ export function WhatsAppChatWorkspace({
         unreadCount: number;
         lastActivity: string;
         isOnline: boolean;
+        statusText: string;
         avatarUrl?: string;
       }
     >();
@@ -607,11 +632,12 @@ export function WhatsAppChatWorkspace({
           ? `${req.ticket_number} • ${req.problem_category}${req.assigned_technician ? ` • ${req.assigned_technician}` : ""}`
           : `${req.ticket_number} • ${req.city_lga || req.address_in_kano}`;
 
-      const isOnline =
-        actorRole === "admin"
-          ? Boolean(req.customer_id && presence.onlineCustomerIds.includes(req.customer_id)) ||
-            Boolean(req.assigned_plumber_id && presence.onlinePlumberIds.includes(req.assigned_plumber_id))
-          : presence.adminOnline;
+      const pres = resolveThreadPresenceStatus({
+        actorRole,
+        assignedPlumberId: req.assigned_plumber_id,
+        customerId: req.customer_id,
+        presence,
+      });
 
       const avatarUrl =
         actorRole !== "plumber" && plumberAvatars
@@ -628,19 +654,25 @@ export function WhatsAppChatWorkspace({
         subtitle,
         unreadCount: 0,
         lastActivity: req.updated_at || req.created_at,
-        isOnline,
+        isOnline: pres.isOnline,
+        statusText: pres.statusText,
         avatarUrl,
       });
     }
 
     for (const m of visibleMessages) {
+      const fallbackPres = resolveThreadPresenceStatus({
+        actorRole,
+        presence,
+      });
       const existing = map.get(m.ticket_number) || {
         ticket: m.ticket_number,
         title: m.ticket_number,
         subtitle: m.sender_name,
         unreadCount: 0,
         lastActivity: m.created_at,
-        isOnline: presence.adminOnline,
+        isOnline: fallbackPres.isOnline,
+        statusText: fallbackPres.statusText,
       };
 
       const isUnread =
@@ -810,8 +842,46 @@ export function WhatsAppChatWorkspace({
     ) {
       return;
     }
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadMessages.length, selectedTicket, pendingScrollTarget, highlightedMessageId]);
+    if (!selectedTicket) {
+      lastScrolledTicketRef.current = null;
+      lastThreadMsgIdRef.current = null;
+      return;
+    }
+
+    const latestMsg = threadMessages.length > 0 ? threadMessages[threadMessages.length - 1] : null;
+    const latestId = latestMsg?.id || null;
+    const ticketChanged = lastScrolledTicketRef.current !== selectedTicket;
+
+    if (ticketChanged) {
+      lastScrolledTicketRef.current = selectedTicket;
+      lastThreadMsgIdRef.current = latestId;
+      isNearBottomRef.current = true;
+      setUnseenBelowCount(0);
+      requestAnimationFrame(() => {
+        endRef.current?.scrollIntoView({ behavior: "auto" });
+      });
+      return;
+    }
+
+    if (latestId && latestId !== lastThreadMsgIdRef.current) {
+      lastThreadMsgIdRef.current = latestId;
+      const isMine = latestMsg?.sender_role === actorRole;
+      if (isMine || isNearBottomRef.current) {
+        setUnseenBelowCount(0);
+        requestAnimationFrame(() => {
+          endRef.current?.scrollIntoView({ behavior: "smooth" });
+        });
+      } else {
+        setUnseenBelowCount((c) => c + 1);
+      }
+    }
+  }, [
+    threadMessages,
+    selectedTicket,
+    actorRole,
+    pendingScrollTarget,
+    highlightedMessageId,
+  ]);
 
   const handleSelectThread = (ticket: string) => {
     suppressAutoScrollBottomRef.current = false;
@@ -872,62 +942,114 @@ export function WhatsAppChatWorkspace({
     }, 2000);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!selectedTicket) return;
-    if (!draft.trim() && !pendingFile) return;
+    const text = draft.trim();
+    const attachedFile = pendingFile;
+    if (!text && !attachedFile) return;
+
     setSendError(null);
     suppressAutoScrollBottomRef.current = false;
     setHighlightedMessageId(null);
 
     const targetTicket = selectedTicket;
-    const targetReqId = activeThread?.req?.id || targetTicket;
     const isInternal =
       (actorRole === "admin" || actorRole === "plumber") &&
       (visibilityMode === "private_plumber" || Boolean(replyTo?.is_internal));
+    const replyId = replyTo?.id || null;
 
-    startTransition(async () => {
-      try {
-        let attachment: ChatAttachment | undefined;
-        if (pendingFile) {
-          setUploading(true);
-          attachment = await uploadChatFile(pendingFile, targetTicket, actorRole);
-          setUploading(false);
-        }
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const optimisticMsg: JobMessage = {
+      id: optimisticId,
+      request_id: activeThread?.req?.id || targetTicket,
+      ticket_number: targetTicket,
+      sender_role: actorRole,
+      sender_name: actorName,
+      recipient_role: isInternal
+        ? actorRole === "plumber"
+          ? "admin"
+          : "plumber"
+        : actorRole === "customer"
+          ? activeThread?.req?.assigned_plumber_id
+            ? "plumber"
+            : "admin"
+          : "customer",
+      message: text || (attachedFile ? attachedFile.name : ""),
+      is_internal: isInternal,
+      reply_to_id: replyId,
+      read_by: [actorRole],
+      receipt_status: "sent",
+      created_at: new Date().toISOString(),
+    };
 
-        const res = await postCommunicationMessageAction({
-          requestId: targetReqId,
+    // Instant zero-delay optimistic render before network call
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setDraft("");
+    draftsRef.current[targetTicket] = "";
+    setPendingFile(null);
+    setReplyTo(null);
+    setUnseenBelowCount(0);
+    isNearBottomRef.current = true;
+    requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
+
+    try {
+      let attachment: ChatAttachment | undefined;
+      if (attachedFile) {
+        setUploading(true);
+        attachment = await uploadChatFile(attachedFile, targetTicket, actorRole);
+        setUploading(false);
+      }
+
+      const response = await fetch("/api/chat/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           ticketNumber: targetTicket,
-          senderRole: actorRole,
-          message: draft.trim(),
+          actorRole,
+          message: text,
           attachment,
           isInternal,
-          replyToId: replyTo?.id || null,
-        });
+          replyToId: replyId,
+        }),
+      });
+      const res = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: JobMessage;
+        aiReply?: JobMessage | null;
+        error?: string;
+      } | null;
 
-        if (res.success && res.message) {
-          const sentMsg = res.message;
-          const aiMsg = (res as { aiReply?: JobMessage | null }).aiReply;
-          setMessages((prev) => {
-            let next = prev.some((m) => m.id === sentMsg.id) ? prev : [...prev, sentMsg];
-            if (aiMsg && !next.some((m) => m.id === aiMsg.id)) {
-              next = [...next, aiMsg];
-            }
-            return next;
-          });
-          setDraft("");
-          draftsRef.current[targetTicket] = "";
-          setPendingFile(null);
-          setReplyTo(null);
-          broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket });
-          broadcastRealtimeEvent("notification_sync", {});
-        } else {
-          setSendError(res.error || "Could not send message.");
-        }
-      } catch (err: any) {
-        setUploading(false);
-        setSendError(err?.message || "Failed to send message.");
+      if (response.ok && res?.success && res.message) {
+        const sentMsg = res.message;
+        const aiMsg = res.aiReply;
+        setMessages((prev) => {
+          const alreadyHasReal = prev.some((m) => m.id === sentMsg.id);
+          let next = alreadyHasReal
+            ? prev.filter((m) => m.id !== optimisticId)
+            : prev.map((m) => (m.id === optimisticId ? sentMsg : m));
+          if (aiMsg && !next.some((m) => m.id === aiMsg.id)) {
+            next = [...next, aiMsg];
+          }
+          return next;
+        });
+        broadcastRealtimeEvent("new_message", {
+          ticketNumber: targetTicket,
+          ...(sentMsg.is_internal ? {} : { message: sentMsg }),
+        });
+        broadcastRealtimeEvent("notification_sync", {});
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        if (!draft) setDraft(text);
+        setSendError(res?.error || "Could not send message.");
       }
-    });
+    } catch (err: any) {
+      setUploading(false);
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      if (!draft) setDraft(text);
+      setSendError(err?.message || "Failed to send message.");
+    }
   };
 
   const cleanupVoiceStream = useCallback(() => {
@@ -1005,13 +1127,12 @@ export function WhatsAppChatWorkspace({
       return;
     }
     const targetTicket = selectedTicket;
-    const targetReqId = activeThread?.req?.id || targetTicket;
     const isInternal =
       actorRole !== "customer" &&
       (visibilityMode === "private_plumber" || Boolean(replyTo?.is_internal));
     const replyId = replyTo?.id || null;
 
-    rec.onstop = () => {
+    rec.onstop = async () => {
       const chunks = voiceChunksRef.current;
       const actualMime = rec.mimeType || "audio/webm";
       const ext = actualMime.includes("mp4")
@@ -1020,6 +1141,7 @@ export function WhatsAppChatWorkspace({
           ? ".ogg"
           : ".webm";
       const blob = new Blob(chunks, { type: actualMime });
+      const durationSec = voiceSeconds;
       voiceChunksRef.current = [];
       setRecordingVoice(false);
       setVoiceSeconds(0);
@@ -1034,34 +1156,73 @@ export function WhatsAppChatWorkspace({
         type: actualMime.split(";")[0],
       });
 
-      startTransition(async () => {
-        try {
-          setUploading(true);
-          const attachment = await uploadChatFile(file, targetTicket, actorRole);
-          setUploading(false);
-          const res = await postCommunicationMessageAction({
-            requestId: targetReqId,
+      const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const optimisticVoice: JobMessage = {
+        id: optimisticId,
+        request_id: activeThread?.req?.id || targetTicket,
+        ticket_number: targetTicket,
+        sender_role: actorRole,
+        sender_name: actorName,
+        recipient_role: isInternal
+          ? actorRole === "plumber"
+            ? "admin"
+            : "plumber"
+          : "customer",
+        message: `Voice Note (${durationSec}s)`,
+        is_internal: isInternal,
+        reply_to_id: replyId,
+        read_by: [actorRole],
+        receipt_status: "sent",
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, optimisticVoice]);
+      setReplyTo(null);
+      requestAnimationFrame(() => {
+        endRef.current?.scrollIntoView({ behavior: "smooth" });
+      });
+
+      try {
+        setUploading(true);
+        const attachment = await uploadChatFile(file, targetTicket, actorRole);
+        setUploading(false);
+        const response = await fetch("/api/chat/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             ticketNumber: targetTicket,
-            senderRole: actorRole,
+            actorRole,
             message: "",
             attachment,
             isInternal,
             replyToId: replyId,
+          }),
+        });
+        const res = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          message?: JobMessage;
+          error?: string;
+        } | null;
+        if (response.ok && res?.success && res.message) {
+          const sentMsg = res.message;
+          setMessages((prev) =>
+            prev.some((m) => m.id === sentMsg.id)
+              ? prev.filter((m) => m.id !== optimisticId)
+              : prev.map((m) => (m.id === optimisticId ? sentMsg : m))
+          );
+          broadcastRealtimeEvent("new_message", {
+            ticketNumber: targetTicket,
+            ...(sentMsg.is_internal ? {} : { message: sentMsg }),
           });
-          if (res.success && res.message) {
-            const sentMsg = res.message;
-            setMessages((prev) => (prev.some((m) => m.id === sentMsg.id) ? prev : [...prev, sentMsg]));
-            setReplyTo(null);
-            broadcastRealtimeEvent("new_message", { ticketNumber: targetTicket });
-            broadcastRealtimeEvent("notification_sync", {});
-          } else {
-            setSendError(res.error || "Could not send voice note.");
-          }
-        } catch (err: any) {
-          setUploading(false);
-          setSendError(err?.message || "Failed to upload voice note.");
+          broadcastRealtimeEvent("notification_sync", {});
+        } else {
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+          setSendError(res?.error || "Could not send voice note.");
         }
-      });
+      } catch (err: any) {
+        setUploading(false);
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        setSendError(err?.message || "Failed to upload voice note.");
+      }
     };
 
     try {
@@ -1192,7 +1353,12 @@ export function WhatsAppChatWorkspace({
                         {formatTimeShort(t.lastActivity)}
                       </span>
                     </div>
-                    <p className="truncate text-[11px] font-medium text-slate-500">{t.subtitle}</p>
+                    <p className="truncate text-[11px] font-medium text-slate-500">
+                      {t.isOnline ? (
+                        <span className="font-semibold text-emerald-600">{t.statusText} • </span>
+                      ) : null}
+                      {t.subtitle}
+                    </p>
                     <div className="mt-1 flex items-center justify-between gap-2">
                       <p className="truncate text-xs text-slate-600">
                         {t.lastMessage
@@ -1310,19 +1476,24 @@ export function WhatsAppChatWorkspace({
                         {typingInfo.name} is typing...
                       </span>
                     ) : activeThread.isOnline ? (
-                      <span className="text-emerald-300 md:text-emerald-600">
-                        Online • {activeThread.ticket}
+                      <span className="inline-flex items-center gap-1.5 font-medium text-emerald-300 md:text-emerald-600">
+                        <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 md:bg-emerald-500" />
+                        {activeThread.statusText} • {activeThread.ticket}
                       </span>
                     ) : (
                       (() => {
                         const targetUserId =
                           actorRole === "admin"
                             ? activeThread.req?.customer_id || activeThread.req?.assigned_plumber_id
-                            : null;
+                            : actorRole === "customer"
+                              ? activeThread.req?.assigned_plumber_id || "admin"
+                              : activeThread.req?.customer_id || "admin";
                         const lastSeen = targetUserId
                           ? formatLastSeen(presence.lastSeenMap?.[targetUserId])
                           : null;
-                        return lastSeen ? `${lastSeen} • ${activeThread.ticket}` : activeThread.subtitle;
+                        return lastSeen
+                          ? `${lastSeen} • ${activeThread.ticket}`
+                          : `Offline • ${activeThread.subtitle}`;
                       })()
                     )}
                   </p>
@@ -1393,7 +1564,20 @@ export function WhatsAppChatWorkspace({
             )}
 
             {/* Messages Feed */}
-            <div ref={messagesFeedRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="relative flex-1 overflow-hidden">
+              <div
+                ref={messagesFeedRef}
+                onScroll={() => {
+                  const el = messagesFeedRef.current;
+                  if (!el) return;
+                  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+                  isNearBottomRef.current = nearBottom;
+                  if (nearBottom && unseenBelowCount > 0) {
+                    setUnseenBelowCount(0);
+                  }
+                }}
+                className="h-full space-y-3 overflow-y-auto p-4"
+              >
               {threadMessages.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-xs text-slate-500">
                   No messages in this conversation yet. Send a message below to begin.
@@ -1577,6 +1761,20 @@ export function WhatsAppChatWorkspace({
                 })
               )}
               <div ref={endRef} />
+              </div>
+              {unseenBelowCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    isNearBottomRef.current = true;
+                    setUnseenBelowCount(0);
+                    endRef.current?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                  className="absolute bottom-3 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-[#0B1F3A] px-3 py-1.5 text-[11px] font-bold text-white shadow-lg transition hover:bg-[#132f57]"
+                >
+                  ↓ {unseenBelowCount} new {unseenBelowCount === 1 ? "message" : "messages"}
+                </button>
+              )}
             </div>
 
             {/* Composer */}
@@ -1756,11 +1954,11 @@ export function WhatsAppChatWorkspace({
                   <button
                     type="button"
                     onClick={handleSend}
-                    disabled={isPending || uploading || (!draft.trim() && !pendingFile)}
+                    disabled={uploading || (!draft.trim() && !pendingFile)}
                     className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0B1F3A] text-xs font-bold text-white transition hover:bg-[#0B1F3A]/90 disabled:opacity-40 sm:w-auto sm:px-4"
                     aria-label="Send message"
                   >
-                    {isPending || uploading ? (
+                    {uploading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Send className="h-4 w-4" />

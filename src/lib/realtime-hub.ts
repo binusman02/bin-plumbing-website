@@ -38,6 +38,7 @@ export interface RealtimeHubOptions {
     adminOnline: boolean;
     plumberOnline: boolean;
     customerOnline: boolean;
+    onlineAdminIds: string[];
     onlinePlumberIds: string[];
     onlineCustomerIds: string[];
     availabilityUpdates: Record<string, boolean>;
@@ -53,32 +54,39 @@ const locationSignalListeners = new Set<(data: { ticketNumbers: string[] }) => v
 const connectionListeners = new Set<(connected: boolean) => void>();
 
 function computePresenceSummary(ch: RealtimeChannel) {
-  const state = ch.presenceState<RealtimePresencePayload>();
+  const state = ch.presenceState<RealtimePresencePayload & { id?: string }>();
   let adminOnline = false;
   let plumberOnline = false;
   let customerOnline = false;
+  const onlineAdminIds: string[] = [];
   const onlinePlumberIds: string[] = [];
   const onlineCustomerIds: string[] = [];
   const availabilityUpdates: Record<string, boolean> = {};
 
   for (const entries of Object.values(state)) {
     for (const entry of entries) {
-      if (entry.role === "admin") adminOnline = true;
+      const uid = entry.userId || entry.id;
+      if (entry.role === "admin") {
+        adminOnline = true;
+        if (uid && !onlineAdminIds.includes(uid)) {
+          onlineAdminIds.push(uid);
+        }
+      }
       if (entry.role === "plumber") {
         plumberOnline = true;
-        if (entry.userId) {
-          if (!onlinePlumberIds.includes(entry.userId)) {
-            onlinePlumberIds.push(entry.userId);
+        if (uid) {
+          if (!onlinePlumberIds.includes(uid)) {
+            onlinePlumberIds.push(uid);
           }
           if (typeof entry.isAvailable === "boolean") {
-            availabilityUpdates[entry.userId] = entry.isAvailable;
+            availabilityUpdates[uid] = entry.isAvailable;
           }
         }
       }
       if (entry.role === "customer") {
         customerOnline = true;
-        if (entry.userId && !onlineCustomerIds.includes(entry.userId)) {
-          onlineCustomerIds.push(entry.userId);
+        if (uid && !onlineCustomerIds.includes(uid)) {
+          onlineCustomerIds.push(uid);
         }
       }
     }
@@ -88,6 +96,7 @@ function computePresenceSummary(ch: RealtimeChannel) {
     adminOnline,
     plumberOnline,
     customerOnline,
+    onlineAdminIds,
     onlinePlumberIds,
     onlineCustomerIds,
     availabilityUpdates,
@@ -119,6 +128,14 @@ function getSharedChannel(): RealtimeChannel | null {
       .on("presence", { event: "join" }, handlePresence)
       .on("presence", { event: "leave" }, handlePresence)
       .on("broadcast", { event: "new_message" }, ({ payload }) => {
+        if (payload?.message && typeof payload.message === "object") {
+          const msg = payload.message as JobMessage;
+          if (!msg.is_internal && msg.id && msg.ticket_number) {
+            for (const listener of hubListeners) {
+              listener.current.onMessage?.(msg);
+            }
+          }
+        }
         if (payload?.ticketNumber) {
           const ticketNumber = String(payload.ticketNumber);
           for (const listener of hubListeners) {

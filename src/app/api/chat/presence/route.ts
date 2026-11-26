@@ -46,8 +46,20 @@ export async function GET(request: Request) {
       actorRole: actor.role,
     });
 
+    const ticketParticipants = {
+      customerId: ctx.customerId || null,
+      assignedPlumberId: ctx.assignedPlumberId || null,
+      adminOnline: presence.adminOnline,
+      customerOnline: ctx.customerId
+        ? presence.onlineCustomerIds.includes(ctx.customerId)
+        : false,
+      assignedPlumberOnline: ctx.assignedPlumberId
+        ? presence.onlinePlumberIds.includes(ctx.assignedPlumberId)
+        : false,
+    };
+
     return NextResponse.json(
-      { presence, plumberAvailability: {}, messages: ticketMessages },
+      { presence, ticketParticipants, plumberAvailability: {}, messages: ticketMessages },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
   }

@@ -150,7 +150,8 @@ class _PlumberShellState extends State<PlumberShell> {
           final payable = (p["plumber_payable"] as num?)?.toDouble() ??
               (p["total_payment"] as num?)?.toDouble() ??
               0;
-          final verified = p["verification_status"] == "verified";
+          final payStatus = (p["verification_status"] ?? "").toString();
+          final verified = payStatus == "verified" || payStatus == "confirmed";
           if (verified) {
             earningsTotal += payable;
           }

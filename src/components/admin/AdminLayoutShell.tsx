@@ -136,7 +136,7 @@ export function AdminLayoutShell({
     document.addEventListener("visibilitychange", refreshSignals);
     window.addEventListener("admin-signals-refresh", refreshSignals);
 
-    // Admin online presence heartbeat
+    // Admin online presence heartbeat (25s < 70s server TTL so status never flickers)
     const sendPresence = () => {
       if (document.visibilityState === "hidden") return;
       fetch("/api/chat/presence", {
@@ -146,7 +146,19 @@ export function AdminLayoutShell({
       }).catch(() => {});
     };
     sendPresence();
-    const presenceInterval = window.setInterval(sendPresence, 45000);
+    const presenceInterval = window.setInterval(sendPresence, 25000);
+
+    const handlePageHide = () => {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(
+          "/api/chat/presence",
+          new Blob([JSON.stringify({ role: "admin", action: "offline" })], {
+            type: "application/json",
+          })
+        );
+      }
+    };
+    window.addEventListener("pagehide", handlePageHide);
 
     return () => {
       active = false;
@@ -155,6 +167,7 @@ export function AdminLayoutShell({
       window.removeEventListener("focus", refreshSignals);
       document.removeEventListener("visibilitychange", refreshSignals);
       window.removeEventListener("admin-signals-refresh", refreshSignals);
+      window.removeEventListener("pagehide", handlePageHide);
     };
   }, []);
 
