@@ -3,6 +3,7 @@
 import path from "path";
 import { revalidatePath, updateTag } from "next/cache";
 import { triggerWorkforceOnCustomerTicketMessage } from "@/lib/ai-workforce/auto-triggers";
+import { notifyCustomerOnPlumberAssigned } from "@/lib/ai-workforce/public-amina";
 import { validateJobTransition, type JobAction } from "@/lib/job-lifecycle";
 import { PLUMBER_UPDATABLE_STATUSES } from "@/lib/status-styles";
 import {
@@ -362,25 +363,10 @@ export async function assignPlumberToRequestAction(params: {
       destination: `/plumber?tab=jobs&ticket=${params.ticketNumber}`,
     });
 
-    const supabase = getServiceSupabase();
-    const { data: reqRow } = await supabase
-      .from("service_requests")
-      .select("customer_id")
-      .eq("ticket_number", params.ticketNumber)
-      .maybeSingle();
-    if (reqRow?.customer_id) {
-      await createNotification({
-        recipientId: String(reqRow.customer_id),
-        recipientRole: "customer",
-        actorRole: "admin",
-        type: "plumber_assigned",
-        title: `Plumber Assigned: ${params.ticketNumber}`,
-        body: `${params.plumberName} has been assigned to your service request.`,
-        entityType: "service_request",
-        entityId: params.ticketNumber,
-        destination: `/customer?tab=requests&ticket=${params.ticketNumber}`,
-      });
-    }
+    await notifyCustomerOnPlumberAssigned({
+      ticketNumber: params.ticketNumber,
+      plumberName: params.plumberName,
+    });
 
     revalidatePath("/admin/requests");
     revalidatePath("/admin/plumbers");
@@ -491,21 +477,11 @@ export async function claimServiceRequestAction(params: {
       destination: `/admin/requests?ticket=${params.ticketNumber}`,
       dedupeKey: `job_claimed:admin:${params.ticketNumber}:${effectivePlumberId}`,
     });
-    if (existingReq.customer_id) {
-      await createNotification({
-        recipientId: String(existingReq.customer_id),
-        recipientRole: "customer",
-        actorRole: "plumber",
-        actorId: effectivePlumberId,
-        type: "plumber_assigned",
-        title: `Plumber Assigned: ${params.ticketNumber}`,
-        body: `${effectivePlumberName} has been assigned to your service request.`,
-        entityType: "service_request",
-        entityId: params.ticketNumber,
-        destination: `/customer?tab=requests&ticket=${params.ticketNumber}`,
-        dedupeKey: `plumber_assigned:customer:${params.ticketNumber}:${effectivePlumberId}`,
-      });
-    }
+    await notifyCustomerOnPlumberAssigned({
+      ticketNumber: params.ticketNumber,
+      plumberName: effectivePlumberName,
+      customerId: existingReq.customer_id,
+    });
 
     revalidatePath("/plumber");
     revalidatePath("/admin");

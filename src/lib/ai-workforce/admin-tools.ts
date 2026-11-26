@@ -12,6 +12,7 @@ import { getServiceSupabase } from "@/lib/supabase/admin";
 import { ToolGateway } from "@/lib/ai-workforce/tool-gateway";
 import { getAgentDefinition, listAgentDefinitions } from "@/lib/ai-workforce/registry";
 import { createStructuredHandoff, respondToHandoff } from "@/lib/ai-workforce/handoffs";
+import { notifyCustomerOnPlumberAssigned } from "@/lib/ai-workforce/public-amina";
 import { recordTeamNote } from "@/lib/ai-workforce/team-memory";
 import { registerEngineeringTools } from "@/lib/ai-workforce/specialists/engineering";
 import { registerResearchTools } from "@/lib/ai-workforce/specialists/research";
@@ -114,6 +115,10 @@ export function registerAdminWorkforceTools(
         }
       );
       if (!updated) throw new Error(`Ticket ${input.ticketNumber} not found.`);
+      await notifyCustomerOnPlumberAssigned({
+        ticketNumber: updated.ticket_number,
+        plumberName: String(match.full_name),
+      }).catch(() => {});
       return {
         ticketNumber: updated.ticket_number,
         plumber: match.full_name,
