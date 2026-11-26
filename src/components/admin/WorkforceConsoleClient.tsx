@@ -194,6 +194,9 @@ function humanPayloadRows(payload: Record<string, unknown>): Array<{ label: stri
 
 function cleanEventSummary(raw: string): string {
   return cleanHumanProse(raw)
+    .replace(/\s*\|\s*Trace:[\s\S]*$/i, "")
+    .replace(/\s*\|\s*Path:\s*[^\s|]+/gi, "")
+    .replace(/\[Area:\s*[A-Z_-]+\]\s*Source:\s*[^\s|]+\s*\|\s*/gi, "")
     .replace(/\bTransitioned\s+([a-z_]+)\s*->\s*([a-z_]+)/gi, (_, a, b) => {
       return `Changed from ${humanStatusLabel(a)} to ${humanStatusLabel(b)}`;
     })

@@ -179,9 +179,9 @@ export async function reportSystemIncident(
     return { recorded: false, skippedReason: "empty_message", area };
   }
 
-  // Ignore expected user abort / resize noise
+  // Ignore expected user abort, resize noise, and Next.js internal navigation signals
   if (
-    /\b(ResizeObserver loop|AbortError: The user aborted a request|Non-Error promise rejection)\b/i.test(
+    /\b(NEXT_REDIRECT|NEXT_NOT_FOUND|NEXT_HTTP_ERROR_FALLBACK|ResizeObserver loop|AbortError: The user aborted a request|Non-Error promise rejection)\b/i.test(
       cleanMessage
     )
   ) {

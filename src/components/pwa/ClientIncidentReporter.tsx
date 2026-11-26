@@ -6,6 +6,9 @@ const REPORTED_KEYS = new Set<string>();
 
 function isIgnorableClientNoise(message: string, filename?: string): boolean {
   if (!message || message.trim().length < 3) return true;
+  if (/^(?:NEXT_REDIRECT|NEXT_NOT_FOUND|NEXT_HTTP_ERROR_FALLBACK)\b/i.test(message.trim())) {
+    return true;
+  }
   if (
     /ResizeObserver loop|Script error\.?$|AbortError|Load failed|ChunkLoadError/i.test(message) &&
     !filename?.includes("/_next/")
@@ -26,6 +29,7 @@ export function reportClientIncident(payload: {
 }) {
   try {
     if (typeof window === "undefined") return;
+    if (isIgnorableClientNoise(payload.message)) return;
     const routePath = `${window.location.pathname}${window.location.search}`.slice(0, 160);
     const key = `${payload.source}::${routePath}::${payload.message.slice(0, 80)}`;
     if (REPORTED_KEYS.has(key)) return;

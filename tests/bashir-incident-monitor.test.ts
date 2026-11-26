@@ -51,13 +51,28 @@ describe("Bashir whole-system incident monitor", () => {
     assert.ok(diagnoseIncidentHint("Storage bucket upload rejected").toLowerCase().includes("upload"));
   });
 
-  it("filters benign browser noise and deduplicates repeated incidents within 15 minutes", async () => {
+  it("filters benign browser noise and Next.js redirect control signals and deduplicates repeated incidents", async () => {
     const noise = await reportSystemIncident({
       source: "client:window_error",
       errorMessage: "ResizeObserver loop limit exceeded",
     });
     assert.equal(noise.recorded, false);
     assert.equal(noise.skippedReason, "benign_browser_noise");
+
+    const redirectSignal = await reportSystemIncident({
+      source: "client:unhandled_rejection",
+      errorMessage: "NEXT_REDIRECT",
+      routePath: "/customer?tab=profile",
+    });
+    assert.equal(redirectSignal.recorded, false);
+    assert.equal(redirectSignal.skippedReason, "benign_browser_noise");
+
+    const notFoundSignal = await reportSystemIncident({
+      source: "client:unhandled_rejection",
+      errorMessage: "NEXT_NOT_FOUND",
+    });
+    assert.equal(notFoundSignal.recorded, false);
+    assert.equal(notFoundSignal.skippedReason, "benign_browser_noise");
 
     const key1 = buildIncidentDedupeKey("/api/mobile/requests", "Failed row 999123 insert");
     const key2 = buildIncidentDedupeKey("/api/mobile/requests", "Failed row 444555 insert");
